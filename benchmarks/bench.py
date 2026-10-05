@@ -3,6 +3,7 @@
     uv run python benchmarks/bench.py                  # default cases
     uv run python benchmarks/bench.py --cases 3d-64    # pick cases
     uv run python benchmarks/bench.py --record         # also append to history.jsonl
+    uv run python benchmarks/bench.py --backend fused  # C++ kernel (blochparty.fused), forward only
 
 Throughput is reported as spin-segments/s (work the simulator does) and as
 spin-samples/s (the irreducible spins x ADC-samples cost of any Bloch simulator).
@@ -11,7 +12,9 @@ spin-samples/s (the irreducible spins x ADC-samples cost of any Bloch simulator)
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import os
 import platform
 import resource
 import subprocess
@@ -35,13 +38,13 @@ DEFAULT = ["2d-96", "3d-32", "3d-48"]
 HISTORY = Path(__file__).with_name("history.jsonl")
 
 
-def run_case(name: str, dtype, device: str) -> dict:
+def run_case(name: str, dtype, device: str, simulate=bp.simulate) -> dict:
     ndim, n = CASES[name]
     phantom = bp.shepp_logan(n, ndim=ndim, dtype=torch.float64).to(dtype=dtype, device=device)
     coils = bp.birdcage_sensitivities(phantom.pos, n_coils=8)
     seq = bp.gre_cartesian((n,) * ndim, n_dummy=N_DUMMY, dtype=dtype)
     t0 = time.perf_counter()
-    signal = bp.simulate(phantom, seq, coils).signal
+    signal = simulate(phantom, seq, coils).signal
     if device != "cpu":
         torch.mps.synchronize() if device == "mps" else torch.cuda.synchronize()
     elapsed = time.perf_counter() - t0
@@ -81,16 +84,27 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
+    p.add_argument("--backend", default="torch", choices=["torch", "fused"])
+    p.add_argument("--threads", type=int, default=None, help="fused: worker threads (default: all CPUs)")
+    p.add_argument("--block", type=int, default=None, help="fused: spins per block (default: auto)")
     p.add_argument("--record", action="store_true", help="append results to history.jsonl")
     args = p.parse_args(argv)
     dtype = getattr(torch, args.dtype)
 
+    simulate, threads, backend = bp.simulate, torch.get_num_threads(), args.backend
+    if args.backend == "fused":
+        from blochparty import fused
+
+        fused._ext()  # compile (or load) outside the timed region
+        threads = args.threads or os.cpu_count()
+        simulate = functools.partial(fused.simulate_fused, n_threads=threads, block=args.block)
+        backend = f"fused block {args.block or 'auto'}"
     print(f"blochparty {git_commit()} | torch {torch.__version__} | {platform.processor() or platform.machine()}"
-          f" | {args.device} {args.dtype} | {torch.get_num_threads()} threads")
+          f" | {args.device} {args.dtype} | {backend} | {threads} threads")
     print(f"{'case':>7} {'spins':>9} {'segments':>9} {'time [s]':>9} {'spin-seg/s':>11} {'spin-smp/s':>11}")
     results = []
     for name in args.cases:
-        r = run_case(name, dtype, args.device)
+        r = run_case(name, dtype, args.device, simulate)
         results.append(r)
         print(f"{r['case']:>7} {r['spins']:>9} {r['segments']:>9} {r['seconds']:>9.2f}"
               f" {r['spin_segments_per_s']:>11.2e} {r['spin_samples_per_s']:>11.2e}", flush=True)
@@ -102,8 +116,10 @@ def main(argv=None):
     if args.record:
         entry = {"date": datetime.now(timezone.utc).isoformat(timespec="seconds"), "commit": git_commit(),
                  "torch": torch.__version__, "machine": platform.machine(), "device": args.device,
-                 "dtype": args.dtype, "threads": torch.get_num_threads(), "peak_rss_mb": round(peak_mb),
+                 "dtype": args.dtype, "threads": threads, "peak_rss_mb": round(peak_mb),
                  "projected_128_min": round(proj / 60, 1), "results": results}
+        if args.backend != "torch":
+            entry.update(backend=args.backend, block=args.block)
         with HISTORY.open("a") as f:
             f.write(json.dumps(entry) + "\n")
         print(f"recorded to {HISTORY.name}")

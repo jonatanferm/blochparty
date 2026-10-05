@@ -11,7 +11,7 @@ pulseq = ["pypulseq>=1.5"]  # read_pulseq
 mrzero = ["MRzeroCore>=1.1"]  # validation/compare_mrzero.py and the crosscheck tests
 
 [dependency-groups]
-dev = ["pytest", "scipy", "matplotlib", "pypulseq>=1.5"]
+dev = ["pytest", "scipy", "matplotlib", "ninja", "pypulseq>=1.5"]  # ninja: builds blochparty.fused
 
 [build-system]
 requires = ["hatchling"]
