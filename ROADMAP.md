@@ -110,7 +110,9 @@ bound at realistic sizes; ~92 % of segments are single ADC samples.
 deviations); slice profile vs. small-tip Fourier approximation and SLR; T2′: FID decays
 with T2*, spin echo with T2; bSSFP off-resonance banding profile vs. closed form;
 fat–water shift in pixels vs. bandwidth; EPI distortion vs. B0 map / echo spacing.
-Add an independent EPG implementation as a reference model.
+✅ Independent EPG reference model (`epg.py`): matches closed forms to 1e-12–1e-15 and the
+isochromat simulator exactly once isochromats outnumber the dephasing orders present
+(CPMG 120°: K=17 → 3e-16; 117° RF-spoiled GRE: K=151 → 6e-16).
 
 ## Phase 3 – Pulseq in/out and cross-simulator validation
 

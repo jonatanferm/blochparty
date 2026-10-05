@@ -18,20 +18,29 @@ from .sequence import Sequence
 # --- closed-form results -----------------------------------------------------
 
 
+def _real(x, like=None) -> Tensor:
+    """Tensor in ``like``'s dtype, or float64 (not torch's float32 default) for plain numbers."""
+    dtype = like.dtype if torch.is_tensor(like) and like.is_floating_point() else torch.float64
+    return torch.as_tensor(x, dtype=dtype)
+
+
 def ernst_angle(tr, t1):
     """Flip angle [rad] maximizing the spoiled-GRE steady-state signal."""
-    return torch.arccos(torch.exp(-torch.as_tensor(tr) / torch.as_tensor(t1)))
+    t1 = _real(t1, tr)
+    return torch.arccos(torch.exp(-_real(tr, t1) / t1))
 
 
 def spoiled_gre_signal(pd, t1, t2, tr, te, flip_rad):
     """Steady-state transverse magnetization of an ideally spoiled GRE at TE."""
-    e1 = torch.exp(-torch.as_tensor(tr) / t1)
-    a = torch.as_tensor(flip_rad)
-    return pd * torch.sin(a) * (1 - e1) / (1 - torch.cos(a) * e1) * torch.exp(-torch.as_tensor(te) / t2)
+    t1 = _real(t1)
+    e1 = torch.exp(-_real(tr, t1) / t1)
+    a = _real(flip_rad, t1)
+    return _real(pd, t1) * torch.sin(a) * (1 - e1) / (1 - torch.cos(a) * e1) * torch.exp(-_real(te, t1) / _real(t2, t1))
 
 
 def inversion_recovery_mz(pd, t1, ti):
-    return pd * (1 - 2 * torch.exp(-torch.as_tensor(ti) / t1))
+    t1 = _real(t1)
+    return _real(pd, t1) * (1 - 2 * torch.exp(-_real(ti, t1) / t1))
 
 
 # --- signal equation -----------------------------------------------------------
