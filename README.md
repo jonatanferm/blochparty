@@ -180,6 +180,47 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-14 
   backward on 4 CPU cores, 1.2 GB peak, where autograd through `simulate` would need ~300 GB).
 - CPU, float32 / float64, first-order only; needs a C++ compiler and `ninja`.
 
+## Sequence design
+
+`blochparty.design` adds what an optimizer (or an agent) needs around the simulator. Everything
+is a differentiable function of the sequence's tensors or of simulated images:
+
+```python
+from blochparty import design
+
+hw = design.Hardware(max_grad=40, max_slew=150, max_b1=20)   # mT/m, T/m/s, µT
+loss = -design.cnr(image, wm, gm, sigma) + sum(design.penalties(seq, hw).values())
+var = design.crb(signal_fn, theta)   # Cramér–Rao bounds from the simulated Jacobian
+report = design.design_report(seq, phantom, masks=masks, contrast_pairs=[("wm", "gm")], kspace_sigma=0.05)
+report["violations"]  # ["slew x exceeded at 128 boundaries (128 ranges); worst at boundary 402 (t = 2002.685 ms) by 699 % ...", ...]
+```
+
+- Constraints, in scanner units: gradient amplitude [mT/m] and slew [T/m/s] per axis, peak
+  B1 [µT] (Hz → T via γ̄), RF energy Σ|B1|²·dt and a SAR proxy (mean |B1|², optionally scaled
+  and windowed), an approximate PNS estimate (chronaxie-filtered dG/dt; reproduces the IEC
+  hyperbolic strength–duration law, but is not a coil-specific model), scan time. Each has a
+  smooth penalty (`penalties`) and violation reports naming segment ranges, times and excess.
+- A gradient step is taken to ramp over at most one gradient raster time (10 µs): ramps sampled
+  on the raster (as `read_pulseq` does) give their true slew, while the builders' instantaneous
+  gradients show up as violations instead of being hidden by long segments.
+- Metrics: tissue contrast, CNR, SNR and SNR efficiency (noise σ given, or propagated from the
+  coil noise model through any reconstruction by pseudo-replicas), PSF and its FWHM / sidelobes
+  from a simulated point spin, and the Cramér–Rao bound with the Jacobian w.r.t. tissue
+  parameters taken by autograd (`method="autograd"`, differentiable again through `simulate`) or
+  central differences (`method="fd"`, differentiable through `simulate_fused`).
+- `minimize`: augmented Lagrangian around L-BFGS, so active constraints hold exactly at the end.
+- `design_report`: JSON-serialisable timing, constraints with margins, PSF and image metrics.
+
+Optimizations with independently known answers (each is also a test; all run through the
+fused kernel, whose gradients match `simulate`'s):
+
+```bash
+uv run python examples/design_despot1.py     # VFA T1 mapping: CRB-optimal flips give 70.71 % of Ernst (Deoni 2003)
+uv run python examples/design_contrast_tr.py # WM/GM contrast, flip and TR free under a scan-time budget
+uv run python examples/design_tse_flips.py   # low-SAR TSE refocusing train, echoes >= target (vs EPG + SLSQP)
+uv run python examples/design_report.py      # the report for an 8-coil GRE -> outputs/design_report.json
+```
+
 ## Layout
 
 | module | contents |
@@ -195,6 +236,7 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-14 
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
 | `pulseq.py` | `read_pulseq()`: `.seq` / pypulseq → `Sequence` |
+| `design.py` | hardware / safety constraints and penalties, image metrics, Cramér–Rao bound, `minimize`, `design_report()` |
 
 ## Conventions
 
