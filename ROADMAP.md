@@ -83,6 +83,12 @@ count) are impractical at current speed. 3D is the target workload for this phas
       gradcheck (finite differences) incl. complex coils; standalone C++17 build vs
       finite differences; identical gradients for any checkpoint interval; gradient
       descent through it recovers the WM/GM optimum (16.109°) to 0.002°.
+      Apple M4, float32, forward + backward: 2D 96² 0.08 s (PyTorch core 0.32 s); 3D 32³
+      0.46 s / 1 GB peak (PyTorch core 3.6 s / 3.5 GB); 3D 64³ 27.5 s.
+- [ ] Profile the adjoint on the M4: backward costs ~7× the forward there (3D 64³: 3.3 s
+      forward, 27.5 s total) vs ~3.8× on a Xeon; ADC λ-injection and coil-gradient loops
+      run at about half the forward sampling speed; the RF-segment loop is not vectorized
+      by Apple clang
 - [ ] Metal / CUDA ports of the fused kernel (forward and adjoint)
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit
