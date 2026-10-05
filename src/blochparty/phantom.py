@@ -8,6 +8,8 @@ from dataclasses import dataclass, replace
 import torch
 from torch import Tensor
 
+from .constants import GAMMA_BAR
+
 
 @dataclass
 class Phantom:
@@ -42,7 +44,6 @@ def grid_positions(shape: int | tuple[int, ...], fov: float, dtype=torch.float64
     return torch.stack(xyz, dim=-1)
 
 
-GAMMA_BAR = 42.577478518e6  # 1H gyromagnetic ratio / 2 pi [Hz/T]
 
 # Six-peak fat spectrum (Ren et al., J Lipid Res 2008; ISMRM fat-water toolbox): chemical shift
 # relative to water [ppm] and relative amplitude. Fat resonates below water: negative shifts.

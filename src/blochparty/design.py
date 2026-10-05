@@ -29,11 +29,11 @@ import torch
 from torch import Tensor
 
 from .coils import add_noise
+from .constants import GAMMA_BAR
 from .phantom import Phantom
 from .recon import reconstruct, rss
 from .sequence import Sequence
 
-GAMMA_BAR = 42.577478518e6  # proton gyromagnetic ratio / 2 pi [Hz/T]
 AXES = "xyz"
 
 
@@ -46,7 +46,7 @@ class Hardware:
     """
 
     max_grad: float = 40.0  # per axis [mT/m]
-    max_slew: float = 150.0  # per axis [T/m/s]
+    max_slew: float = 170.0  # per axis [T/m/s]; with max_grad, the defaults of sequence.System
     grad_raster: float = 10e-6  # longest time a gradient step may take [s] (see ``slew_rate``)
     max_b1: float = 20.0  # peak RF amplitude [µT]
     max_b1_rms: float | None = None  # RMS B1 over ``sar_window`` [µT]

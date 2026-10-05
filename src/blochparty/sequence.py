@@ -26,7 +26,8 @@ import numpy as np
 import torch
 from torch import Tensor
 
-GAMMA_BAR = 42.576e6  # [Hz/T] for 1H, as in pypulseq: 1 mT/m = 42 576 Hz/m
+from .constants import PULSEQ_GAMMA_BAR
+
 _T_TOL = 1e-11  # [s] event times closer than this are the same breakpoint
 _AXES = {"x": 0, "y": 1, "z": 2}
 
@@ -96,8 +97,8 @@ class System:
     Defaults are typical 3 T values: 40 mT/m, 170 T/m/s, Siemens-like rasters and RF dead
     times. Limits apply to each gradient axis separately."""
 
-    max_grad: float = 40e-3 * GAMMA_BAR  # [Hz/m]
-    max_slew: float = 170.0 * GAMMA_BAR  # [Hz/m/s]
+    max_grad: float = 40e-3 * PULSEQ_GAMMA_BAR  # [Hz/m]
+    max_slew: float = 170.0 * PULSEQ_GAMMA_BAR  # [Hz/m/s]
     grad_raster: float = 10e-6  # [s]
     rf_raster: float = 1e-6  # [s]
     adc_raster: float = 100e-9  # [s] dwell times must be multiples of this

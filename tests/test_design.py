@@ -17,9 +17,11 @@ import torch
 import blochparty as bp
 from blochparty import SequenceBuilder, simulate
 from blochparty import design as d
+from blochparty.constants import PULSEQ_GAMMA_BAR
 from blochparty.epg import epg_cpmg
 from blochparty.phantom import LABELS
 from blochparty.reference import spoiled_gre_signal
+from blochparty.sequence import System
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "examples"))
 import design_contrast_tr as contrast_tr  # noqa: E402
@@ -45,6 +47,15 @@ def fused():
 
 def rel(a, b):
     return float((a - b).abs().max() / b.abs().max())
+
+
+HW150 = d.Hardware(max_slew=150.0)  # the violation tests below assume a 150 T/m/s scanner
+
+
+def test_hardware_defaults_match_the_builders_system():
+    sysm = System()
+    assert d.Hardware().max_grad == pytest.approx(sysm.max_grad / PULSEQ_GAMMA_BAR * 1e3)
+    assert d.Hardware().max_slew == pytest.approx(sysm.max_slew / PULSEQ_GAMMA_BAR)
 
 
 def trapezoid(slew, flat_mT_m, raster=10e-6, axis=0):
@@ -89,7 +100,7 @@ def test_slew_of_raster_sampled_trapezoid_is_exact():
     s = d.slew_rate(seq)[:, 0].abs()
     assert abs(float(s.max()) - 100.0) < 1e-9  # inside the ramps
     assert abs(float(d.grad_mT_m(seq).abs().max()) - 20.0) < 1e-12
-    report = d.design_report(seq, psf=False)
+    report = d.design_report(seq, psf=False, hardware=HW150)
     assert report["ok"], report["violations"]
     assert abs(report["constraints"]["slew x"]["margin_pct"] - 100 * (1 - 100 / 150)) < 1e-6
 
@@ -99,14 +110,14 @@ def test_instantaneous_steps_are_reported_with_segments_and_excess():
     seq = SequenceBuilder().delay(1e-3).delay(1e-3, grad=(G * 20e-3, 0.0, 0.0)).delay(1e-3).build()
     s = d.slew_rate(seq)[:, 0]
     assert abs(float(s[1]) - 20e-3 / 10e-6) < 1e-6 and abs(float(s[2]) + 2000.0) < 1e-6
-    checks = {c.name: c for c in d.check_hardware(seq)}
+    checks = {c.name: c for c in d.check_hardware(seq, HW150)}
     items = d.violations(checks["slew x"], seq)
     assert [i["segments"] for i in items] == [[1, 2]]  # boundaries 1 and 2: one run
     assert items[0]["message"] == ("slew x exceeded in boundaries 1–2 (t = 1.000–2.000 ms) by 1.23e+03 % "
                                    "(2000 T/m/s > 150 T/m/s)")
     # a ramp 12 % too steep over boundaries 101..119 of a raster-sampled trapezoid
     seq = trapezoid(slew=168.0, flat_mT_m=168.0 * 20 * 10e-6 * 1e3)
-    report = d.design_report(seq, psf=False)
+    report = d.design_report(seq, psf=False, hardware=HW150)
     slew = report["constraints"]["slew x"]
     assert not slew["ok"] and abs(slew["margin_pct"] + 12.0) < 1e-6
     msgs = [v["message"] for v in slew["violations"]]

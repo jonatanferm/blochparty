@@ -6,7 +6,7 @@ Every feature is checked against an independent reference (see [ROADMAP.md](ROAD
 
 ```bash
 uv sync
-uv run pytest                              # 110 verification tests, ~1.5 min
+uv run pytest                              # 233 verification tests, ~1 min
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--fused: C++ adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)

@@ -11,7 +11,8 @@ import torch
 
 import blochparty as bp
 from blochparty.builders import bssfp_2d, epi_2d, se_2d, tse_2d
-from blochparty.sequence import (ADC, GAMMA_BAR, SequenceBuilder, System, gradient_waveform, sinc_pulse,
+from blochparty.constants import PULSEQ_GAMMA_BAR
+from blochparty.sequence import (ADC, SequenceBuilder, System, gradient_waveform, sinc_pulse,
                                  trapezoid)
 
 SYS = System()
@@ -129,7 +130,7 @@ def test_limits_raise():
         bp.gre_2d(8, ramps=True, dwell=1.05e-6, system=System(max_grad=1e9))
     with pytest.raises(ValueError, match="max_grad"):  # 4.5 MHz/m readout
         bp.gre_2d(8, ramps=True, dwell=1e-6)
-    assert System().max_grad == pytest.approx(40e-3 * GAMMA_BAR)
+    assert System().max_grad == pytest.approx(40e-3 * PULSEQ_GAMMA_BAR)
 
 
 def test_gradient_waveform_and_adc_moments_exact():
