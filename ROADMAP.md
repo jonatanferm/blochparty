@@ -59,8 +59,12 @@ count) are impractical at current speed. 3D is the target workload for this phas
       per-TR math; not wired in yet (compile time, shape-dependent recompiles)
 - [ ] Apple MPS / CUDA devices: runs unchanged on MPS, but eager MPS is no faster than CPU
       (elementwise exp/cos/sin and the K=3 matmul are slow there); revisit with fusion
-- [ ] Two-pass, chunked-over-spins backward (forward → dL/ds → per-chunk VJP) so
-      memory scales with chunk size, not spin count
+- [x] Two-pass, chunked-over-spins backward (`simulate_chunked`): forward without grad,
+      then per-chunk recompute + VJP; saved-tensor memory scales with the chunk (16× less
+      at N/16), gradients identical to ~1e-16, ~1.5–4× runtime depending on chunk size
+- [ ] Reverse sweep over segment blocks (store magnetization at block boundaries,
+      `simulate(..., m_init=...)` per block) to remove autograd's per-step bookkeeping
+      floor, which `checkpoint_every` does not
 - [x] Benchmarks tracked over time (spins × segments / s, memory):
       `benchmarks/bench.py [--record]` → `benchmarks/history.jsonl`
 - [ ] If pure PyTorch isn't fast enough: a fused compiled kernel (C++ extension; later

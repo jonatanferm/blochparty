@@ -176,6 +176,7 @@ def test_saved_tensor_memory_scales_with_chunk():
           + f" (inputs {mib(floor)}); plain / chunk 256 = {plain / chunked[256][0]:.1f}x, "
           + f"excluding inputs {plain / (chunked[256][0] - floor):.1f}x")
     assert 0.9 < chunked[n][0] / plain < 1.1  # one chunk of N costs what plain autograd does
-    assert plain / chunked[256][0] > 12  # chunk N/16
+    # including the fixed inputs (with the closed-form core, plain stores ~22 MiB here)
+    assert plain / chunked[256][0] > 10  # chunk N/16
     assert 15 < plain / (chunked[256][0] - floor) < 17
     assert 3.8 < (chunked[1024][0] - floor) / (chunked[256][0] - floor) < 4.2
