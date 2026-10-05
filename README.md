@@ -6,7 +6,7 @@ Every feature is checked against an independent reference (see [ROADMAP.md](ROAD
 
 ```bash
 uv sync
-uv run pytest                              # 26 verification tests, ~15 s
+uv run pytest                              # 39 verification tests, ~20 s
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
@@ -28,12 +28,35 @@ image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
 (flip angles, TR, gradient amplitudes, T1/T2/PD maps, coil maps).
 
+## Memory-bounded gradients
+
+Backprop through `simulate` keeps every spin's state at every segment, so memory grows as
+spins × segments. When that no longer fits, swap in `simulate_chunked`: same arguments
+and result, but the backward pass recomputes the simulation one spin chunk at a time, so
+the graph it holds covers only `spin_chunk` spins.
+
+```python
+from blochparty.chunked import simulate_chunked
+
+kspace = simulate_chunked(phantom, seq, coils, spin_chunk=4096).signal
+loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 in float64)
+```
+
+- Use it for gradients on large phantoms (3D, sub-voxel spins); plain forward runs gain
+  nothing from it. It costs about one extra forward pass (~1.5× `simulate` forward+backward)
+  plus a fixed per-segment Python cost per chunk, so keep chunks in the thousands of spins.
+- `checkpoint_every` bounds the other direction (segments) and combines with it.
+- Autograd also keeps a few tens of kB of bookkeeping per segment regardless of spin count,
+  so for long sequences that floor, not the chunk, sets the minimum memory.
+- First-order gradients only (no double backward).
+
 ## Layout
 
 | module | contents |
 |---|---|
 | `sequence.py` | `Sequence` (flat piecewise-constant segments) and `SequenceBuilder` |
 | `bloch.py` | the simulator core: `simulate()` |
+| `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins |
 | `coils.py` | receive sensitivities, thermal noise |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
