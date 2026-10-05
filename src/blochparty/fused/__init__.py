@@ -1,14 +1,19 @@
-"""Fused CPU kernel: ``simulate_fused`` is ``blochparty.simulate`` without autograd, fast.
+"""Fused CPU kernel: ``simulate_fused`` is ``blochparty.simulate``, fast, gradients included.
 
 The pure-PyTorch simulator runs ~30 tensor ops over all spins per segment, so it is
 memory-bandwidth bound. Spins are independent, so the C++ kernel (``kernel.h``) instead
 takes a block of spins, keeps its magnetization in L1 and steps it through every
 segment, with blocks spread over threads. The math is that of ``bloch.py``: in float64
-the two agree to ~1e-13; in float32 the kernel is closer to the float64 result than
-the PyTorch simulator in float32 is (see ``tests/test_fused.py``).
+the two agree to ~1e-13. In float32 the kernel is closer to the float64 result than
+the PyTorch simulator in float32 is on short sequences (see ``tests/test_fused.py``);
+its rounding grows with the number of segments, so on long ones (2D 96²) it is ~3x
+further off (~1e-5) than the PyTorch simulator's closed-form free runs.
 
-Forward only: inputs are detached and no gradients flow. Use ``blochparty.simulate``
-for optimization; this is for producing data. CPU, float32 / float64.
+Gradients come from a hand-written adjoint in the same kernel (reverse sweep over
+checkpointed segment intervals, see ``kernel.h``), wrapped in an autograd Function: they
+reach every tensor ``simulate`` differentiates and whatever built those tensors, and
+match autograd through ``simulate`` to ~1e-14 in float64 (``tests/test_fused_grad.py``).
+First-order only. CPU, float32 / float64.
 
 The extension is compiled on first use with ``torch.utils.cpp_extension.load`` (needs
 a C++20 compiler, as PyTorch's headers do, and ``ninja``) and cached by PyTorch
@@ -20,12 +25,15 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import math
 import os
 import platform
 from pathlib import Path
+from typing import NamedTuple
 
 import torch
 from torch import Tensor
+from torch.autograd.function import once_differentiable
 
 from ..bloch import SimResult
 from ..phantom import Phantom
@@ -68,6 +76,49 @@ def default_block(n_spins: int, n_threads: int, dtype=torch.float32) -> int:
     return block
 
 
+def default_checkpoint_every(n_segments: int) -> int:
+    """About sqrt(segments): checkpoint memory and replay buffer balance."""
+    return max(1, math.isqrt(max(n_segments - 1, 0)) + 1)
+
+
+class _Opts(NamedTuple):
+    n_threads: int
+    block: int
+    every: int
+
+
+class _FusedSimulate(torch.autograd.Function):
+    """Forward stores m every ``every`` segments; backward is the kernel's reverse sweep."""
+
+    @staticmethod
+    def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, flags):
+        ctx.set_materialize_grads(False)
+        ctx.opts = opts
+        m = m0.detach().clone()
+        sig, ckpt = _ext().simulate(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, m,
+                                    opts.n_threads, opts.block, opts.every)
+        ctx.save_for_backward(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig)
+        return sig, m
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, g_sig, g_m):
+        opts = ctx.opts
+        pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig = ctx.saved_tensors
+        need = list(ctx.needs_input_grad[1:12])  # pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0
+        if g_sig is None:  # sensitivities and receiver phase only reach the signal
+            need[5] = need[9] = False
+        if (g_sig is None and g_m is None) or not any(need):
+            return (None,) * 13
+        prep = lambda g: None if g is None else g.to(pd.dtype).contiguous()
+        # kernel order: dt, rf, grad, adc_phase, pos, pd, t1, t2, db0, sens, m
+        needs = [*need[6:10], *need[:6], need[10]]
+        out = _ext().adjoint(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, opts.every, sig,
+                             prep(g_sig), prep(g_m), needs, opts.n_threads, opts.block)
+        g_dt, g_rf, g_grad, g_psi, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_m0 = out
+        return None, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_dt, g_rf, g_grad, g_psi, g_m0, None
+
+
 def simulate_fused(
     phantom: Phantom,
     seq: Sequence,
@@ -76,41 +127,52 @@ def simulate_fused(
     m_init: Tensor | None = None,
     n_threads: int | None = None,
     block: int | None = None,
+    checkpoint_every: int | None = None,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``: same arguments and result as ``blochparty.simulate``,
-    but forward only (inputs are detached; the result has no autograd graph).
+    gradients included.
 
     n_threads: worker threads (default: all logical CPUs).
     block: spins per block, one of ``BLOCK_SIZES`` (default: ``default_block``).
+    checkpoint_every: when gradients are needed, the forward pass stores the
+        magnetization of every spin before every ``checkpoint_every`` segments, and the
+        backward pass replays one such interval at a time (default:
+        ``default_checkpoint_every``). Gradients do not depend on it.
     """
-    pd = phantom.pd.detach()
+    pd = phantom.pd
     dtype = pd.dtype
     if dtype not in (torch.float32, torch.float64):
         raise TypeError(f"simulate_fused supports float32 and float64, got {dtype}")
     if pd.device.type != "cpu":
         raise ValueError("simulate_fused runs on the CPU")
+    if checkpoint_every is not None and checkpoint_every < 1:
+        raise ValueError(f"checkpoint_every must be positive, got {checkpoint_every}")
     n_threads = n_threads or os.cpu_count() or 1
-    real = lambda t: t.detach().to(dtype=dtype, device="cpu").contiguous()
+    real = lambda t: t.to(dtype=dtype, device="cpu").contiguous()
     n = len(phantom)
     if coils is None:
         sens = torch.zeros(n, 1, 2, dtype=dtype)
         sens[..., 0] = 1.0
     else:
-        coils = coils.detach()
         sens = torch.stack([real(coils.real), real(coils.imag)], dim=-1)
     if m_init is None:
-        m = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], dim=-1)
+        m0 = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], dim=-1)
     else:
-        m = real(m_init).clone()
+        m0 = real(m_init)
     flag = lambda bits, value: torch.tensor(bits, dtype=torch.uint8).reshape(len(seq)) * value
     flags = flag(seq.is_rf, _RF) | flag(seq.adc, _ADC) | flag(seq.spoil, _SPOIL)
-    sig = _ext().simulate(
-        real(phantom.pos), real(pd), real(phantom.t1), real(phantom.t2), real(phantom.db0), sens.contiguous(),
-        real(seq.dt), real(seq.rf), real(seq.grad), real(seq.adc_phase), flags, m,
-        n_threads, block or default_block(n, n_threads, dtype),
-    )  # (n_adc, C, 2)
+    inputs = (real(phantom.pos), real(pd), real(phantom.t1), real(phantom.t2), real(phantom.db0), sens.contiguous(),
+              real(seq.dt), real(seq.rf), real(seq.grad), real(seq.adc_phase), real(m0))
+    block = block or default_block(n, n_threads, dtype)
+    if torch.is_grad_enabled() and any(t.requires_grad for t in inputs):
+        every = checkpoint_every or default_checkpoint_every(len(seq))
+        sig, m = _FusedSimulate.apply(_Opts(n_threads, block, every), *inputs, flags)
+    else:
+        *spin_seq, m = (t.detach() for t in inputs)
+        m = m.clone()
+        sig, _ = _ext().simulate(*spin_seq, flags, m, n_threads, block, 0)
     assert sig.shape[0] == seq.n_adc
     return SimResult(torch.view_as_complex(sig).T, m)
 
 
-__all__ = ["BLOCK_SIZES", "available", "default_block", "simulate_fused"]
+__all__ = ["BLOCK_SIZES", "available", "default_block", "default_checkpoint_every", "simulate_fused"]
