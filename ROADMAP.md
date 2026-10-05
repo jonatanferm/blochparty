@@ -50,11 +50,15 @@ count) are impractical at current speed. 3D is the target workload for this phas
 - [x] 3D: volumetric phantom (3D Shepp-Logan to start), `gre_3d` builder (second
       phase-encode loop on Gz), `ifftnc` / `reconstruct` reconstruction
 
-- [ ] Closed-form ADC runs: for constant gradients, compute all samples of a readout in
-      one vectorized step instead of one segment per sample (expected large speed-up)
+- [x] Closed-form free runs: every stretch of RF-free segments (prephaser + readout +
+      spoiler) is one step; all its ADC samples come from blockwise spins × samples matrix
+      products (any gradient waveform, gradients flow to every segment). 3.5–9.5× faster;
+      `merge_free_runs=False` keeps the segment-wise path, agreement ~1e-14
 - [ ] Merge consecutive free-precession segments; skip spins outside excited slab
-- [ ] `torch.compile` of the step kernel; float32 by default with float64 test mode
-- [ ] Apple MPS / CUDA devices (complex-free core already); spin chunking
+- [ ] `torch.compile` of the free-run block: measured 1.4× (CPU) / 2× (MPS) on the 64³
+      per-TR math; not wired in yet (compile time, shape-dependent recompiles)
+- [ ] Apple MPS / CUDA devices: runs unchanged on MPS, but eager MPS is no faster than CPU
+      (elementwise exp/cos/sin and the K=3 matmul are slow there); revisit with fusion
 - [ ] Two-pass, chunked-over-spins backward (forward → dL/ds → per-chunk VJP) so
       memory scales with chunk size, not spin count
 - [x] Benchmarks tracked over time (spins × segments / s, memory):
@@ -85,7 +89,11 @@ Baseline (end of Phase 0, Apple M4 CPU, float32, 8 coils, 200 dummy TRs; PyTorch
 | 3D 48³ | 29 831 | 120 208 | 44 s | 8.2e7 |
 | 3D 64³ | 70 505 | 278 928 | 233 s | 8.4e7 |
 
-Projected 3D 128³: ~4 h. ~20 µs fixed Python overhead per segment; memory-bandwidth
+Projected 3D 128³: ~4 h.
+
+After closed-form free runs (same machine, CPU): 2D 96² 0.17 s (9.5×), 3D 32³ 1.2 s (6.3×),
+3D 48³ 10.9 s (4.0×), 3D 64³ 68 s (3.5×); projected 128³ ~70 min. Per 64³ TR (~12 ms):
+exp/cos/sin ~45 %, phase ~17 %, elementwise products ~20 %, matmuls ~17 %. ~20 µs fixed Python overhead per segment; memory-bandwidth
 bound at realistic sizes; ~92 % of segments are single ADC samples.
 
 ## Phase 2 – Physical realism

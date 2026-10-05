@@ -3,7 +3,8 @@
 Each spin's magnetization (mx, my, mz) is advanced segment by segment:
 
 * free precession (no RF): exact rotation about z and exact relaxation
-  (they commute, so this is exact for any segment length);
+  (they commute, so this is exact for any segment length). Consecutive RF-free
+  segments are evaluated together in closed form, ADC samples included;
 * RF segments: exact rotation about the effective field, with relaxation split
   symmetrically around it (Strang splitting, second order in dt).
 
@@ -72,27 +73,90 @@ def _rotate(mx, my, mz, wx, wy, wz):
     )
 
 
-def _run(mx, my, mz, segments, spins: _Spins):
+# Spins x ADC samples evaluated per block in a free run; bounds temporary memory.
+_MAX_BLOCK = 1 << 22
+
+
+def _rf_segment(mx, my, mz, dt, rf, g, spins: _Spins):
+    bz = spins.pos @ g + spins.db0  # off-resonance in the rotating frame [Hz]
+    mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
+    w = -TWO_PI * dt
+    mx, my, mz = _rotate(mx, my, mz, w * rf[0], w * rf[1], w * bz)
+    return _relax(mx, my, mz, 0.5 * dt, spins)
+
+
+def _sample(mx, my, psi, spins: _Spins):
+    """(2, C) demodulated signal of the current magnetization."""
+    re = mx @ spins.sens_re - my @ spins.sens_im
+    im = mx @ spins.sens_im + my @ spins.sens_re
+    c, s = torch.cos(psi), torch.sin(psi)  # demodulate by exp(-i*psi)
+    return torch.stack([re * c + im * s, im * c - re * s])
+
+
+def _free_run(mx, my, mz, dt, g, psi, adc_idx, spins: _Spins):
+    """A stretch of RF-free segments in closed form.
+
+    With t and k the cumulative time and gradient moment from the run's start,
+    Mxy(t) = Mxy(0) exp(-t/T2) exp(-i 2 pi (k.r + dB0 t)) and Mz relaxes as usual, so
+    every ADC sample in the run is a sum over spins of one exponential: computed
+    blockwise as matrix products instead of segment by segment.
+    """
+    t = torch.cumsum(dt, 0)
+    k = torch.cumsum(g * dt[:, None], 0)
+    sig = None
+    if adc_idx:
+        idx = torch.tensor(adc_idx, device=dt.device)
+        ta, ka, pa = t[idx], k[idx], psi[idx]
+        v_re = spins.sens_re * mx[:, None] - spins.sens_im * my[:, None]  # (N, C): coil * Mxy
+        v_im = spins.sens_re * my[:, None] + spins.sens_im * mx[:, None]
+        block = max(1, _MAX_BLOCK // max(mx.shape[0], 1))
+        parts = []
+        for j in range(0, len(adc_idx), block):
+            tj, kj = ta[j : j + block], ka[j : j + block]
+            phase = TWO_PI * (spins.pos @ kj.T + spins.db0[:, None] * tj)  # (N, n)
+            decay = torch.exp(-spins.r2[:, None] * tj)
+            e_re, e_im = decay * torch.cos(phase), -decay * torch.sin(phase)
+            parts.append(torch.stack([v_re.T @ e_re - v_im.T @ e_im, v_re.T @ e_im + v_im.T @ e_re]))
+        s_re, s_im = torch.cat(parts, dim=-1)  # (C, n_adc) each
+        c, s = torch.cos(pa), torch.sin(pa)
+        sig = torch.stack([s_re * c + s_im * s, s_im * c - s_re * s]).permute(2, 0, 1)  # (n_adc, 2, C)
+    mx, my = _precess(mx, my, -TWO_PI * (spins.pos @ k[-1] + spins.db0 * t[-1]))
+    mx, my, mz = _relax(mx, my, mz, t[-1], spins)
+    return mx, my, mz, sig
+
+
+def _steps(seq: Sequence, merge: bool) -> list[tuple[int, int]]:
+    """Split the sequence into [start, end) steps: single RF segments, and free runs of
+    consecutive RF-free segments (each run ends at a spoiled segment). Without
+    ``merge`` every segment is its own step."""
+    steps, s, n = [], 0, len(seq)
+    while s < n:
+        e = s + 1
+        if merge and not seq.is_rf[s]:
+            while e < n and not seq.is_rf[e] and not seq.spoil[e - 1]:
+                e += 1
+        steps.append((s, e))
+        s = e
+    return steps
+
+
+def _run(mx, my, mz, steps, seq: Sequence, spins: _Spins):
     samples = []
-    for dt, rf, g, psi, is_rf, adc, spoil in segments:
-        bz = spins.pos @ g + spins.db0  # off-resonance in the rotating frame [Hz]
-        if is_rf:
-            mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
-            w = -TWO_PI * dt
-            mx, my, mz = _rotate(mx, my, mz, w * rf[0], w * rf[1], w * bz)
-            mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
+    for a, b in steps:
+        if seq.is_rf[a]:
+            mx, my, mz = _rf_segment(mx, my, mz, seq.dt[a], seq.rf[a], seq.grad[a], spins)
+            if seq.adc[a]:
+                samples.append(_sample(mx, my, seq.adc_phase[a], spins)[None])
         else:
-            mx, my = _precess(mx, my, -TWO_PI * dt * bz)
-            mx, my, mz = _relax(mx, my, mz, dt, spins)
-        if adc:
-            re = mx @ spins.sens_re - my @ spins.sens_im
-            im = mx @ spins.sens_im + my @ spins.sens_re
-            c, s = torch.cos(psi), torch.sin(psi)  # demodulate by exp(-i*psi)
-            samples.append(torch.stack([re * c + im * s, im * c - re * s]))
-        if spoil:
+            adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
+            mx, my, mz, sig = _free_run(mx, my, mz, seq.dt[a:b], seq.grad[a:b], seq.adc_phase[a:b],
+                                        adc_idx, spins)
+            if sig is not None:
+                samples.append(sig)
+        if seq.spoil[b - 1]:
             mx, my = torch.zeros_like(mx), torch.zeros_like(my)
     n_coils = spins.sens_re.shape[1]
-    sig = torch.stack(samples) if samples else mx.new_zeros(0, 2, n_coils)
+    sig = torch.cat(samples) if samples else mx.new_zeros(0, 2, n_coils)
     return mx, my, mz, sig
 
 
@@ -103,14 +167,17 @@ def simulate(
     *,
     m_init: Tensor | None = None,
     checkpoint_every: int | None = None,
+    merge_free_runs: bool = True,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``.
 
     coils: (N, C) complex receive sensitivities at the spin positions (default:
         one uniform coil).
     m_init: (N, 3) starting magnetization (default: equilibrium, Mz = PD).
-    checkpoint_every: recompute the forward pass in chunks of this many segments
-        during backward instead of storing it, trading compute for memory.
+    checkpoint_every: recompute the forward pass in chunks of about this many
+        segments during backward instead of storing it, trading compute for memory.
+    merge_free_runs: evaluate stretches of RF-free segments in closed form (fast).
+        False steps segment by segment; the results agree to rounding error.
     """
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)
@@ -126,17 +193,19 @@ def simulate(
     else:
         mx, my, mz = m_init.unbind(-1)
 
-    segments = list(zip(seq.dt.unbind(0), seq.rf.unbind(0), seq.grad.unbind(0),
-                        seq.adc_phase.unbind(0), seq.is_rf, seq.adc, seq.spoil))
-    chunk = checkpoint_every or max(len(segments), 1)
+    # group steps into chunks of about checkpoint_every segments
+    steps, chunks = _steps(seq, merge_free_runs), []
+    for step in steps:
+        if not chunks or (checkpoint_every and chunks[-1][-1][1] - chunks[-1][0][0] >= checkpoint_every):
+            chunks.append([])
+        chunks[-1].append(step)
     use_ckpt = checkpoint_every is not None and torch.is_grad_enabled()
     sigs = [pd.new_zeros(0, 2, sens_re.shape[1])]
-    for start in range(0, len(segments), chunk):
-        part = segments[start : start + chunk]
+    for part in chunks:
         if use_ckpt:
-            mx, my, mz, sig = checkpoint(_run, mx, my, mz, part, spins, use_reentrant=False)
+            mx, my, mz, sig = checkpoint(_run, mx, my, mz, part, seq, spins, use_reentrant=False)
         else:
-            mx, my, mz, sig = _run(mx, my, mz, part, spins)
+            mx, my, mz, sig = _run(mx, my, mz, part, seq, spins)
         sigs.append(sig)
     sig = torch.cat(sigs)  # (n_adc, 2, C)
     assert sig.shape[0] == seq.n_adc and n == mx.shape[0]
