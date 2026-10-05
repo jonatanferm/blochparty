@@ -57,7 +57,8 @@ def signal_equation(phantom: Phantom, seq: Sequence, coils: Tensor | None = None
     RF, and transverse magnetization ideally spoiled before every RF pulse, so
     only Mz carries over between excitations. RF pulses are treated as
     instantaneous rotations at their centre (ignoring relaxation and
-    off-resonance during the pulse).
+    off-resonance during the pulse), of flip angle b1 * alpha for a spin with
+    transmit scale b1 (``Phantom.b1``).
     """
     pd, t1, t2, db0, pos = phantom.pd, phantom.t1, phantom.t2, phantom.db0, phantom.pos
     seq = seq.to(dtype=pd.dtype, device=pd.device)
@@ -79,6 +80,8 @@ def signal_equation(phantom: Phantom, seq: Sequence, coils: Tensor | None = None
             mz = pd + (mz_ref - pd) * torch.exp(-t_centre / t1)
             rf = seq.rf[s]
             alpha = 2 * math.pi * torch.linalg.vector_norm(rf) * dt
+            if phantom.b1 is not None:
+                alpha = alpha * phantom.b1
             phi = torch.atan2(rf[1], rf[0])
             mxy0 = 1j * torch.exp(1j * phi) * mz * torch.sin(alpha)
             mz_ref, t, k, coherent = mz * torch.cos(alpha), dt / 2, torch.zeros_like(k), True

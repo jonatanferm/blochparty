@@ -142,12 +142,16 @@ segments, 8 coils, float32) in 6.3 min at 3.3e9 spin-segments/s (`examples/gre3d
 
 ## Phase 2 – Physical realism
 
-- [ ] Sub-voxel isochromats (jittered), with guidance on spins-per-voxel vs. gradient moment
-- [ ] T2′ via Lorentzian (Cauchy-quantile) intra-voxel frequency distribution
+- [x] Sub-voxel isochromats (jittered), with guidance on spins-per-voxel vs. gradient moment
+      (`phantom_from_maps(spins_per_voxel=, jitter="stratified")`, PD split over the spins)
+- [x] T2′ via Lorentzian (Cauchy-quantile) intra-voxel frequency distribution (`t2prime` map;
+      quantiles shuffled per voxel, or seeded random draws)
 - [ ] Real spoiling: gradient spoilers + RF spoiling (117° quadratic phase), replacing ideal spoil
 - [ ] Trapezoidal gradients with ramps; ramp-sampling support
 - [ ] Slice-selective shaped pulses (sinc, Gaussian) with slice-select/rephase gradients
-- [ ] B1⁺ (transmit) maps scaling the RF; B0 maps; chemical shift (multi-peak fat model)
+- [x] B1⁺ (transmit) maps scaling the RF (`Phantom.b1`, in the PyTorch core, signal equation,
+      `simulate_chunked` and the fused kernel forward + adjoint; `coils.birdcage_b1`); B0 maps
+      (`b0_shim`, `b0_sphere`, `b0_cylinder`); chemical shift (6-peak fat model, `fat_fraction`)
 - [ ] Spin-echo / turbo spin-echo / bSSFP / EPI builders
 
 **Verify:** spoiled-GRE steady state with real spoiling vs. Ernst (and vs. EPG for known
@@ -157,6 +161,38 @@ fat–water shift in pixels vs. bandwidth; EPI distortion vs. B0 map / echo spac
 ✅ Independent EPG reference model (`epg.py`): matches closed forms to 1e-12–1e-15 and the
 isochromat simulator exactly once isochromats outnumber the dephasing orders present
 (CPMG 120°: K=17 → 3e-16; 117° RF-spoiled GRE: K=151 → 6e-16).
+
+**Verified** (realistic phantoms: `tests/test_phantom_*.py`, 53 tests, ~20 s):
+- Defaults unchanged: one spin per voxel centre, and the fused forward and adjoint are
+  bit-identical to before the B1⁺ change (float32 / float64, one thread, 6 sequences incl.
+  random RF/gradients/off-resonance, 2D/3D GRE, spoils; also `b1 = 1` vs `None`)
+- Sub-voxel spins: layout (one spin per sub-cell, PD conserved); k-space of 3×3 jittered spins
+  equals the signal equation for the same spins to 4e-15; gradient-spoiled GRE (no RF spoiling,
+  150 TRs, 1 cycle/voxel/TR) vs EPG: regular sub-grid 0.26 (K=2) → 3.7e-7 (64) → 1e-15 (151,
+  once K exceeds the orders present); stratified jitter 0.27 → 4e-3 (64) → 3.5e-4 (256), ~K^-1.3
+- T2′: spin offsets are the Cauchy quantiles (vs SciPy), random draws pass a KS test; FID vs
+  exp(−t/T2*) over 3 T2′ within 0.36/√K, 0.25/√K, 0.15/√K for K = 256, 1024, 4096 (bound
+  0.6/√K), T2′ alone within 2/√K out to K·T2′/4; deterministic quantiles beat random draws;
+  spin echo with 1024 spins follows exp(−TE/T2) to 1.4e-7 while the FID has decayed with T2*
+- B1⁺: Mz = cos(b1·α) to 9e-16 for b1 ∈ [0, 3.7] and any RF phase (core, fused, chunked);
+  2D GRE with a centre-brightened birdcage map equals the Ernst signal at b1·α per pixel to
+  4.5e-5; `b1` gradient (and all others) of the fused adjoint vs autograd 6e-15–2e-13
+  (≤ 1e-10 required), gradcheck through core and fused, chunked backward too; `birdcage_b1`
+  solves the Helmholtz equation with the k from SciPy's J0 (1e-5, finite differences)
+- B0: shim terms are harmonic (Laplacian 0); sphere and cylinder (θ = 0°, 30°, magic angle,
+  90°) vs a Fourier-domain dipole convolution of a partial-volume χ grid within 1 % / 0.5 % of
+  the peak field; a linear y shim shears a GRE image by exactly f(y)/bandwidth per row
+- Fat: PD / shift bookkeeping (−434.3 Hz main peak at 3 T); fat-only image moves −2 px at
+  bandwidth = |Δf|/2 (+2, −1, −3 fail); each peak modulates k-space by exp(−i2πf_p t) (1e-4,
+  0.1 µs pulses); water + fat FID at in-/opposed-phase and other TEs equals
+  i[(1−f)e^{−t/T2w} + f e^{−t/T2f} Σ a_p e^{−i2πf_p t}] to 2e-7 at 1.5 T and 3 T (fused
+  too); single peak gives the two-point Dixon values and fat at +90° at t = 1/(4|Δf|)
+- All of it together (sub-voxel + T2′ + fat + B1⁺ + shim + sphere, 2D and 3D, 6 coils): fused
+  vs core 1e-12 (float64) / 1e-5 (float32), chunked 1e-12; gradients of every input ≤ 4e-15,
+  and back through `phantom_from_maps` to the PD, T1, T2′, fat-fraction, fat-T2, B1⁺, B0 maps
+- Cost: 3D 64³ GRE (8 coils, float32, 200 dummies) with 8 spins per voxel (564k spins), fused
+  forward 61 s (59 s with T2′ and a B1⁺ map) vs 7.3 s at one spin per voxel, ~2.6e9
+  spin-segments/s either way (Intel Xeon, 4 vCPUs)
 
 ## Phase 3 – Pulseq in/out and cross-simulator validation
 

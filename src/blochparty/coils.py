@@ -27,6 +27,47 @@ def birdcage_sensitivities(
     return sens
 
 
+def birdcage_b1(pos: Tensor, centre_brightening=0.0, radius: float = 0.1) -> Tensor:
+    """(N,) relative transmit (B1+) scale of a birdcage driven in circular polarisation,
+    for ``Phantom.b1``; the coil axis is z.
+
+    An ideal birdcage gives a uniform field (``centre_brightening=0``, all ones). At high
+    field the wavelength in tissue approaches the body size and the field brightens
+    in the centre; this models it with the circularly polarised standing wave in a long
+    dielectric cylinder, B1+ = J0(k rho) (rho = distance from the axis), normalised to 1 on
+    the axis and with k chosen so that the field at ``radius`` is 1 / (1 + centre_brightening)
+    of the centre's (e.g. ~0.3-0.5 for a head at 7 T, as a rough guide). ``centre_brightening``
+    may be a tensor; requires k radius < 2.405 (the first zero of J0).
+    """
+    cb = torch.as_tensor(centre_brightening, dtype=pos.dtype)
+    target = 1.0 / (1.0 + float(cb.detach()))
+    if not 0 < target <= 1:
+        raise ValueError(f"centre_brightening must be >= 0, got {float(cb.detach())}")
+    # k radius: J0(x) = target on [0, 2.405) by bisection, then one Newton step through
+    # which gradients reach centre_brightening (dJ0/dx = -J1)
+    lo, hi = 0.0, 2.404825557695773
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if _j0(mid) > target else (lo, mid)
+    x = torch.as_tensor(0.5 * (lo + hi), dtype=pos.dtype)
+    if cb.requires_grad and target < 1:
+        x = x + (torch.special.bessel_j0(x) - 1.0 / (1.0 + cb)) / torch.special.bessel_j1(x)
+    rho = torch.sqrt(pos[:, 0] ** 2 + pos[:, 1] ** 2)
+    return _bessel_j0(x / radius * rho)
+
+
+def _j0(x: float) -> float:
+    return float(torch.special.bessel_j0(torch.tensor(x, dtype=torch.float64)))
+
+
+def _bessel_j0(x: Tensor) -> Tensor:
+    """J0 with a gradient (torch.special.bessel_j0 has none): dJ0/dx = -J1."""
+    j0 = torch.special.bessel_j0(x.detach())
+    if not x.requires_grad:
+        return j0
+    return j0 - torch.special.bessel_j1(x.detach()) * (x - x.detach())
+
+
 def add_noise(signal: Tensor, sigma: float, cov: Tensor | None = None, generator=None) -> Tensor:
     """Complex Gaussian thermal noise on (C, ...) k-space.
 

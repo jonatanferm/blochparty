@@ -51,6 +51,11 @@ struct Spins {
     const T* t2;      // (n,) [s]
     const T* db0;     // (n,) [Hz]
     const T* sens;    // (n, C, 2) receive sensitivities, (re, im) interleaved
+    const T* b1;      // (n,) transmit scale of every RF pulse, or null for 1
+
+    Spins(int64_t n, int64_t n_coils, const T* pos, const T* pd, const T* t1, const T* t2, const T* db0,
+          const T* sens, const T* b1 = nullptr)
+        : n(n), n_coils(n_coils), pos(pos), pd(pd), t1(t1), t2(t2), db0(db0), sens(sens), b1(b1) {}
 };
 
 template <typename T>
@@ -77,6 +82,7 @@ struct Grads {
     T* t2 = nullptr;         // (n,)
     T* db0 = nullptr;        // (n,)
     T* sens = nullptr;       // (n, C, 2): d/d(re), d/d(im)
+    T* b1 = nullptr;         // (n,)
     T* m = nullptr;          // (n, 3) initial magnetization
 };
 
@@ -123,7 +129,7 @@ struct Cache {
 
 template <typename T, int B>
 struct Block {
-    alignas(64) T px[B], py[B], pz[B], db0[B], pd[B], r1[B], r2[B];
+    alignas(64) T px[B], py[B], pz[B], db0[B], pd[B], r1[B], r2[B], b1[B];
     alignas(64) T mx[B], my[B], mz[B];
     std::vector<T> sr, si;  // (C, B) sensitivities
     // Relaxation over a duration: expm1(-t * R1), expm1(-t * R2). Key: t.
@@ -150,6 +156,7 @@ struct Block {
             pd[l] = in ? sp.pd[i] : T(0);
             r1[l] = in ? T(1) / sp.t1[i] : T(0);
             r2[l] = in ? T(1) / sp.t2[i] : T(0);
+            b1[l] = in && sp.b1 ? sp.b1[i] : T(1);
             for (int64_t c = 0; c < nc; ++c) {
                 sr[c * B + l] = in ? sp.sens[2 * (i * nc + c)] : T(0);
                 si[c * B + l] = in ? sp.sens[2 * (i * nc + c) + 1] : T(0);
@@ -219,7 +226,8 @@ struct Block {
     }
 
     // Rotation factors of an RF segment for lane i: cos(phi), sin(phi) / phi,
-    // (1 - cos(phi)) / phi^2 and wz, for the rotation vector w = (wx, wy, wz).
+    // (1 - cos(phi)) / phi^2 and wz, for the rotation vector w = (wx, wy, wz) (wx, wy
+    // already scaled by the lane's b1).
     void rotation(T (*r)[B], int i, T w, T wx, T wy, T gx, T gy, T gz) const {
         const T wz = w * (px[i] * gx + py[i] * gy + pz[i] * gz + db0[i]);
         const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
@@ -240,14 +248,16 @@ struct Block {
         const T w = w_per_s * dt;
         bool fill;
         if (seq.flags[s] & kRF) {
-            // relax dt/2 -> rotate by w (Rodrigues) -> relax dt/2
+            // relax dt/2 -> rotate by w (Rodrigues) -> relax dt/2; lane i sees the RF times b1[i]
+            // (exact for b1 = 1, so without a B1+ map the result is unchanged bit for bit)
             const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1];
-            const T wx = w * rx, wy = w * ry;
+            const T wx0 = w * rx, wy0 = w * ry;
             const T (*d)[B] = relaxation(T(0.5) * dt);
             T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz}, fill);
             if (fill)
-                for (int i = 0; i < B; ++i) rotation(r, i, w, wx, wy, gx, gy, gz);
+                for (int i = 0; i < B; ++i) rotation(r, i, w, wx0 * b1[i], wy0 * b1[i], gx, gy, gz);
             for (int i = 0; i < B; ++i) {
+                const T wx = wx0 * b1[i], wy = wy0 * b1[i];
                 const T x = mx[i] + mx[i] * d[1][i], y = my[i] + my[i] * d[1][i];
                 const T z = mz[i] + (mz[i] - pd[i]) * d[0][i];
                 const T c = r[0][i], s1 = r[1][i], s2 = r[2][i], wz = r[3][i];
@@ -371,7 +381,7 @@ void simulate_blocks(const Spins<T>& sp, const Segments<T>& seq, T* m, T* signal
 // follow from lambda_s and m_{s-1}. A_s itself:
 //   free:  A = E(dt) Rz(phi), phi = -2 pi dt (pos.g + db0); E = diag(e2, e2, e1);
 //   RF:    A = E(dt/2) R(w) E(dt/2), R = c I + s1 [w]x + s2 w w^T (Rodrigues), so
-//          R^T = c I - s1 [w]x + s2 w w^T.
+//          R^T = c I - s1 [w]x + s2 w w^T; w = -2 pi dt (b1 rf_x, b1 rf_y, pos.g + db0).
 // m_{s-1} comes from checkpoints: the forward stores m before every `every` segments;
 // the backward replays one interval at a time into a (every, 3, B) buffer and sweeps it
 // in reverse. Relaxation and spoiling are never inverted. Work: one forward replay plus
@@ -381,6 +391,9 @@ void simulate_blocks(const Spins<T>& sp, const Segments<T>& seq, T* m, T* signal
 
 // Segment gradient slots, accumulated in double per thread.
 enum { kGdt, kGrx, kGry, kGgx, kGgy, kGgz, kNSeg };
+
+// Per-spin gradient rows of Adjoint::total ahead of the sensitivities.
+enum { kGpx, kGpy, kGpz, kGdb0, kGpd, kGr1, kGr2, kGb1, kNSpin };
 
 // Per-spin gradients are summed in T and moved into double after every segment whose
 // index is a multiple of this: few enough terms for float32, and the same grouping for
@@ -408,8 +421,8 @@ struct Adjoint {
     Block<T, B> fw;  // spins, magnetization and forward factor caches, for the replay
     alignas(64) T lx[B], ly[B], lz[B];  // lambda
     // Per-spin gradients, summed in T over at most kFlush segments and then into `total`.
-    alignas(64) T gpx[B], gpy[B], gpz[B], gdb0[B], gpd[B], gr1[B], gr2[B];
-    std::vector<double> total;  // (7 + 2C, B): gpx, gpy, gpz, gdb0, gpd, gr1, gr2, d/d sens (re), (im)
+    alignas(64) T gpx[B], gpy[B], gpz[B], gdb0[B], gpd[B], gr1[B], gr2[B], gb1[B];
+    std::vector<double> total;  // (kNSpin + 2C, B): gpx, ..., gr2, gb1, d/d sens (re), (im)
     std::vector<T> buf;         // (every, 3, B): m before each segment of the current interval
     // Sensitivity gradients are sums over ADC samples of h (x) m_transverse; samples are
     // collected here and summed in register tiles by flush().
@@ -420,7 +433,7 @@ struct Adjoint {
     Cache<T, B, 6, 6, 4> rot;
 
     Adjoint(int64_t n_coils, int64_t every)
-        : fw(n_coils), total((7 + 2 * n_coils) * B), buf(3 * B * every), obuf(2 * B * kFlush), hbuf(kFlush) {}
+        : fw(n_coils), total((kNSpin + 2 * n_coils) * B), buf(3 * B * every), obuf(2 * B * kFlush), hbuf(kFlush) {}
 
     void load(const Spins<T>& sp, const T* g_m, int64_t start) {
         rot.clear();
@@ -430,7 +443,7 @@ struct Adjoint {
             lx[l] = in ? g_m[3 * i] : T(0);
             ly[l] = in ? g_m[3 * i + 1] : T(0);
             lz[l] = in ? g_m[3 * i + 2] : T(0);
-            gpx[l] = gpy[l] = gpz[l] = gdb0[l] = gpd[l] = gr1[l] = gr2[l] = T(0);
+            gpx[l] = gpy[l] = gpz[l] = gdb0[l] = gpd[l] = gr1[l] = gr2[l] = gb1[l] = T(0);
         }
         std::fill(total.begin(), total.end(), 0.0);
         n_obuf = 0;
@@ -456,16 +469,16 @@ struct Adjoint {
             }
             for (int q = 0; q < NQ; ++q)
                 for (int v = 0; v < V; ++v) {
-                    total[(7 + c0 + q) * B + i0 + v] += ar[q][v];
-                    total[(7 + n_coils + c0 + q) * B + i0 + v] += ai[q][v];
+                    total[(kNSpin + c0 + q) * B + i0 + v] += ar[q][v];
+                    total[(kNSpin + n_coils + c0 + q) * B + i0 + v] += ai[q][v];
                 }
         }
     }
 
     // Move the per-spin sums into `total`.
     void flush(int64_t n_coils) {
-        T* part[7] = {gpx, gpy, gpz, gdb0, gpd, gr1, gr2};
-        for (int q = 0; q < 7; ++q)
+        T* part[kNSpin] = {gpx, gpy, gpz, gdb0, gpd, gr1, gr2, gb1};
+        for (int q = 0; q < kNSpin; ++q)
             for (int i = 0; i < B; ++i) total[q * B + i] += part[q][i], part[q][i] = T(0);
         if (n_obuf) {
             int64_t c = 0;
@@ -481,15 +494,18 @@ struct Adjoint {
         for (int l = 0; l < B && start + l < sp.n; ++l) {
             const int64_t i = start + l;
             const double r1 = fw.r1[l], r2 = fw.r2[l];
-            if (g.pos) g.pos[3 * i] = T(t[l]), g.pos[3 * i + 1] = T(t[B + l]), g.pos[3 * i + 2] = T(t[2 * B + l]);
-            if (g.db0) g.db0[i] = T(t[3 * B + l]);
-            if (g.pd) g.pd[i] = T(t[4 * B + l]);
-            if (g.t1) g.t1[i] = T(-t[5 * B + l] * r1 * r1);  // r1 = 1 / t1
-            if (g.t2) g.t2[i] = T(-t[6 * B + l] * r2 * r2);
+            if (g.pos)
+                g.pos[3 * i] = T(t[kGpx * B + l]), g.pos[3 * i + 1] = T(t[kGpy * B + l]),
+                g.pos[3 * i + 2] = T(t[kGpz * B + l]);
+            if (g.db0) g.db0[i] = T(t[kGdb0 * B + l]);
+            if (g.pd) g.pd[i] = T(t[kGpd * B + l]);
+            if (g.t1) g.t1[i] = T(-t[kGr1 * B + l] * r1 * r1);  // r1 = 1 / t1
+            if (g.t2) g.t2[i] = T(-t[kGr2 * B + l] * r2 * r2);
+            if (g.b1) g.b1[i] = T(t[kGb1 * B + l]);
             if (g.sens)
                 for (int64_t c = 0; c < nc; ++c) {
-                    g.sens[2 * (i * nc + c)] = T(t[(7 + c) * B + l]);
-                    g.sens[2 * (i * nc + c) + 1] = T(t[(7 + nc + c) * B + l]);
+                    g.sens[2 * (i * nc + c)] = T(t[(kNSpin + c) * B + l]);
+                    g.sens[2 * (i * nc + c) + 1] = T(t[(kNSpin + nc + c) * B + l]);
                 }
             if (g.m) g.m[3 * i] = lx[l], g.m[3 * i + 1] = ly[l], g.m[3 * i + 2] = lz[l];
         }
@@ -557,6 +573,7 @@ struct Adjoint {
         const T* x0 = &buf[3 * B * j];
         const T *y0 = x0 + B, *z0 = x0 + 2 * B;
         const T *px = fw.px, *py = fw.py, *pz = fw.pz, *db0 = fw.db0, *pd = fw.pd, *r1 = fw.r1, *r2 = fw.r2;
+        const T* b1 = fw.b1;
         const T dt = seq.dt[s];
         const T gx = seq.grad[3 * s], gy = seq.grad[3 * s + 1], gz = seq.grad[3 * s + 2];
         const uint8_t f = seq.flags[s];
@@ -569,11 +586,12 @@ struct Adjoint {
         if (f & kRF) {
             const T h_dt = T(0.5) * dt;
             const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1];
-            const T wx = w * rx, wy = w * ry;
+            const T wx0 = w * rx, wy0 = w * ry;  // times b1[i] per lane, as in Block::advance
             const T (*d)[B] = fw.relaxation(h_dt);
             T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz}, fill);
             if (fill)
                 for (int i = 0; i < B; ++i) {
+                    const T wx = wx0 * b1[i], wy = wy0 * b1[i];
                     fw.rotation(r, i, w, wx, wy, gx, gy, gz);
                     const T wz = r[3][i];
                     const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
@@ -581,6 +599,7 @@ struct Adjoint {
                 }
             // forward intermediates: m1 = E m0, n = R m1, out = E n
             auto fwd = [&](int i, T& m1x, T& m1y, T& m1z, T& dot, T& nx, T& ny, T& nz) {
+                const T wx = wx0 * b1[i], wy = wy0 * b1[i];
                 m1x = x0[i] + x0[i] * d[1][i], m1y = y0[i] + y0[i] * d[1][i];
                 m1z = z0[i] + (z0[i] - pd[i]) * d[0][i];
                 const T c = r[0][i], s1 = r[1][i], s2 = r[2][i], wz = r[3][i];
@@ -604,6 +623,7 @@ struct Adjoint {
             for (int i = 0; i < B; ++i) {
                 T m1x, m1y, m1z, dot, nx, ny, nz;
                 fwd(i, m1x, m1y, m1z, dot, nx, ny, nz);
+                const T wx = wx0 * b1[i], wy = wy0 * b1[i];
                 const T c = r[0][i], s1 = r[1][i], s2 = r[2][i], wz = r[3][i], f1 = r[4][i], f2 = r[5][i];
                 const T e1 = T(1) + d[0][i], e2 = T(1) + d[1][i];
                 // second half relaxation
@@ -638,7 +658,9 @@ struct Adjoint {
                 const T bz0 = px[i] * gx + py[i] * gy + pz[i] * gz + db0[i];
                 sdt += w_per_s * gwz * bz0 - T(0.5) * (gd1 * r1[i] * e1 + gd2 * r2[i] * e2);
                 sgx += gb * px[i], sgy += gb * py[i], sgz += gb * pz[i];
-                swx += gwx, swy += gwy;
+                // (wx, wy) = b1 (wx0, wy0): the sequence sees dL/dw times b1, the spin dL/dw . w0
+                swx += gwx * b1[i], swy += gwy * b1[i];
+                gb1[i] += gwx * wx0 + gwy * wy0;
             }
             if (gseg) {
                 gseg[kGdt] += double(sdt) + double(w_per_s) * (double(rx) * swx + double(ry) * swy);
