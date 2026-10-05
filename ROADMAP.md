@@ -67,12 +67,13 @@ count) are impractical at current speed. 3D is the target workload for this phas
       floor, which `checkpoint_every` does not
 - [x] Benchmarks tracked over time (spins × segments / s, memory):
       `benchmarks/bench.py [--record]` → `benchmarks/history.jsonl`
-- [ ] If pure PyTorch isn't fast enough: a fused compiled kernel (C++ extension; later
-      Metal / CUDA) behind the same `simulate()` API — one thread per spin block stepping
-      through all segments with magnetization in registers, plus a hand-written adjoint
-      backward with checkpointing. The pure-PyTorch simulator stays as its reference
-      (forward to ~1e-12 in float64, gradients vs. autograd and finite differences).
-      Written against raw arrays so a standalone CLI (no Python) can wrap it later.
+- [x] Fused compiled kernel, forward (`blochparty.fused.simulate_fused`): header-only C++17
+      kernel on raw arrays (`fused/kernel.h`, no PyTorch dependency), spin blocks in L1,
+      `std::thread` workers, per-segment factor caching, SIMD coil sums; JIT-built PyTorch
+      extension. Matches `simulate` to ~2e-14 (float64); float32 error ~1e-6 vs float64
+      (10× lower than the PyTorch float32 path, thanks to `expm1` relaxation)
+- [ ] Fused kernel, backward: hand-written adjoint with checkpointing, verified against
+      autograd and finite differences; then Metal / CUDA ports of the same kernel
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit
 (float64) or within float32 tolerance; benchmark table in this file. 3D: Bloch vs.
@@ -99,6 +100,18 @@ After closed-form free runs (same machine, CPU): 2D 96² 0.17 s (9.5×), 3D 32³
 3D 48³ 10.9 s (4.0×), 3D 64³ 68 s (3.5×); projected 128³ ~70 min. Per 64³ TR (~12 ms):
 exp/cos/sin ~45 %, phase ~17 %, elementwise products ~20 %, matmuls ~17 %. ~20 µs fixed Python overhead per segment; memory-bandwidth
 bound at realistic sizes; ~92 % of segments are single ADC samples.
+
+Fused kernel (same machine, float32, 10 threads, idle; vs. the closed-form PyTorch core):
+
+| case | PyTorch core | fused | speed-up |
+|---|---|---|---|
+| 2D 96² | 0.16 s | 0.012 s | ~13× |
+| 3D 32³ | 1.14 s | 0.07 s | 16× |
+| 3D 48³ | 9.3 s | 0.80 s | 12× |
+| 3D 64³ | 60 s | 5.4 s (float64: 12.6 s) | 11× |
+
+Targets: 64³ < 1 min ✅ (5.4 s); 128³ < 30 min on CPU ✅ — full run (565k spins × 2.16M
+segments, 8 coils, float32) in 6.3 min at 3.3e9 spin-segments/s (`examples/gre3d_128.py`).
 
 ## Phase 2 – Physical realism
 

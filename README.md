@@ -10,6 +10,7 @@ uv run pytest                              # 52 verification tests, ~20 s
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
+uv run python examples/gre3d_128.py        # full 3D 128^3 with the fused kernel, ~6 min
 uv run python benchmarks/bench.py --backend fused  # same, with the fused C++ kernel
 ```
 
@@ -58,7 +59,7 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 
 | `sequence.py` | `Sequence` (flat piecewise-constant segments) and `SequenceBuilder` |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
-| `fused/` | forward-only C++ kernel, same results ~50-150x faster on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
+| `fused/` | forward-only C++ kernel, same results ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins |
 | `coils.py` | receive sensitivities, thermal noise |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
