@@ -13,7 +13,7 @@ a segment is w = -2*pi*dt*(rf_x, rf_y, G.r + dB0) and the transverse
 magnetization Mxy = Mx + i*My evolves as exp(-i*2*pi*f*t) at offset f.
 
 Everything is plain tensor arithmetic, so autograd reaches the sequence
-(flip angles, timings, gradients), the phantom (PD, T1, T2, dB0) and the coils.
+(flip angles, timings, gradients), the phantom (PD, T1, T2, dB0, B1+) and the coils.
 """
 
 from __future__ import annotations
@@ -40,6 +40,7 @@ class _Spins(NamedTuple):
     r2: Tensor
     sens_re: Tensor  # (N, C)
     sens_im: Tensor
+    b1: Tensor | None  # (N,) transmit scale, or None for 1
 
 
 @dataclass
@@ -81,7 +82,10 @@ def _rf_segment(mx, my, mz, dt, rf, g, spins: _Spins):
     bz = spins.pos @ g + spins.db0  # off-resonance in the rotating frame [Hz]
     mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
     w = -TWO_PI * dt
-    mx, my, mz = _rotate(mx, my, mz, w * rf[0], w * rf[1], w * bz)
+    wx, wy = w * rf[0], w * rf[1]
+    if spins.b1 is not None:  # B1+: every spin sees the RF field scaled by its b1
+        wx, wy = wx * spins.b1, wy * spins.b1
+    mx, my, mz = _rotate(mx, my, mz, wx, wy, w * bz)
     return _relax(mx, my, mz, 0.5 * dt, spins)
 
 
@@ -186,7 +190,7 @@ def simulate(
         sens_re, sens_im = torch.ones_like(pd)[:, None], torch.zeros_like(pd)[:, None]
     else:
         sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
-    spins = _Spins(phantom.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im)
+    spins = _Spins(phantom.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1)
 
     if m_init is None:
         mx, my, mz = torch.zeros_like(pd), torch.zeros_like(pd), pd

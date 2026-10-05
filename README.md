@@ -29,7 +29,52 @@ image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 3D works the same way: `bp.shepp_logan(32, ndim=3)`, `bp.gre_3d(32)`, `bp.reconstruct(...)`.
 
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
-(flip angles, TR, gradient amplitudes, T1/T2/PD maps, coil maps).
+(flip angles, TR, gradient amplitudes, T1/T2/PD/B0/B1⁺/T2′/fat maps, coil maps).
+
+## Realistic phantoms
+
+`phantom_from_maps` turns 2D/3D maps into spins; the options below are off by default (one
+spin per voxel centre, results unchanged bit for bit):
+
+```python
+from blochparty.coils import birdcage_b1
+from blochparty.phantom import b0_shim, b0_sphere
+
+maps = bp.shepp_logan_maps(64)
+grid = bp.grid_positions(64, 0.22).reshape(-1, 3)
+air = b0_sphere(grid, (0.0, 0.07, 0.0), 0.01, 9.4e-6)    # 1 cm air pocket in tissue, Hz
+b0 = (b0_shim(grid, z2=300.0) + air).reshape(64, 64)
+phantom = bp.phantom_from_maps(
+    maps["pd"], maps["t1"], maps["t2"], fov=0.22, db0=b0,
+    spins_per_voxel=4, jitter="stratified", seed=0,   # 2x2 isochromats per voxel, PD / 4 each
+    t2prime=torch.full((64, 64), 0.05),               # Lorentzian intra-voxel offsets: T2*
+    fat_fraction=(maps["label"] == 1).double(),       # 6-peak fat spins in the "fat" ellipse
+    field_strength=3.0,
+    b1=birdcage_b1(grid, centre_brightening=0.3).reshape(64, 64))  # transmit scale
+```
+
+- **Sub-voxel isochromats** (`spins_per_voxel=K` or per-side counts like `(1, 8)`; regular
+  sub-grid or `jitter="stratified"`; in-plane for 2D maps). Spins per voxel side must exceed the cycles of
+  dephasing across a voxel that still carry signal (spoilers, stimulated echoes), else
+  those configurations alias back as spurious echoes (`validation/RESULTS.md`). Costs
+  K× the spins; use `simulate_fused` or `simulate_chunked` for gradients.
+- **T2′** (`t2prime` map): each voxel's spins get static offsets from a Lorentzian of
+  half-width 1/(2πT2′) (Cauchy quantiles shuffled over the voxel, or `t2prime_sampling="random"`),
+  so the FID decays with 1/T2* = 1/T2 + 1/T2′ and a spin echo refocuses it. K spins
+  reproduce exp(−t/T2′) to ~0.5/√K of the initial signal over the first few T2′ (needs
+  hundreds of spins per voxel for percent accuracy).
+- **B0 maps**: `b0_shim` (offset, linear and second-order solid harmonics), `b0_sphere` and
+  `b0_cylinder` (closed-form susceptibility fields, Lorentz corrected, B0 along z) return
+  Hz at any positions; evaluate them at `phantom.pos` to sample the field at every spin.
+- **B1⁺**: `Phantom.b1` (`None` = 1) scales every RF pulse per spin (flip b1·α) in `simulate`,
+  `simulate_chunked`, `simulate_fused` (forward and adjoint: `b1` gets gradients) and
+  `reference.signal_equation`. `coils.birdcage_b1(pos, centre_brightening, radius)` is a CP
+  birdcage field, uniform or with J0(kρ) centre brightening.
+- **Fat** (`fat_fraction` map): water keeps PD·(1 − f); one fat spin per peak of `FAT_PEAKS`
+  (−3.80 … +0.60 ppm, amplitudes normalised to 1) with PD·f·a_p, fat T1/T2 (`fat_t1`,
+  `fat_t2`) and offset ppm·γ̄·B0 (`field_strength`, T): fat sits below water (−434 Hz for
+  the main peak at 3 T). Fat spins share their water spin's position, T2′ offset and B1⁺.
+  `bp.shepp_logan(n, chemical_shift=True)` turns its fat ellipse into fat.
 
 ## Pulseq
 
@@ -108,8 +153,8 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-14 
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
 | `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
-| `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins |
-| `coils.py` | receive sensitivities, thermal noise |
+| `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
+| `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
 | `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |
