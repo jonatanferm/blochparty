@@ -542,6 +542,13 @@ struct Adjoint {
         }
     }
 
+    // Apple clang cannot vectorize the RF-segment loop below (GCC does) and reports the
+    // failed simd request at the function; harmless (one RF segment per TR), so keep
+    // -Werror builds working.
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wpass-failed"
+#endif
     // Reverse through segment s; m_{s-1} is at buf slot j, lambda holds dL/dm_s.
     // h: dL/d(raw coil sums) of this segment's ADC sample, or null.
     void reverse(const Segments<T>& seq, int64_t s, int64_t j, const T* h, int64_t n_coils, bool sens,
@@ -681,6 +688,9 @@ struct Adjoint {
         }
         if (gseg) gseg[kGgx] += double(sgx), gseg[kGgy] += double(sgy), gseg[kGgz] += double(sgz);
     }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 };
 
 template <typename T, int B>
