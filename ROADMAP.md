@@ -196,20 +196,44 @@ from the PyPulseq repo; round-trip read→write→read is lossless.
 ## Phase 4 – Differentiable sequence design
 
 - [ ] Parameterized sequence API: which tensors are free, bounds, reparameterizations
-- [ ] Hardware constraints as penalties/projections: Gmax, slew rate, RF peak / SAR proxy,
-      PNS model, timing raster
-- [ ] Losses: tissue contrast, CNR / SNR efficiency, PSF / resolution, artifact energy,
-      parameter-estimation Cramér–Rao bound (for quantitative MRI)
-- [ ] Examples: variable flip angle trains for TSE, RF pulse design, MRF-style schedules
+      (so far by hand, e.g. TR = TR_min + softplus(u) in `examples/design_contrast_tr.py`)
+- [x] Hardware constraints as smooth penalties (`blochparty.design`): Gmax and slew per axis,
+      peak B1 [µT], RF energy / windowed SAR proxy, approximate PNS (chronaxie-filtered dG/dt),
+      scan time; violations named by segment range, time and excess. Verified: units and B1 vs
+      closed forms; slew exact on a raster-sampled trapezoid, builders' instantaneous steps
+      flagged; windowed RF power vs closed form; PNS reproduces the IEC hyperbolic
+      strength–duration law (error < raster / ramp time, converging linearly); penalties zero
+      inside the limits, gradcheck outside
+- [ ] Timing raster checks; projections onto the constraints; Pulseq's own checks
+- [x] Losses: tissue contrast, CNR, SNR efficiency (noise from the coil model by pseudo-replicas:
+      σ/√N for the iFFT to 2 %), PSF FWHM / sidelobes (simulated point spin = Dirichlet kernel to
+      1e-9, FWHM 1.207 px / sidelobe 21.7 %; T2 blurring = closed-form readout weighting to
+      1e-9), Cramér–Rao bound from the simulated Jacobian (= closed-form DESPOT1 CRB to 1e-7, via
+      fused autograd, fused finite differences and `simulate` autograd)
+- [ ] Artifact energy loss
+- [x] Examples with known optima, through the fused kernel (gradients = `simulate`'s to 1e-10):
+      DESPOT1 flip pair by CRB (`examples/design_despot1.py`: 4.109° / 23.618° at TR 15 ms,
+      T1 1 s, = closed-form grid to 2e-4°, signals at 70.711 % of Ernst = 1/√2 to 1e-6, Deoni
+      2003: ≈ 71 %);
+      WM/GM contrast with TR free under a scan-time budget (`design_contrast_tr.py`: lands on
+      the budget's TR, 16.109° at 10 ms and 25.224° at 25 ms, = closed-form grid to 0.01°);
+      low-SAR TSE refocusing train with every echo ≥ 0.6 × the 180° echo
+      (`design_tse_flips.py`: 24 % of the RF energy of the cheapest constant train, echoes =
+      EPG to 2e-16, train = SciPy SLSQP on EPG to 2e-6°)
+- [ ] Examples: RF pulse design, MRF-style schedules
 
-**Verify:** recover known optima (Ernst ✅, WM/GM contrast ✅, VFA-TSE schemes from the
-literature, SLR-designed pulses); constraint satisfaction checked by Pulseq's own checks.
+**Verify:** recover known optima (Ernst ✅, WM/GM contrast ✅ (also with TR free ✅), DESPOT1
+CRB ✅, low-SAR VFA-TSE vs EPG + SLSQP ✅, SLR-designed pulses); constraint satisfaction checked
+by Pulseq's own checks.
 
 ## Phase 5 – Agentic sequence development
 
 - [ ] Tool-style API: JSON sequence spec in → structured report out (metrics, constraint
-      violations by block, images, PSF), deterministic and fast
-- [ ] Sequence linter with actionable messages ("slew exceeded in block 14 by 12 %")
+      violations by block, images, PSF), deterministic and fast. Report out exists
+      (`design.design_report`, JSON, ~0.6 s for a 64² 8-coil GRE); spec in does not yet
+- [ ] Sequence linter with actionable messages ("slew exceeded in block 14 by 12 %"): the report
+      names segment ranges ("slew x exceeded in boundaries 2–20 (t = 1.010–1.190 ms) by 12 %");
+      mapping segments back to Pulseq blocks is still to do
 - [ ] Split of labour: agent chooses structure (sequence family, ordering, spoiling);
       gradient descent tunes continuous parameters inside it
 - [ ] Benchmark task suite with scored targets (e.g. "T1w brain at 1 mm in < 2 min,
