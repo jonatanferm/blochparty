@@ -146,13 +146,26 @@ segments, 8 coils, float32) in 6.3 min at 3.3e9 spin-segments/s (`examples/gre3d
       (`phantom_from_maps(spins_per_voxel=, jitter="stratified")`, PD split over the spins)
 - [x] T2′ via Lorentzian (Cauchy-quantile) intra-voxel frequency distribution (`t2prime` map;
       quantiles shuffled per voxel, or seeded random draws)
-- [ ] Real spoiling: gradient spoilers + RF spoiling (117° quadratic phase), replacing ideal spoil
-- [ ] Trapezoidal gradients with ramps; ramp-sampling support
-- [ ] Slice-selective shaped pulses (sinc, Gaussian) with slice-select/rephase gradients
+- [x] Real spoiling: gradient spoilers (net moment per TR in cycles per voxel, phase-encode
+      rewinders) + RF spoiling (117° quadratic phase, receiver follows), opt-in on the GRE
+      builders (`spoiling="gradient" | "rf"`); ideal spoiling stays the default
+- [x] Hardware limits (`System`: max gradient / slew per axis, gradient / RF / ADC rasters,
+      RF dead time and ringdown) and trapezoidal gradients with ramps (`trapezoid`: by area,
+      flat area or amplitude, minimum time or fixed duration, any axis or direction; the
+      minimum-time designs equal pypulseq's), arbitrary waveforms (`gradient_waveform`),
+      Pulseq-like blocks (`SequenceBuilder.block`) cut on the gradient raster with exact
+      per-segment average gradients; `ramps=True` on the GRE builders
+- [ ] Ramp-sampled readouts in the builders (ADC on ramps is already exact in k) + gridding recon
+- [x] Slice-selective windowed-sinc pulses (`sinc_pulse`: time-bandwidth product, apodization,
+      slice offset as a frequency offset) with slice-select gradient and ramp-aware rephaser;
+      `slice_thickness=` on the builders (slab in 3D)
+- [ ] Gaussian / SLR pulses
 - [x] B1⁺ (transmit) maps scaling the RF (`Phantom.b1`, in the PyTorch core, signal equation,
       `simulate_chunked` and the fused kernel forward + adjoint; `coils.birdcage_b1`); B0 maps
       (`b0_shim`, `b0_sphere`, `b0_cylinder`); chemical shift (6-peak fat model, `fat_fraction`)
-- [ ] Spin-echo / turbo spin-echo / bSSFP / EPI builders
+- [x] Spin-echo / turbo spin-echo / bSSFP / EPI builders (`se_2d`; `tse_2d` with arbitrary
+      refocusing flips, ETL, linear / centric ordering; `bssfp_2d` with α/2 preparation and
+      phase cycling; `epi_2d` single-shot blipped, blips on the readout ramps)
 
 **Verify:** spoiled-GRE steady state with real spoiling vs. Ernst (and vs. EPG for known
 deviations); slice profile vs. small-tip Fourier approximation and SLR; T2′: FID decays
@@ -193,6 +206,38 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 - Cost: 3D 64³ GRE (8 coils, float32, 200 dummies) with 8 spins per voxel (564k spins), fused
   forward 61 s (59 s with T2′ and a B1⁺ map) vs 7.3 s at one spin per voxel, ~2.6e9
   spin-segments/s either way (Intel Xeon, 4 vCPUs)
+
+**Verified** (realistic sequences; `tests/test_sequences_*.py`, 49 tests, ~1 min):
+- Gradient moments: trapezoid areas and k-space at every ADC sample of GRE (2D / 3D slab,
+  ramps, slice select, spoilers), SE / TSE (moment negated at each refocusing pulse), bSSFP
+  (zero net moment per TR, TE = TR/2 to 1e-12 s) and EPI equal the analytic values to ≤ 1e-9 /m;
+  an arbitrary waveform with off-raster ADC samples matches its integral. A pypulseq-written
+  RF-spoiled, slice-selective GRE (pypulseq's own sinc / readout designs) read with
+  `read_pulseq` gives the same moments as pypulseq's `calculate_kspace` (≤ 1e-9) and the same
+  simulated signal to 1e-9; the sinc pulse equals `make_sinc_pulse` sample by sample.
+- Slice profile: small-tip profiles equal the Fourier transform of the RF envelope up to the
+  expected α²/6 (2.5° / 5° / 10°: 3.2e-4 / 1.27e-3 / 5.07e-3); a 90° profile (also off-centre)
+  equals SciPy ODE integration to 2e-12; phase flat to 7e-4 rad after the rephaser at 5°
+  (dropping the fall ramp from it gives
+  the predicted linear phase to 1 %); the slice sits at +z0 for f = G·z0 (flipped sign: −z0).
+  At 90° the half-area rephaser leaves the physical ~0.2 rad odd residual phase the ODE shows.
+- Spoiling: RF + gradient spoiled GRE (ramps, 4 cycles per voxel per TR, 60 TRs) on K
+  isochromats across a voxel vs `epg_spoiled_gre`: K = 16 / 32 / 64 / 128 → 7e-2 / 2.5e-2 /
+  5.6e-3 / 2.6e-4, exact (≤ 1e-16) once K / 4 reaches the TR count (K = 240); gradient-only
+  spoiling (1 cycle): K = 16 / 32 / 48 → 1e-4 / 4e-5 / 4e-6, K = 64 → 2e-16. On
+  Shepp-Logan with 4 jittered isochromats per voxel, the full EPG field evaluated at each
+  isochromat predicts the multi-coil k-space to 1e-10.
+- TSE vs `epg_cpmg` (ETL 8, crushers of one cycle): 180° exact for any K (4e-15); 120°:
+  K = 4 / 8 / 12 / 16 → 0.13 / 0.11 / 7e-3 / 1.4e-5, K = 17 → 8e-16; a variable train
+  (60–170°): 0.32 / 1.3e-2 / 2e-4 / 5e-7, K = 17 → 9e-16. SE / TSE Shepp-Logan k-space vs a
+  closed-form Mz recursion + signal equation: < 1e-10.
+- bSSFP vs `epg_bssfp` with off-resonance 0–160 Hz: ≤ 2e-8 (1 ns pulses); α/2 prep vs EPG
+  < 1e-7, with ≥ 20× less transient oscillation; steady-state banding profile vs the closed
+  form < 1e-7; Shepp-Logan k-space vs per-tissue EPG < 1e-10. EPI k-space vs the signal
+  equation < 1e-10; a uniform offset of 2 PE pixels' bandwidth (1 / (N·esp)) shifts the
+  image by +2 rows (residual 0.75 %, from the 0.02 px readout shift; ±1 px or −2 px: ≥ 35 %).
+- Default builders: bit-identical sequences to before (sha256); autograd through flip angles
+  of the new blocks matches finite differences.
 
 ## Phase 3 – Pulseq in/out and cross-simulator validation
 

@@ -76,6 +76,41 @@ phantom = bp.phantom_from_maps(
   the main peak at 3 T). Fat spins share their water spin's position, T2′ offset and B1⁺.
   `bp.shepp_logan(n, chemical_shift=True)` turns its fat ellipse into fat.
 
+## Realistic sequences
+
+The default builders are idealised (hard pulse, instantaneous gradients, ideal spoiling) and
+stay bit-identical. Opt in to the real versions, built within a `System`'s hardware limits
+(default: 40 mT/m, 170 T/m/s, 10 µs gradient / 1 µs RF / 0.1 µs ADC rasters, 100 µs RF dead
+time, 30 µs ringdown; gradients in Hz/m):
+
+```python
+from blochparty.builders import se_2d, tse_2d, bssfp_2d, epi_2d, cartesian_recon
+
+seq = bp.gre_2d(64, spoiling="rf", ramps=True, slice_thickness=5e-3)  # or spoiling="gradient"
+seq = tse_2d(64, etl=8, refocus_flip_deg=[150, 120, 120, ...], ordering="centric")
+seq = bssfp_2d(64, flip_deg=50.0)          # alpha/2 prep, 180 deg phase cycling, TE = TR/2
+seq = epi_2d(64)                           # single shot, blips on the readout ramps
+image = bp.rss(cartesian_recon(bp.simulate(phantom, seq, coils).signal, seq))
+```
+
+- `spoiling="gradient"`: a spoiler lobe brings the net readout-axis moment per TR to
+  `spoiler_cycles` (default 4) cycles across a voxel, phase encodes are rewound; `"rf"` adds
+  quadratic RF spoiling (117°, receiver phase follows). Spoiling acts on intra-voxel dephasing,
+  so it needs several isochromats per voxel: with one spin at each voxel centre the spoiler
+  is a whole number of turns and RF spoiling only modulates the signal line by line (ghosts).
+- `slice_thickness`: windowed-sinc pulse (`time_bw_product`, `apodization`, default 2 ms) with
+  slice-select gradient, `slice_offset` via a frequency offset, rephasing lobe including the
+  ramps. `ramps=True`: trapezoids (minimum time, as pypulseq designs them).
+- `se_2d`, `bssfp_2d` (and GRE) set `meta["kspace_shape"]`, so `bp.reconstruct` works. `tse_2d`
+  (line ordering) and `epi_2d` (alternating readouts) set `meta["matrix"]` and
+  `meta["kspace_index"]` instead; `cartesian_kspace` / `cartesian_recon` work for all of them.
+- Building blocks for your own sequences (`blochparty.sequence`): `trapezoid(...)` (by area,
+  flat area or amplitude; any axis or direction), `gradient_waveform(samples, raster)`,
+  `block_pulse`, `sinc_pulse`, `ADC`, and `SequenceBuilder.block(*gradients, rf=..., adc=...)`,
+  which plays them together like a Pulseq block. Ramps are cut on the gradient raster and each
+  segment carries its exact average gradient, so k-space is exact at every ADC sample. Limits
+  are checked (per axis) and violations raise.
+
 ## Pulseq
 
 `read_pulseq` turns a `.seq` file (or a `pypulseq.Sequence`) into a `Sequence` (needs the
@@ -149,13 +184,13 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-14 
 
 | module | contents |
 |---|---|
-| `sequence.py` | `Sequence` (flat piecewise-constant segments) and `SequenceBuilder` |
+| `sequence.py` | `Sequence` (flat piecewise-constant segments), `SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
 | `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
-| `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
+| `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`) |
 | `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
