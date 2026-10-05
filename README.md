@@ -6,12 +6,13 @@ Every feature is checked against an independent reference (see [ROADMAP.md](ROAD
 
 ```bash
 uv sync
-uv run pytest                              # 52 verification tests, ~20 s
+uv run pytest                              # 97 verification tests, ~2 min
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
-uv run python examples/optimize_contrast.py  # gradient descent through the simulator
+uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--fused: C++ adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
 uv run python examples/gre3d_128.py        # full 3D 128^3 with the fused kernel, ~6 min
 uv run python benchmarks/bench.py --backend fused  # same, with the fused C++ kernel
+uv run python benchmarks/bench.py --grad --backend fused  # forward + backward
 ```
 
 ```python
@@ -52,6 +53,27 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 
   so for long sequences that floor, not the chunk, sets the minimum memory.
 - First-order gradients only (no double backward).
 
+## Fast gradients: the fused kernel
+
+`blochparty.fused.simulate_fused` takes the same arguments and returns the same result as
+`simulate`, ~10-15× faster on CPU, and is differentiable through a hand-written adjoint
+(reverse sweep in C++) instead of autograd:
+
+```python
+from blochparty.fused import simulate_fused
+
+kspace = simulate_fused(phantom, seq, coils).signal   # JIT-builds the extension on first use
+loss(kspace).backward()            # same gradients as with simulate (to ~1e-14 in float64)
+```
+
+- Gradients reach everything `simulate` differentiates (sequence, phantom, coils, `m_init`).
+- The forward stores every spin's magnetization each `checkpoint_every` segments (default
+  ≈ √segments); the backward replays one such interval at a time. Memory is those
+  checkpoints, N × 3 × segments / `checkpoint_every` values, with no autograd graph.
+  The backward pass costs ~4 forward passes (64³ GRE, 8 coils: 46 s for forward +
+  backward on 4 CPU cores, 1.2 GB peak, where autograd through `simulate` would need ~300 GB).
+- CPU, float32 / float64, first-order only; needs a C++ compiler and `ninja`.
+
 ## Layout
 
 | module | contents |
@@ -59,7 +81,7 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 
 | `sequence.py` | `Sequence` (flat piecewise-constant segments) and `SequenceBuilder` |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
-| `fused/` | forward-only C++ kernel, same results ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
+| `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins |
 | `coils.py` | receive sensitivities, thermal noise |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
