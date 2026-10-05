@@ -120,11 +120,35 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 
 ## Phase 3 – Pulseq in/out and cross-simulator validation
 
-- [ ] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
+- [x] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
+      (`read_pulseq`): blocks split at every event, exact segment-average gradients, shaped
+      RF, trapezoids / arbitrary / extended gradients, frequency / phase / ppm offsets
 - [ ] Write `Sequence` → `.seq`, so optimized sequences can run on real scanners
-- [ ] Phantom export for KomaMRI (`.phantom` / HDF5) and MRzero
-- [ ] `validation/` harness: run the same `.seq` + phantom through blochparty, MRzero
-      (`pip install MRzeroCore`) and KomaMRI (Julia), store reference outputs, diff in CI
+- [ ] Phantom export for KomaMRI (`.phantom` / HDF5) and MRzero (the harness builds
+      MRzero's `SimData` in memory from blochparty's maps)
+- [x] `validation/` harness, MRzero part: the same `.seq` + phantom through blochparty and
+      MRzero (`validation/compare_mrzero.py` → `validation/RESULTS.md`, opt-in
+      `pytest -m crosscheck`)
+- [ ] The same against KomaMRI (Julia); store reference outputs and diff them in CI
+
+**Verified** (`tests/test_pulseq.py`, 13 tests, ~5 s; `pytest -m crosscheck`, 4 tests):
+- Pulseq timing and units vs closed forms: FID samples at (i + ½)·dwell after the ADC start
+  (half a dwell off would fail by 300×), flip, RF/ADC phase, T2 decay, off-resonance;
+  ADC frequency offset tracks off-resonant spins; ppm offsets; ADC phase modulation
+- Phase convention pinned by Pulseq's own definition: a sinc pulse with freq_offset = G·z0
+  excites the slice at +z0, identical to the centred slice (to 1e-5) with the usual
+  zero-phase-at-centre offset; the "mrzero" reading is the exact mirror image (1e-12)
+- Gradient moment at every ADC sample vs pypulseq's `calculate_kspace`: GRE with slice
+  select 9e-11 /m, EPI with and without ramp sampling 6e-13 /m, arbitrary + extended
+  gradients ≤ 1e-9 /m (|k| up to 36 /m)
+- A pypulseq GRE equals the same GRE built with `SequenceBuilder` to 1e-10
+- pypulseq 2D GRE of Shepp-Logan, imported and reconstructed, equals the tissue-model image
+  to 1.1e-4 (T2 decay during the readout)
+- MRzero, 32×32, point isochromats, RF-spoiled GRE / spin echo / bSSFP / EPI: k-space
+  agreement 2e-6–4e-5, image NRMSE 2e-6–7e-5, after the convention factor −i (fitted to
+  1e-5). An exact matrix-exponential Bloch solution on sampled voxels puts the residual on
+  MRzero (float32, PDG state merging): blochparty is within 4e-9–6e-7 of it. MRzero's box
+  voxels vs. K×K jittered isochromats: 5e-4 k-space at 16×16 on EPI (falls as K⁻²)
 
 **Verify:** k-space agreement with MRzero/KomaMRI on GRE, SE, TSE, bSSFP, EPI examples
 from the PyPulseq repo; round-trip read→write→read is lossless.

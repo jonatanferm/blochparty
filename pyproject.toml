@@ -6,8 +6,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["torch>=2.4", "numpy"]
 
+[project.optional-dependencies]
+pulseq = ["pypulseq>=1.5"]  # read_pulseq
+mrzero = ["MRzeroCore>=1.1"]  # validation/compare_mrzero.py and the crosscheck tests
+
 [dependency-groups]
-dev = ["pytest", "scipy", "matplotlib"]
+dev = ["pytest", "scipy", "matplotlib", "pypulseq>=1.5"]
 
 [build-system]
 requires = ["hatchling"]
@@ -15,3 +19,5 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m crosscheck)"]
+addopts = "-m 'not crosscheck'"
