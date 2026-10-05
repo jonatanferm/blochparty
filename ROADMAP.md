@@ -42,7 +42,43 @@ instantaneous gradients, analytic (non-EM) coil maps.
 
 ---
 
-## Phase 1 – Physical realism
+## Phase 1 – Performance and 3D
+
+Comes first: 3D imaging and most of the realism work (sub-voxel spins multiply the spin
+count) are impractical at current speed. 3D is the target workload for this phase.
+
+- [ ] 3D: volumetric phantom (3D Shepp-Logan to start), `gre_3d` builder (second
+      phase-encode loop on Gz), `ifftnc` reconstruction
+
+- [ ] Closed-form ADC runs: for constant gradients, compute all samples of a readout in
+      one vectorized step instead of one segment per sample (expected large speed-up)
+- [ ] Merge consecutive free-precession segments; skip spins outside excited slab
+- [ ] `torch.compile` of the step kernel; float32 by default with float64 test mode
+- [ ] Apple MPS / CUDA devices (complex-free core already); spin chunking
+- [ ] Two-pass, chunked-over-spins backward (forward → dL/ds → per-chunk VJP) so
+      memory scales with chunk size, not spin count
+- [ ] Benchmarks tracked over time (spins × segments / s, memory)
+- [ ] If pure PyTorch isn't fast enough: a fused compiled kernel (C++ extension; later
+      Metal / CUDA) behind the same `simulate()` API — one thread per spin block stepping
+      through all segments with magnetization in registers, plus a hand-written adjoint
+      backward with checkpointing. The pure-PyTorch simulator stays as its reference
+      (forward to ~1e-12 in float64, gradients vs. autograd and finite differences).
+      Written against raw arrays so a standalone CLI (no Python) can wrap it later.
+
+**Verify:** every optimization must reproduce the existing test outputs bit-for-bit
+(float64) or within float32 tolerance; benchmark table in this file. 3D: Bloch vs.
+signal-equation k-space and recon vs. tissue model, as for 2D; small 3D cases also against
+the unoptimized simulator.
+
+Targets (to be revisited once measured): 64³ 3D GRE in < 1 min on CPU; 128³ in
+< 30 min on CPU and a few minutes on GPU. The work is fundamentally spins × ADC samples
+(~4e12 for 128³), so the final factor comes from the fused kernel / GPU.
+
+Baseline (end of Phase 0, Apple M4 CPU, float32, 96×96 GRE = 10 000 segments, 92 % ADC samples):
+~20 µs fixed Python overhead per segment (0.2 s total); 1.0e8 spin-segments/s at 50k
+spins, 1.5e8 at 200k — i.e. memory-bandwidth bound at realistic sizes.
+
+## Phase 2 – Physical realism
 
 - [ ] Sub-voxel isochromats (jittered), with guidance on spins-per-voxel vs. gradient moment
 - [ ] T2′ via Lorentzian (Cauchy-quantile) intra-voxel frequency distribution
@@ -58,7 +94,7 @@ with T2*, spin echo with T2; bSSFP off-resonance banding profile vs. closed form
 fat–water shift in pixels vs. bandwidth; EPI distortion vs. B0 map / echo spacing.
 Add an independent EPG implementation as a reference model.
 
-## Phase 2 – Pulseq in/out and cross-simulator validation
+## Phase 3 – Pulseq in/out and cross-simulator validation
 
 - [ ] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
 - [ ] Write `Sequence` → `.seq`, so optimized sequences can run on real scanners
@@ -68,20 +104,6 @@ Add an independent EPG implementation as a reference model.
 
 **Verify:** k-space agreement with MRzero/KomaMRI on GRE, SE, TSE, bSSFP, EPI examples
 from the PyPulseq repo; round-trip read→write→read is lossless.
-
-## Phase 3 – Performance
-
-- [ ] Closed-form ADC runs: for constant gradients, compute all samples of a readout in
-      one vectorized step instead of one segment per sample (expected large speed-up)
-- [ ] Merge consecutive free-precession segments; skip spins outside excited slab
-- [ ] `torch.compile` of the step kernel; float32 by default with float64 test mode
-- [ ] Apple MPS / CUDA devices (complex-free core already); spin chunking
-- [ ] Two-pass, chunked-over-spins backward (forward → dL/ds → per-chunk VJP) so
-      memory scales with chunk size, not spin count
-- [ ] Benchmarks tracked over time (spins × segments / s, memory)
-
-**Verify:** every optimization must reproduce the Phase 0–2 test outputs bit-for-bit
-(float64) or within float32 tolerance; benchmark table in this file.
 
 ## Phase 4 – Differentiable sequence design
 
