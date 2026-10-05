@@ -28,6 +28,8 @@ import design_tse_flips as tse  # noqa: E402
 
 G = d.GAMMA_BAR
 f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
+# gre_cartesian checks float(TR) on a TR that requires grad; harmless
+tr_with_grad = pytest.mark.filterwarnings("ignore:Converting a tensor with requires_grad=True to a scalar")
 
 
 @pytest.fixture(scope="module")
@@ -242,6 +244,7 @@ def test_despot1_optimum_gives_71_percent_of_ernst(fused):
         assert abs(despot1.ernst_fraction(a) - 0.71) < 0.005  # Deoni 2003
 
 
+@tr_with_grad
 def test_contrast_with_free_tr_under_scan_time_budget(fused):
     budget = (contrast_tr.N_DUMMY + contrast_tr.N) * 10e-3
     res = contrast_tr.optimize(budget, simulate=fused)
@@ -251,6 +254,7 @@ def test_contrast_with_free_tr_under_scan_time_budget(fused):
     assert res["duration"] <= budget * (1 + 1e-6)
 
 
+@tr_with_grad
 def test_contrast_gradient_fused_equals_simulate(fused):
     grads = []
     for sim in (fused, simulate):
