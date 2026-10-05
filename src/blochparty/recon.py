@@ -9,15 +9,28 @@ from .sequence import Sequence
 
 
 def kspace_grid(signal: Tensor, seq: Sequence) -> Tensor:
-    """(C, n_adc) signal -> (C, ny, nx) k-space with k = 0 at index (ny/2, nx/2)."""
+    """(C, n_adc) signal -> (C, *kspace_shape) k-space with k = 0 at index n/2 on each axis."""
     return signal.reshape(signal.shape[0], *seq.meta["kspace_shape"])
 
 
+def ifftnc(k: Tensor, ndim: int) -> Tensor:
+    """Centred inverse DFT over the last ``ndim`` axes. With the default (backward)
+    normalisation, a spin of magnetization m at a voxel centre gives voxel value m."""
+    dims = tuple(range(-ndim, 0))
+    return torch.fft.fftshift(torch.fft.ifftn(torch.fft.ifftshift(k, dim=dims), dim=dims), dim=dims)
+
+
 def ifft2c(k: Tensor) -> Tensor:
-    """Centred inverse 2D DFT over the last two axes. With the default (backward)
-    normalisation, a spin of magnetization m at a voxel centre gives pixel value m."""
-    dims = (-2, -1)
-    return torch.fft.fftshift(torch.fft.ifft2(torch.fft.ifftshift(k, dim=dims)), dim=dims)
+    return ifftnc(k, 2)
+
+
+def ifft3c(k: Tensor) -> Tensor:
+    return ifftnc(k, 3)
+
+
+def reconstruct(signal: Tensor, seq: Sequence) -> Tensor:
+    """(C, n_adc) Cartesian signal -> (C, *kspace_shape) coil images."""
+    return ifftnc(kspace_grid(signal, seq), len(seq.meta["kspace_shape"]))
 
 
 def rss(images: Tensor, dim: int = 0) -> Tensor:

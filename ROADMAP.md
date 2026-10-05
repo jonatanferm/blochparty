@@ -25,7 +25,7 @@ EPG models → other simulators (MRzero, KomaMRI) on identical Pulseq files → 
 - [x] 2D Cartesian spoiled GRE builder; centred iFFT, RSS, sensitivity-weighted combine
 - [x] Gradient checkpointing (`checkpoint_every`) for memory-bounded backprop
 
-**Verified by** (21 tests, `uv run pytest`):
+**Verified by** (21 tests at the end of Phase 0, `uv run pytest`):
 - SciPy ODE on random RF/gradient/off-resonance sequences: 1e-9 without relaxation;
   measured 2nd-order convergence (≈4× per RF-step halving) with relaxation
 - Closed form: flip angle, RF phase / signal sign convention, FID, spin echo refocusing,
@@ -47,8 +47,8 @@ instantaneous gradients, analytic (non-EM) coil maps.
 Comes first: 3D imaging and most of the realism work (sub-voxel spins multiply the spin
 count) are impractical at current speed. 3D is the target workload for this phase.
 
-- [ ] 3D: volumetric phantom (3D Shepp-Logan to start), `gre_3d` builder (second
-      phase-encode loop on Gz), `ifftnc` reconstruction
+- [x] 3D: volumetric phantom (3D Shepp-Logan to start), `gre_3d` builder (second
+      phase-encode loop on Gz), `ifftnc` / `reconstruct` reconstruction
 
 - [ ] Closed-form ADC runs: for constant gradients, compute all samples of a readout in
       one vectorized step instead of one segment per sample (expected large speed-up)
@@ -57,7 +57,8 @@ count) are impractical at current speed. 3D is the target workload for this phas
 - [ ] Apple MPS / CUDA devices (complex-free core already); spin chunking
 - [ ] Two-pass, chunked-over-spins backward (forward → dL/ds → per-chunk VJP) so
       memory scales with chunk size, not spin count
-- [ ] Benchmarks tracked over time (spins × segments / s, memory)
+- [x] Benchmarks tracked over time (spins × segments / s, memory):
+      `benchmarks/bench.py [--record]` → `benchmarks/history.jsonl`
 - [ ] If pure PyTorch isn't fast enough: a fused compiled kernel (C++ extension; later
       Metal / CUDA) behind the same `simulate()` API — one thread per spin block stepping
       through all segments with magnetization in registers, plus a hand-written adjoint
@@ -74,9 +75,18 @@ Targets (to be revisited once measured): 64³ 3D GRE in < 1 min on CPU; 128³ in
 < 30 min on CPU and a few minutes on GPU. The work is fundamentally spins × ADC samples
 (~4e12 for 128³), so the final factor comes from the fused kernel / GPU.
 
-Baseline (end of Phase 0, Apple M4 CPU, float32, 96×96 GRE = 10 000 segments, 92 % ADC samples):
-~20 µs fixed Python overhead per segment (0.2 s total); 1.0e8 spin-segments/s at 50k
-spins, 1.5e8 at 200k — i.e. memory-bandwidth bound at realistic sizes.
+Baseline (end of Phase 0, Apple M4 CPU, float32, 8 coils, 200 dummy TRs; PyTorch picks
+4 threads on this 10-core chip):
+
+| case | spins | segments | time | spin-segments/s |
+|---|---|---|---|---|
+| 2D 96² | 4 603 | 10 000 | 1.6 s | 2.8e7 |
+| 3D 32³ | 8 803 | 37 264 | 7.8 s | 4.2e7 |
+| 3D 48³ | 29 831 | 120 208 | 44 s | 8.2e7 |
+| 3D 64³ | 70 505 | 278 928 | 233 s | 8.4e7 |
+
+Projected 3D 128³: ~4 h. ~20 µs fixed Python overhead per segment; memory-bandwidth
+bound at realistic sizes; ~92 % of segments are single ADC samples.
 
 ## Phase 2 – Physical realism
 

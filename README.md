@@ -6,9 +6,10 @@ Every feature is checked against an independent reference (see [ROADMAP.md](ROAD
 
 ```bash
 uv sync
-uv run pytest                              # 21 verification tests, ~15 s
+uv run pytest                              # 26 verification tests, ~15 s
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator
+uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
 ```
 
 ```python
@@ -22,6 +23,8 @@ kspace = bp.simulate(phantom, seq, coils).signal          # (coils, n_adc) compl
 image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 ```
 
+3D works the same way: `bp.shepp_logan(32, ndim=3)`, `bp.gre_3d(32)`, `bp.reconstruct(...)`.
+
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
 (flip angles, TR, gradient amplitudes, T1/T2/PD maps, coil maps).
 
@@ -33,8 +36,8 @@ Anything numeric in a sequence or phantom can be a tensor with `requires_grad=Tr
 | `bloch.py` | the simulator core: `simulate()` |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins |
 | `coils.py` | receive sensitivities, thermal noise |
-| `builders.py` | ready-made sequences (`gre_2d`) |
-| `recon.py` | k-space gridding, centred iFFT, RSS, coil combination |
+| `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`) |
+| `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |
 
 ## Conventions
@@ -45,5 +48,6 @@ Anything numeric in a sequence or phantom can be a tensor with `requires_grad=Tr
   puts the magnetization at Mxy = i·e^{iφ}·sin α.
 - **Signal:** Mxy = Mx + iMy evolves as e^{−i2πft} at offset f; s(k) = Σ ρ(r)·C(r)·e^{−i2πk·r};
   ADC phase ψ demodulates by e^{−iψ}.
-- **Grid:** index i ↔ position (i − n/2)·FOV/n and k = (i − n/2)/FOV; rows are y, columns x.
+- **Grid:** index i ↔ position (i − n/2)·FOV/n and k = (i − n/2)/FOV; arrays are ordered
+  (z, y, x), so the last axis is x. 3D GRE lines run with ky fastest, then kz.
 - **ADC timing:** sample i of a readout sits at (i + ½)·dwell after the ADC start (Pulseq).
