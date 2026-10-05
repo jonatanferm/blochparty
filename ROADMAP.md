@@ -72,8 +72,18 @@ count) are impractical at current speed. 3D is the target workload for this phas
       `std::thread` workers, per-segment factor caching, SIMD coil sums; JIT-built PyTorch
       extension. Matches `simulate` to ~2e-14 (float64); float32 error ~1e-6 vs float64
       (10× lower than the PyTorch float32 path, thanks to `expm1` relaxation)
-- [ ] Fused kernel, backward: hand-written adjoint with checkpointing, verified against
-      autograd and finite differences; then Metal / CUDA ports of the same kernel
+- [x] Fused kernel, backward (`simulate_fused` is now differentiable): hand-written adjoint
+      in `kernel.h` (reverse sweep λ ← Aᵀλ + ADC terms per segment, parameter gradients
+      from λ and the replayed m), checkpoints every ≈√S segments stored by the forward,
+      one interval replayed at a time; per-thread segment accumulators reduced in thread
+      order. Verified against autograd through `simulate` for every input (sequence dt /
+      RF / gradients / receiver phase, pos / PD / T1 / T2 / dB0, complex coils, `m_init`)
+      to ≤ 1e-10 (measured ~1e-14) on random RF / gradient / off-resonance sequences, 8-coil
+      2D GRE, 3D GRE with dB0, spoils and ADC right after RF, losses on signal and/or m;
+      gradcheck (finite differences) incl. complex coils; standalone C++17 build vs
+      finite differences; identical gradients for any checkpoint interval; gradient
+      descent through it recovers the WM/GM optimum (16.109°) to 0.002°.
+- [ ] Metal / CUDA ports of the fused kernel (forward and adjoint)
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit
 (float64) or within float32 tolerance; benchmark table in this file. 3D: Bloch vs.
@@ -109,6 +119,17 @@ Fused kernel (same machine, float32, 10 threads, idle; vs. the closed-form PyTor
 | 3D 32³ | 1.14 s | 0.07 s | 16× |
 | 3D 48³ | 9.3 s | 0.80 s | 12× |
 | 3D 64³ | 60 s | 5.4 s (float64: 12.6 s) | 11× |
+
+Gradients (forward + backward of Σ|signal|² w.r.t. flip angle, T1 map and coil maps; float32,
+8 coils, 200 dummy TRs; Intel Xeon Cascade Lake, 4 vCPUs, Linux, GCC 13; peak RSS of the
+whole process, ~0.5 GB of which is Python + PyTorch; `benchmarks/bench.py --grad`):
+
+| case | PyTorch core (autograd) | `simulate_chunked` | fused adjoint | fused forward only |
+|---|---|---|---|---|
+| 2D 96² | 1.65 s, 1.1 GB | 4.2 s, 1.2 GB | 0.15 s, 0.53 GB | 0.03 s |
+| 3D 32³ | 19.5 s, 5.1 GB | 41 s, 2.8 GB | 1.0 s, 0.57 GB | 0.27 s |
+| 3D 48³ | not run (~50 GB extrapolated) | 258 s, 7.9 GB | 9.1 s, 0.74 GB | 1.8 s |
+| 3D 64³ | not run (~300 GB extrapolated) | not run (~17 GB extrapolated) | 46 s, 1.2 GB | 9.4 s |
 
 Targets: 64³ < 1 min ✅ (5.4 s); 128³ < 30 min on CPU ✅ — full run (565k spins × 2.16M
 segments, 8 coils, float32) in 6.3 min at 3.3e9 spin-segments/s (`examples/gre3d_128.py`).

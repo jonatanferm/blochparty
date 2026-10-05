@@ -125,7 +125,10 @@ def test_empty_sequence_and_no_grad():
     out = fused.simulate_fused(phantom, empty)
     assert out.signal.shape == (1, 0)
     assert torch.equal(out.m, torch.stack([torch.zeros_like(phantom.pd)] * 2 + [phantom.pd], dim=-1))
-    # forward only: inputs that require grad are accepted, the result is detached
+    # differentiable (tests/test_fused_grad.py), except under no_grad
     flip = torch.tensor(15.0, dtype=torch.float64, requires_grad=True)
     out = fused.simulate_fused(phantom, bp.gre_2d(4, flip_deg=flip))
+    assert out.signal.requires_grad and out.m.requires_grad
+    with torch.no_grad():
+        out = fused.simulate_fused(phantom, bp.gre_2d(4, flip_deg=flip))
     assert not out.signal.requires_grad and not out.m.requires_grad

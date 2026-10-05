@@ -4,9 +4,11 @@ descent *through the full Bloch simulation and reconstruction*, then compare
 with a brute-force search over the closed-form steady-state signal.
 
     uv run python examples/optimize_contrast.py
+    uv run python examples/optimize_contrast.py --fused   # through the fused C++ kernel's adjoint
 """
 
 import math
+import sys
 import time
 
 import torch
@@ -21,11 +23,15 @@ maps = bp.shepp_logan_maps(N)
 phantom = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV)
 wm, gm = maps["label"] == LABELS.index("wm"), maps["label"] == LABELS.index("gm")
 flip = torch.tensor(40.0, dtype=torch.float64, requires_grad=True)
+if "--fused" in sys.argv[1:]:
+    from blochparty.fused import simulate_fused as simulate
+else:
+    simulate = bp.simulate
 
 
 def contrast():
     seq = bp.gre_2d(N, FOV, flip_deg=flip, tr=TR, te=TE, dwell=2e-6, n_dummy=400)
-    img = bp.ifft2c(bp.kspace_grid(bp.simulate(phantom, seq).signal, seq))[0].abs()
+    img = bp.ifft2c(bp.kspace_grid(simulate(phantom, seq).signal, seq))[0].abs()
     return img[wm].mean() - img[gm].mean()
 
 
