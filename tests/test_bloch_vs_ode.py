@@ -12,7 +12,7 @@ import pytest
 import torch
 from scipy.integrate import solve_ivp
 
-from mrsim import Phantom, SequenceBuilder, simulate
+from blochparty import Phantom, SequenceBuilder, simulate
 
 
 def bloch_ode(phantom: Phantom, seq) -> np.ndarray:

@@ -1,4 +1,4 @@
-# mrsim roadmap
+# Bloch Party roadmap
 
 Goals, in order of how much they shape design decisions:
 
@@ -63,7 +63,7 @@ Add an independent EPG implementation as a reference model.
 - [ ] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
 - [ ] Write `Sequence` → `.seq`, so optimized sequences can run on real scanners
 - [ ] Phantom export for KomaMRI (`.phantom` / HDF5) and MRzero
-- [ ] `validation/` harness: run the same `.seq` + phantom through mrsim, MRzero
+- [ ] `validation/` harness: run the same `.seq` + phantom through blochparty, MRzero
       (`pip install MRzeroCore`) and KomaMRI (Julia), store reference outputs, diff in CI
 
 **Verify:** k-space agreement with MRzero/KomaMRI on GRE, SE, TSE, bSSFP, EPI examples

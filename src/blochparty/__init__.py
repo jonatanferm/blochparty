@@ -1,4 +1,4 @@
-"""mrsim: a differentiable MRI simulator in PyTorch."""
+"""Bloch Party: a differentiable MRI simulator in PyTorch."""
 
 from .bloch import SimResult, simulate
 from .builders import gre_2d, readout_bandwidth_per_pixel

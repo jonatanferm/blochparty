@@ -4,9 +4,9 @@ import math
 
 import torch
 
-import mrsim
-from mrsim import Phantom, SequenceBuilder, simulate
-from mrsim.reference import ernst_angle
+import blochparty as bp
+from blochparty import Phantom, SequenceBuilder, simulate
+from blochparty.reference import ernst_angle
 
 
 def few_spins(t1, t2, n=3):
@@ -48,9 +48,9 @@ def test_gradient_wrt_coil_sensitivities():
 
 
 def test_checkpointing_gives_identical_gradients():
-    phantom = mrsim.shepp_logan(16)
+    phantom = bp.shepp_logan(16)
     flip = torch.tensor(20.0, dtype=torch.float64, requires_grad=True)
-    seq = mrsim.gre_2d(16, flip_deg=flip, n_dummy=5)
+    seq = bp.gre_2d(16, flip_deg=flip, n_dummy=5)
     grads = []
     for every in (None, 7):
         loss = simulate(phantom, seq, checkpoint_every=every).signal.abs().sum()

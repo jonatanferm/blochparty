@@ -11,21 +11,21 @@ import time
 
 import torch
 
-import mrsim
-from mrsim.phantom import LABELS
-from mrsim.reference import spoiled_gre_signal
+import blochparty as bp
+from blochparty.phantom import LABELS
+from blochparty.reference import spoiled_gre_signal
 
 N, FOV, TR, TE = 32, 0.22, 10e-3, 3e-3
 
-maps = mrsim.shepp_logan_maps(N)
-phantom = mrsim.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV)
+maps = bp.shepp_logan_maps(N)
+phantom = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV)
 wm, gm = maps["label"] == LABELS.index("wm"), maps["label"] == LABELS.index("gm")
 flip = torch.tensor(40.0, dtype=torch.float64, requires_grad=True)
 
 
 def contrast():
-    seq = mrsim.gre_2d(N, FOV, flip_deg=flip, tr=TR, te=TE, dwell=2e-6, n_dummy=400)
-    img = mrsim.ifft2c(mrsim.kspace_grid(mrsim.simulate(phantom, seq).signal, seq))[0].abs()
+    seq = bp.gre_2d(N, FOV, flip_deg=flip, tr=TR, te=TE, dwell=2e-6, n_dummy=400)
+    img = bp.ifft2c(bp.kspace_grid(bp.simulate(phantom, seq).signal, seq))[0].abs()
     return img[wm].mean() - img[gm].mean()
 
 

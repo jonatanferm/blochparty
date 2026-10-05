@@ -1,5 +1,5 @@
 [project]
-name = "mrsim"
+name = "blochparty"
 version = "0.1.0"
 description = "Differentiable MRI simulator in PyTorch"
 readme = "README.md"

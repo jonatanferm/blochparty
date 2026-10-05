@@ -4,8 +4,8 @@ import math
 
 import torch
 
-from mrsim import Phantom, SequenceBuilder, simulate
-from mrsim.reference import inversion_recovery_mz, spoiled_gre_signal
+from blochparty import Phantom, SequenceBuilder, simulate
+from blochparty.reference import inversion_recovery_mz, spoiled_gre_signal
 
 
 def spins(n=1, t1=1.0, t2=0.1, db0=0.0, pd=1.0):

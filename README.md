@@ -1,6 +1,7 @@
-# mrsim
+# Bloch Party 🎉
 
 A small, differentiable MRI simulator in PyTorch: phantom + coils + sequence → raw k-space.
+Everyone's invited, as long as they precess.
 Every feature is checked against an independent reference (see [ROADMAP.md](ROADMAP.md)).
 
 ```bash
@@ -11,14 +12,14 @@ uv run python examples/optimize_contrast.py  # gradient descent through the simu
 ```
 
 ```python
-import mrsim
+import blochparty as bp
 
-phantom = mrsim.shepp_logan(64)
-coils = mrsim.birdcage_sensitivities(phantom.pos, n_coils=8)
-seq = mrsim.gre_2d(64, flip_deg=15.0, tr=10e-3, n_dummy=200)
+phantom = bp.shepp_logan(64)
+coils = bp.birdcage_sensitivities(phantom.pos, n_coils=8)
+seq = bp.gre_2d(64, flip_deg=15.0, tr=10e-3, n_dummy=200)
 
-kspace = mrsim.simulate(phantom, seq, coils).signal          # (coils, n_adc) complex
-image = mrsim.rss(mrsim.ifft2c(mrsim.kspace_grid(kspace, seq)))
+kspace = bp.simulate(phantom, seq, coils).signal          # (coils, n_adc) complex
+image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 ```
 
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
