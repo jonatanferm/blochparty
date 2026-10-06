@@ -21,6 +21,7 @@ spheres and scored on the odd ones (a first digital-twin step).
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -33,7 +34,11 @@ from scipy import ndimage
 import blochparty as bp
 from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
-from nist import N, T2_MNCL2, coarsen_rf, phantom, recon, roi_means, shape_error, slice_positions, sphere_radius, t1_of_mncl2
+from nist import (N, PIXEL, T2_MNCL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, phantom, recon, roi_means,
+                  shape_error, slice_positions, sphere_radius, t1_of_mncl2)
+
+if os.environ.get("BLOCHPARTY_BACKEND") == "metal":  # Apple GPU, forward only: same physics, float32
+    from blochparty.metal import simulate_metal as simulate_fused  # noqa: F811
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "TSE_T2_mapping"
 SEQ = DATA / "acq" / "tse_multiecho_NIST_t2_sag.seq"
@@ -119,10 +124,16 @@ def mono_exponential() -> np.ndarray:
     return np.exp(-TE[:, None] / (np.asarray(T2_REF)[None] * 1e-3))
 
 
-def simulate(ph: bp.Phantom, seq: bp.Sequence, rois, b1: float | None = None) -> np.ndarray:
-    if b1 is not None:
-        ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=torch.full((len(ph),), b1, dtype=ph.pd.dtype))
-    return roi_means(sim_images(simulate_fused(ph, seq).signal), rois)
+def simulate(phantoms, seq: bp.Sequence, rois, b1: float | None = None) -> np.ndarray:
+    """ROI-mean echo curves of one phantom or the sum of several (spheres + water fill: spins are
+    independent, so their complex signals add before reconstruction)."""
+    phantoms = phantoms if isinstance(phantoms, (list, tuple)) else [phantoms]
+    total = 0
+    for ph in phantoms:
+        if b1 is not None:
+            ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=torch.full((len(ph),), b1, dtype=ph.pd.dtype))
+        total = total + simulate_fused(ph, seq).signal
+    return roi_means(sim_images(total), rois)
 
 
 def plot_curves(real, rows, path):
@@ -155,6 +166,9 @@ def main(argv=None):
     p.add_argument("--rf-merge", type=int, default=4, help="merge this many 1 us RF samples (1: exact)")
     p.add_argument("--warmup", type=int, default=8, help="TRs simulated before the 128 imaging TRs")
     p.add_argument("--b1-grid", type=float, nargs="*", default=[], help="global B1+ scales to fit over")
+    p.add_argument("--fill-margin", type=float, default=5, help="water simulated within this many pixels of a sphere wall (0: none)")
+    p.add_argument("--wall", type=float, default=1.0, help="sphere wall thickness [mm]")
+    p.add_argument("--water", type=float, nargs=2, default=[WATER_T1 * 1e3, WATER_T2 * 1e3], help="water T1 T2 [ms]")
     args = p.parse_args(argv)
 
     real_img = real_images()
@@ -165,19 +179,26 @@ def main(argv=None):
     n_tr = N + 1 + args.warmup  # 128 lines + this pass's dummy + warm-up TRs of the first pass
     seq = coarsen_rf(last_trs(read_pulseq(SEQ), n_tr).to(dtype=torch.float32), args.rf_merge)
     ph, _ = phantom(rois, radii, T1_REF, T2_REF, x0, n_slice=args.n_slice, sub=args.sub, sub_read=args.sub_read)
-    print(f"slice x0 = {x0 * 1e3:.2f} mm, radii {np.round(np.array(radii) * 1e3, 1)} mm, {len(ph)} spins, "
-          f"{len(seq)} segments ({n_tr} TRs)", flush=True)
+    phantoms = [ph]
+    if args.fill_margin > 0:
+        mask = fill_mask(real_img, rois, radii[0] + args.wall * 1e-3)
+        phantoms.append(fill_phantom(rois, mask, radii[0], args.wall * 1e-3, x0, margin=args.fill_margin * PIXEL,
+                                     t1_ms=args.water[0], t2_ms=args.water[1], n_slice=args.n_slice, sub=args.sub,
+                                     sub_read=args.sub_read))
+    print(f"slice x0 = {x0 * 1e3:.2f} mm, sphere radius {radii[0] * 1e3:.2f} mm, wall {args.wall} mm, "
+          f"{' + '.join(str(len(q)) for q in phantoms)} spins, {len(seq)} segments ({n_tr} TRs)", flush=True)
 
     rows = [("mono-exponential, reference T2", shape_error(mono_exponential(), real), mono_exponential())]
     t0 = time.perf_counter()
-    sim = simulate(ph, seq, rois)
+    sim = simulate(phantoms, seq, rois)
     print(f"simulated in {time.perf_counter() - t0:.0f} s", flush=True)
-    rows.append(("Bloch on the scanner's .seq, nominal B1+", shape_error(sim, real), sim))
+    label = f" + water fill ({args.fill_margin:g} px)" if args.fill_margin > 0 else ""
+    rows.append((f"Bloch on the scanner's .seq{label}, nominal B1+", shape_error(sim, real), sim))
     if args.b1_grid:
         even, odd = [1, 3, 5, 7, 9], [0, 2, 4, 6, 8]  # spheres 2,4,..,10 fit / 1,3,..,9 scored
         fits = []
         for b in args.b1_grid:
-            s = simulate(ph, seq, rois, b1=b)
+            s = simulate(phantoms, seq, rois, b1=b)
             fits.append((shape_error(s, real)[even].mean(), b, s))
             print(f"  B1 {b:.3f}: fit-sphere error {100 * fits[-1][0]:.2f} %", flush=True)
         _, b, s = min(fits, key=lambda f: f[0])

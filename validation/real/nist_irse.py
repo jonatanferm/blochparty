@@ -26,6 +26,7 @@ inversion times by gradient descent through the simulator and evaluated on the o
 from __future__ import annotations
 
 import argparse
+import os
 import time
 from pathlib import Path
 
@@ -37,7 +38,11 @@ from scipy import ndimage
 import blochparty as bp
 from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
-from nist import N, T1_NICL2, coarsen_rf, phantom, recon, roi_means, shape_error, slice_position, sphere_radius, t2_of_nicl2
+from nist import (N, PIXEL, T1_NICL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, phantom, recon, roi_means,
+                  shape_error, slice_position, sphere_radius, t2_of_nicl2)
+
+if os.environ.get("BLOCHPARTY_BACKEND") == "metal":  # Apple GPU, forward only: same physics, float32
+    from blochparty.metal import simulate_metal as simulate_fused  # noqa: F811
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "IRSE_T1_mapping"
 TI = [50, 75, 100, 125, 150, 250, 1000, 1500, 2000, 3000]  # [ms]
@@ -72,10 +77,18 @@ def analytic(t1_ms, t2_ms) -> np.ndarray:
     return np.abs(1 - 2 * np.exp(-ti / t1) + np.exp(-TR / t1)) * np.exp(-TE / (np.asarray(t2_ms)[None] * 1e-3))
 
 
-def simulate_all(ph: bp.Phantom, seqs, b1=None) -> list[torch.Tensor]:
-    if b1 is not None:
-        ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=b1)
-    return [simulate_fused(ph, s).signal for s in seqs]
+def simulate_all(phantoms, seqs, b1=None) -> list[torch.Tensor]:
+    """Signals for every sequence of one phantom or the sum of several (spheres + water fill)."""
+    phantoms = phantoms if isinstance(phantoms, (list, tuple)) else [phantoms]
+    out = []
+    for s in seqs:
+        total = 0
+        for ph in phantoms:
+            if b1 is not None:
+                ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=b1 if b1.numel() == len(ph) else b1[:1].expand(len(ph)))
+            total = total + simulate_fused(ph, s).signal
+        out.append(total)
+    return out
 
 
 def torch_roi_means(signals, rois) -> torch.Tensor:
@@ -139,6 +152,9 @@ def main(argv=None):
     p.add_argument("--rf-merge", type=int, default=4, help="merge this many 1 us RF samples (1: exact)")
     p.add_argument("--fit-b1", action="store_true", help="also fit a global B1+ scale on 5 TIs (slow)")
     p.add_argument("--t2", type=float, nargs=14, help="override the spheres' T2 [ms]")
+    p.add_argument("--fill-margin", type=float, default=0, help="water simulated within this many pixels of a sphere wall (0: none)")
+    p.add_argument("--wall", type=float, default=1.0, help="sphere wall thickness [mm]")
+    p.add_argument("--water", type=float, nargs=2, default=[WATER_T1 * 1e3, WATER_T2 * 1e3], help="water T1 T2 [ms]")
     args = p.parse_args(argv)
 
     real_img = real_images()
@@ -157,10 +173,17 @@ def main(argv=None):
         t2 = args.t2 or T2_REF[ver]
         rows.append((f"analytic IR formula, T1 {ver}", shape_error(analytic(t1, t2), real), analytic(t1, t2)))
         ph, _ = phantom(rois, radii, t1, t2, x0, n_slice=args.n_slice, sub=args.sub)
+        phs = [ph]
+        if args.fill_margin > 0:
+            mask = fill_mask(real_img, rois, max(radii) + args.wall * 1e-3)
+            phs.append(fill_phantom(rois, mask, radii, args.wall * 1e-3, x0, margin=args.fill_margin * PIXEL,
+                                    t1_ms=args.water[0], t2_ms=args.water[1], n_slice=args.n_slice, sub=args.sub))
         t0 = time.perf_counter()
-        sim = roi_means(np.stack([sim_images(s) for s in simulate_all(ph, seqs)]), rois)
-        print(f"{ver}: {len(ph)} spins, 10 sequences simulated in {time.perf_counter() - t0:.0f} s", flush=True)
-        rows.append((f"Bloch on the scanner's .seq, T1 {ver}", shape_error(sim, real), sim))
+        sim = roi_means(np.stack([sim_images(s) for s in simulate_all(phs, seqs)]), rois)
+        print(f"{ver}: {' + '.join(str(len(q)) for q in phs)} spins, 10 sequences simulated in "
+              f"{time.perf_counter() - t0:.0f} s", flush=True)
+        label = f" + water fill ({args.fill_margin:g} px)" if args.fill_margin > 0 else ""
+        rows.append((f"Bloch on the scanner's .seq{label}, T1 {ver}", shape_error(sim, real), sim))
         if args.fit_b1:
             b1 = fit_b1(ph, seqs, real, rois, train)
             sim_b = roi_means(np.stack([sim_images(s) for s in simulate_all(ph, seqs, b1=torch.full((len(ph),), b1))]),

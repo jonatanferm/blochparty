@@ -274,6 +274,7 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
 | `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
+| `metal/` | forward kernel on the Apple GPU (`simulate_metal`, float32, runtime-compiled Metal shader); 5.8× the CPU kernel on the real NIST TSE workload |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`) |

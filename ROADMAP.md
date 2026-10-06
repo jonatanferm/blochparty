@@ -96,7 +96,14 @@ count) are impractical at current speed. 3D is the target workload for this phas
       forward, 27.5 s total) vs ~3.8× on a Xeon; ADC λ-injection and coil-gradient loops
       run at about half the forward sampling speed; the RF-segment loop is not vectorized
       by Apple clang
-- [ ] Metal / CUDA ports of the fused kernel (forward and adjoint)
+- [x] Metal forward kernel (`blochparty.metal.simulate_metal`): Apple GPU via
+      `torch.mps.compile_shader`, same physics as the CPU paths (float32), block-buffered
+      ADC reductions. Agrees with the float64 core like the CPU kernel does in float32 (tests:
+      `tests/test_metal.py`). 5.8× the CPU fused kernel on the real NIST TSE (85 k spins, 4.1 M
+      segments, 1 coil: 40 s vs 232 s); slower than the CPU on 8-coil GRE benchmarks, where the
+      per-sample coil reduction dominates
+- [ ] Metal: many-coil ADC reduction via simdgroup matrix multiply; adjoint; scanner model
+- [ ] CUDA port
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit
 (float64) or within float32 tolerance; benchmark table in this file. 3D: Bloch vs.

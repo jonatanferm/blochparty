@@ -132,3 +132,27 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   ~0.7 px inside the spheres. Second suspect: T2 reference uncertainty (sphere 5's T2 is one the
   manual withholds; MnCl2 T2 is temperature-sensitive).
 - Next: model the fill fluid and sphere walls (both benchmarks).
+
+### Water fill, and Monte Carlo instead of a second engine
+- Modelled the fill (deionised water, T2 ≈ 2 s) and sphere walls from image geometry. First
+  result was *worse* (2.6 % → 5.8 %). The scanner's late-echo tails matched the simulation
+  *without* water, refuting the "water blurs into the ROIs" story for most spheres; ideal
+  end-of-TR spoiling changed nothing; the simulated water was heavily speckled even at echo 1:
+  Monte Carlo noise from too few spins per pixel, which a magnitude image turns into an upward
+  bias that is largest exactly at short-T2 spheres' late echoes.
+- Considered analytic voxel integration (state/PDG methods). The owner preferred not to: state
+  pruning error, within-voxel uniformity assumptions, a second engine. Decision: keep one exact
+  isochromat engine and improve the *sampling and estimation* instead — scrambled-Sobol spin
+  placement, importance sampling for the water, independent seeds averaged in the complex
+  domain (embarrassingly parallel), magnitude-bias correction from the seed spread, and
+  jackknife error bars. Brute-force speckle on a water patch: std/mean 0.38 (64 spins/pixel) →
+  0.27 (256) → 0.13 (1024). Validation of the MC estimator against that reference is running.
+
+### Apple GPU kernel (owner: "priority number 1")
+- CPU at 60–70 % and the M4's GPU idle for our work. Built `blochparty.metal` with
+  `torch.mps.compile_shader` (runtime Metal, no build system): one thread per spin, same physics
+  as the CPU kernels, float32. First version 2.5–3× *slower* than the CPU kernel; profiling showed
+  spin evolution was already ~4× faster and the per-ADC-sample reduction over spins dominated.
+  Block-buffered reductions doubled speed. On the real NIST TSE workload (1 coil, long RF trains,
+  23 echoes) it is **5.8× the CPU kernel (40 s vs 232 s)**; on 8-coil synthetic GRE still slower
+  — the next optimisation (simdgroup matrix multiply) is noted. 8 tests vs the float64 core.

@@ -5,6 +5,7 @@
     uv run python benchmarks/bench.py --record         # also append to history.jsonl
     uv run python benchmarks/bench.py --backend fused  # C++ kernel (blochparty.fused)
     uv run python benchmarks/bench.py --grad --backend fused  # forward + backward instead
+    uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal), forward only
 
 Throughput is reported as spin-segments/s (work the simulator does) and as
 spin-samples/s (the irreducible spins x ADC-samples cost of any Bloch simulator).
@@ -118,7 +119,7 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
-    p.add_argument("--backend", default="torch", choices=["torch", "fused", "chunked"])
+    p.add_argument("--backend", default="torch", choices=["torch", "fused", "chunked", "metal"])
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
     p.add_argument("--checkpoint-every", type=int, default=None, help="fused --grad: checkpoint interval")
     p.add_argument("--threads", type=int, default=None, help="fused: worker threads (default: all CPUs)")
@@ -138,6 +139,13 @@ def main(argv=None):
         backend = f"fused block {args.block or 'auto'}"
     elif args.backend == "chunked":
         simulate = bp.simulate_chunked
+    elif args.backend == "metal":
+        from blochparty import metal
+
+        if args.grad or args.dtype != "float32":
+            p.error("--backend metal is forward-only and float32")
+        metal._lib()  # compile the shader outside the timed region
+        simulate, threads, backend = metal.simulate_metal, "GPU", "metal (Apple GPU)"
     if args.grad:
         if args.record:
             p.error("--record tracks forward runs only")

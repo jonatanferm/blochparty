@@ -7,6 +7,13 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Speckle biases magnitude images upward, worst where the signal is small.** Spins are a
+  Monte Carlo sample of the continuum; the complex image's MC noise is ~zero-mean, but
+  E|s + n| ≈ |s| + σ²/2|s|. A water fill simulated at sphere-level density (64 spins/pixel)
+  made short-T2 spheres' late echoes 2–4× too high (benchmark 2: 2.6 % → 5.8 %); the scanner's
+  tails matched the simulation *without* water. Fixes: more spins, independent seeds with the
+  bias σ² removed (`nist.mc_magnitude`), lower-discrepancy placement (`nist.*_qmc`). Ideal
+  spoiling at TR end changed nothing (coherence across TRs was not the cause).
 - **Multi-echo shapes constrain |B1⁺ − 1|, not its sign.** Refocusing at 180°·(1 ± δ) gives
   nearly the same echo train, and the 90°'s scaling is absorbed by any per-sphere scale. On
   the real NIST TSE the shape error is *highest* at nominal B1⁺ (2.57 %) and falls both ways
@@ -131,6 +138,17 @@ says where it came from so it can be re-checked.
 - **GIRF/eddy-current models make every segment's gradient unique**, defeating the fused
   kernel's per-segment factor cache: ~6× slower forward on 3D 32³. (PR #6)
 
+- **Metal from Python works with no build step**: `torch.mps.compile_shader(src)` compiles MSL at
+  runtime and launches kernels on MPS tensors. Pass `threads=` and `group_size=` explicitly (the
+  default launch size is wrong for our layout); threadgroup memory is capped at 32 KB.
+- **On the GPU, ADC reductions dominate, not transcendentals**: pure spin evolution ran ~4× the
+  CPU kernel's rate (1.7e10 spin-segments/s), but summing every ADC sample over spins (simd_sum,
+  two barriers, atomics per sample) made it 3× slower than the CPU. Buffering a block of
+  samples in threadgroup memory halved it; a per-segment factor cache changed nothing. With one
+  coil (the real-data benchmarks) the GPU is 5.8× the CPU; with 8 coils still ~0.4–0.8×.
+- **float32 and large phases**: RF spoiling grows receiver phases to thousands of radians; wrap
+  them modulo 2π in float64 before casting to float32.
+
 ## Process and tooling
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:
@@ -149,5 +167,7 @@ says where it came from so it can be re-checked.
   and push, drafts included (it can take a few seconds).
 - **The Mac sleeps with the lid closed** (clamshell, especially on battery); long runs pause
   and `caffeinate -i` doesn't prevent it. Watch for wall time ≫ CPU time.
+- **`while pgrep -f "<text>"` can wait forever**: the waiting shell's own command line contains
+  `<text>`. Wait on a PID (`while kill -0 <pid>`) instead.
 - **`cmd | grep` buffers background output** until the command ends; use `python -u` without a
   filter, or filter afterwards.
