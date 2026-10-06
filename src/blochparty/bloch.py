@@ -32,6 +32,7 @@ import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
+from .exchange import BoundPool, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
 from .phantom import Phantom
 from .sequence import Sequence
@@ -50,18 +51,27 @@ class _Spins(NamedTuple):
     b1: Tensor | None  # (N,) transmit scale, or None for 1
     conc: Tensor | None = None  # concomitant-field coefficients (see fields.SpinFields)
     mode: int = 0  # 0 none, 1 leading order, 2 exact
+    bound: BoundPool | None = None  # magnetization transfer (``exchange.py``), expanded to (N,)
 
 
 @dataclass
 class SimResult:
     signal: Tensor  # (C, n_adc) complex, in ADC order
     m: Tensor  # (N, 3) magnetization after the last segment
+    m_bound: Tensor | None = None  # (N,) bound-pool Mz after the last segment (with ``Phantom.bound``)
 
 
 def _relax(mx, my, mz, dt, spins: _Spins):
     e2 = torch.exp(-dt * spins.r2)
     e1 = torch.exp(-dt * spins.r1)
     return mx * e2, my * e2, spins.pd + (mz - spins.pd) * e1
+
+
+def _relax_bound(mx, my, mz, mb, dt, spins: _Spins, w=None):
+    """Relaxation with longitudinal exchange to the bound pool (saturated at rate ``w``)."""
+    e2 = torch.exp(-dt * spins.r2)
+    mz, mb = z_exchange(mz, mb, dt, spins.pd, spins.r1, spins.bound, w)
+    return mx * e2, my * e2, mz, mb
 
 
 def _precess(mx, my, phi):
@@ -96,19 +106,25 @@ def _concomitant(lin, g, spins: _Spins):
     return exact_excess(lin, c[:, :3] @ g, c[:, 3:6] @ g, c[:, 6])
 
 
-def _rf_segment(mx, my, mz, dt, rf, g, off, spins: _Spins):
+def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None):
     bz = spins.pos @ g + spins.db0  # off-resonance in the rotating frame [Hz]
     if off is not None:
         bz = bz + off
     if spins.mode:
         bz = bz + _concomitant(bz, g, spins)
-    mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
+    if spins.bound is not None:  # bound pool saturated at the RF's offset from its resonance
+        sat = saturation_rate(spins.bound, rf, spins.b1, f_rf - bz - spins.bound.dw)
+        mx, my, mz, mb = _relax_bound(mx, my, mz, mb, 0.5 * dt, spins, sat)
+    else:
+        mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
     w = -TWO_PI * dt
     wx, wy = w * rf[0], w * rf[1]
     if spins.b1 is not None:  # B1+: every spin sees the RF field scaled by its b1
         wx, wy = wx * spins.b1, wy * spins.b1
     mx, my, mz = _rotate(mx, my, mz, wx, wy, w * bz)
-    return _relax(mx, my, mz, 0.5 * dt, spins)
+    if spins.bound is not None:
+        return _relax_bound(mx, my, mz, mb, 0.5 * dt, spins, sat)
+    return (*_relax(mx, my, mz, 0.5 * dt, spins), mb)
 
 
 def _sample(mx, my, psi, spins: _Spins):
@@ -138,7 +154,7 @@ def _extra_phase(dt, g, off, spins: _Spins):
     return out
 
 
-def _free_run(mx, my, mz, dt, g, off, psi, adc_idx, spins: _Spins):
+def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
     """A stretch of RF-free segments in closed form.
 
     With t and k the cumulative time and gradient moment from the run's start,
@@ -176,8 +192,11 @@ def _free_run(mx, my, mz, dt, g, off, psi, adc_idx, spins: _Spins):
     if extra is not None:
         cyc = cyc + extra[:, -1]
     mx, my = _precess(mx, my, -TWO_PI * cyc)
-    mx, my, mz = _relax(mx, my, mz, t[-1], spins)
-    return mx, my, mz, sig
+    if spins.bound is not None:
+        mx, my, mz, mb = _relax_bound(mx, my, mz, mb, t[-1], spins)
+    else:
+        mx, my, mz = _relax(mx, my, mz, t[-1], spins)
+    return mx, my, mz, mb, sig
 
 
 def _steps(seq: Sequence, merge: bool) -> list[tuple[int, int]]:
@@ -195,26 +214,27 @@ def _steps(seq: Sequence, merge: bool) -> list[tuple[int, int]]:
     return steps
 
 
-def _run(mx, my, mz, steps, seq: Sequence, spins: _Spins, use_off: bool):
+def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_rf):
     samples = []
     for a, b in steps:
         if seq.is_rf[a]:
             off = seq.b0_offset[a] if use_off else None
-            mx, my, mz = _rf_segment(mx, my, mz, seq.dt[a], seq.rf[a], seq.grad[a], off, spins)
+            mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, spins,
+                                         None if f_rf is None else f_rf[a])
             if seq.adc[a]:
                 samples.append(_sample(mx, my, seq.adc_phase[a], spins)[None])
         else:
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None
-            mx, my, mz, sig = _free_run(mx, my, mz, seq.dt[a:b], seq.grad[a:b], off, seq.adc_phase[a:b],
-                                        adc_idx, spins)
+            mx, my, mz, mb, sig = _free_run(mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off,
+                                            seq.adc_phase[a:b], adc_idx, spins)
             if sig is not None:
                 samples.append(sig)
         if seq.spoil[b - 1]:
             mx, my = torch.zeros_like(mx), torch.zeros_like(my)
     n_coils = spins.sens_re.shape[1]
     sig = torch.cat(samples) if samples else mx.new_zeros(0, 2, n_coils)
-    return mx, my, mz, sig
+    return mx, my, mz, mb, sig
 
 
 def simulate(
@@ -231,7 +251,8 @@ def simulate(
 
     coils: (N, C) complex receive sensitivities at the spin positions (default:
         one uniform coil).
-    m_init: (N, 3) starting magnetization (default: equilibrium, Mz = PD).
+    m_init: (N, 3) starting magnetization (default: equilibrium, Mz = PD); with a bound
+        pool (``Phantom.bound``) also (N, 4), the last column its Mz (default f PD).
     checkpoint_every: recompute the forward pass in chunks of about this many
         segments during backward instead of storing it, trading compute for memory.
     merge_free_runs: evaluate stretches of RF-free segments in closed form (fast).
@@ -247,16 +268,25 @@ def simulate(
     else:
         sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
     fields = spin_fields(scanner, phantom.pos)
+    bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode)
+                   fields.conc, fields.mode, bound)
+    f_rf = rf_frequency(seq) if bound is not None else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset
     use_off = off is not None and (off.requires_grad or bool(off.any()))
 
+    mb = None
     if m_init is None:
         mx, my, mz = torch.zeros_like(pd), torch.zeros_like(pd), pd
+    elif m_init.shape[-1] == 4:
+        mx, my, mz, mb = m_init.unbind(-1)
     else:
         mx, my, mz = m_init.unbind(-1)
+    if bound is not None and mb is None:
+        mb = bound.f * pd
+    elif bound is None and mb is not None:
+        raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
 
     # group steps into chunks of about checkpoint_every segments
     steps, chunks = _steps(seq, merge_free_runs), []
@@ -268,10 +298,10 @@ def simulate(
     sigs = [pd.new_zeros(0, 2, sens_re.shape[1])]
     for part in chunks:
         if use_ckpt:
-            mx, my, mz, sig = checkpoint(_run, mx, my, mz, part, seq, spins, use_off, use_reentrant=False)
+            mx, my, mz, mb, sig = checkpoint(_run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, use_reentrant=False)
         else:
-            mx, my, mz, sig = _run(mx, my, mz, part, seq, spins, use_off)
+            mx, my, mz, mb, sig = _run(mx, my, mz, mb, part, seq, spins, use_off, f_rf)
         sigs.append(sig)
     sig = torch.cat(sigs)  # (n_adc, 2, C)
     assert sig.shape[0] == seq.n_adc and n == mx.shape[0]
-    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1))
+    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1), mb)

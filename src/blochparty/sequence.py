@@ -45,6 +45,10 @@ class Sequence:
     # (S,) spatially uniform field [Hz] added to every spin's off-resonance (B0 eddy
     # currents, drift, ...); None means zeros
     b0_offset: Tensor | None = None
+    # (S,) RF carrier frequency [Hz] per segment (a pulse turning as exp(-i 2 pi f t) is
+    # resonant with spins at offset f), used for the bound-pool saturation (``exchange.py``);
+    # None: derived from the phase of consecutive RF segments (``exchange.rf_frequency``)
+    rf_freq: Tensor | None = None
 
     def __len__(self) -> int:
         return self.dt.shape[0]
@@ -60,6 +64,8 @@ class Sequence:
     def subdivide_rf(self, k: int) -> Sequence:
         """Split every RF segment into ``k`` equal parts. Relaxation during RF is
         handled by second-order splitting, so this shrinks that error by ~k**2."""
+        from .exchange import rf_frequency  # the carrier is fixed before the pieces lose the phase steps
+
         reps = torch.tensor([k if r else 1 for r in self.is_rf], device=self.dt.device)
         rep = lambda t: t.repeat_interleave(reps, dim=0)
 
@@ -76,6 +82,7 @@ class Sequence:
             grad=rep(self.grad),
             adc_phase=rep(self.adc_phase),
             b0_offset=None if self.b0_offset is None else rep(self.b0_offset),
+            rf_freq=rep(rf_frequency(self)),
             is_rf=[r for r in self.is_rf for _ in range(k if r else 1)],
             adc=tail(self.adc),
             spoil=tail(self.spoil),
@@ -90,6 +97,7 @@ class Sequence:
             grad=conv(self.grad),
             adc_phase=conv(self.adc_phase),
             b0_offset=None if self.b0_offset is None else conv(self.b0_offset),
+            rf_freq=None if self.rf_freq is None else conv(self.rf_freq),
         )
 
 

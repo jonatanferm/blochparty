@@ -136,6 +136,9 @@ def simulate_chunked(
         kspace = simulate_chunked(phantom, seq, spin_chunk=512).signal
         kspace.abs().sum().backward()  # fills flip.grad and t1.grad
     """
+    if phantom.bound is not None:
+        raise NotImplementedError("magnetization transfer (Phantom.bound) is not implemented here yet; use blochparty.simulate")
+
     if spin_chunk < 1:
         raise ValueError(f"spin_chunk must be positive, got {spin_chunk}")
     st = _Static(list(seq.is_rf), list(seq.adc), list(seq.spoil), seq.meta, spin_chunk, checkpoint_every)

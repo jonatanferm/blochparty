@@ -299,6 +299,9 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     matrices (default from ``MMA_MIN_COILS`` coils) or one simd_sum per coil and sample."""
     if scanner is not None:
         raise NotImplementedError("the scanner field model is not implemented on Metal; use simulate_fused")
+    if phantom.bound is not None:
+        raise NotImplementedError("magnetization transfer (Phantom.bound) is not implemented here yet; use blochparty.simulate")
+
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)

@@ -148,6 +148,8 @@ def simulate_fused(
         backward pass replays one such interval at a time (default:
         ``default_checkpoint_every``). Gradients do not depend on it.
     """
+    if phantom.bound is not None:
+        raise NotImplementedError("magnetization transfer (Phantom.bound) is not implemented here yet; use blochparty.simulate")
     pd = phantom.pd
     dtype = pd.dtype
     if dtype not in (torch.float32, torch.float64):
