@@ -7,6 +7,10 @@ Goals, in order of how much they shape design decisions:
 3. **Sequence development, including agentic** – differentiable w.r.t. sequence parameters,
    Pulseq in/out, machine-readable metrics an agent can act on.
 
+**Physical realism**: what other simulators model, what nobody models, and the plan to go
+beyond them (real-data benchmark, calibrated digital twin) is in
+[docs/REALISM.md](docs/REALISM.md).
+
 **Ground rule: nothing is "done" without an independent check.** Each phase lists what it is
 verified against. References, from cheapest to strongest:
 closed-form physics → SciPy ODE integration → our own independent signal-equation /
