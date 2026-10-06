@@ -165,3 +165,25 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   2.20 ± 0.04 %**, and the short-T2 spheres roughly halve (sphere 11: 19.4 → 7.8 %, 14: 39.1 →
   22.1 %). The earlier "water makes it worse" (5.75 %) was Monte Carlo bias from undersampling:
   the original hypothesis was right, the first test of it was not.
+
+### State at end of day 2 (for picking up after a context reset)
+- **Repo**: `~/projects/blochparty`, private GitHub `jonatanferm/blochparty`, branch `main` only.
+  Working rules in `CLAUDE.md`; lessons in `docs/LESSONS.md`; realism plan in `docs/REALISM.md`;
+  real-data benchmarks in `validation/real/` (data via `fetch_data.py`, git-ignored).
+- **Engines**: PyTorch core (reference, float64-capable), fused C++ CPU kernel with adjoint
+  (`simulate_fused`), Apple-GPU forward kernel (`blochparty.metal.simulate_metal`, float32;
+  `BLOCHPARTY_BACKEND=metal` for the real-data scripts). Metal is 5.8× the CPU on the 1-coil real
+  TSE, slower than CPU with 8 coils (ADC reduction).
+- **Results so far** (nothing fitted, reference values only): benchmark 1 (IR-SE) 1.77 ± 0.19 %
+  MC (1.49 % brute force) vs 25.9 % analytic; benchmark 2 (23-echo CPMG) 2.20 ± 0.04 % with water
+  fill vs 10.5 % mono-exponential. Run with `--mc 4 --n 256 [--fill-margin 8]`.
+- **Running when this was written**: benchmark-2 wall-thickness sensitivity (`--wall 0.5` and
+  `1.5`, 3 seeds); the 1 mm baseline is the table in `validation/real/RESULTS.md`.
+- **Next, in order** (agreed with the owner):
+  1. Short-T2 spheres (8–22 % error): read the wall sensitivity; if geometry isn't the limit,
+     look at reference values / unmodelled effects.
+  2. Benchmark 1 at Sobol n = 1024 to shrink its error bar (spheres only; water not significant).
+  3. Metal: many-coil ADC reduction (simdgroup matrix multiply); later adjoint.
+  4. Roadmap: Bloch–McConnell magnetization transfer (`docs/REALISM.md` R2), checked against
+     BMCTool / Pulseq-CEST and the Pulseq-CEST phantom data.
+- **Cloud credits** ≈ $38 left: one cloud brief at a time. The Mac sleeps with the lid closed.
