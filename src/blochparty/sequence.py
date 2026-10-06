@@ -42,6 +42,9 @@ class Sequence:
     adc: list[bool]  # sample the signal at the end of the segment
     spoil: list[bool]  # ideal crusher: zero transverse magnetization at segment end
     meta: dict = field(default_factory=dict)
+    # (S,) spatially uniform field [Hz] added to every spin's off-resonance (B0 eddy
+    # currents, drift, ...); None means zeros
+    b0_offset: Tensor | None = None
 
     def __len__(self) -> int:
         return self.dt.shape[0]
@@ -72,6 +75,7 @@ class Sequence:
             rf=rep(self.rf),
             grad=rep(self.grad),
             adc_phase=rep(self.adc_phase),
+            b0_offset=None if self.b0_offset is None else rep(self.b0_offset),
             is_rf=[r for r in self.is_rf for _ in range(k if r else 1)],
             adc=tail(self.adc),
             spoil=tail(self.spoil),
@@ -85,6 +89,7 @@ class Sequence:
             rf=conv(self.rf),
             grad=conv(self.grad),
             adc_phase=conv(self.adc_phase),
+            b0_offset=None if self.b0_offset is None else conv(self.b0_offset),
         )
 
 

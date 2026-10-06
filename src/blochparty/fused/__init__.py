@@ -37,6 +37,7 @@ from torch import Tensor
 from torch.autograd.function import once_differentiable
 
 from ..bloch import SimResult
+from ..fields import Scanner, spin_fields
 from ..phantom import Phantom
 from ..sequence import Sequence
 
@@ -86,38 +87,44 @@ class _Opts(NamedTuple):
     n_threads: int
     block: int
     every: int
+    conc_mode: int
 
 
 class _FusedSimulate(torch.autograd.Function):
     """Forward stores m every ``every`` segments; backward is the kernel's reverse sweep."""
 
     @staticmethod
-    def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1, flags):
+    def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc,
+                flags):
         ctx.set_materialize_grads(False)
         ctx.opts = opts
         m = m0.detach().clone()
         sig, ckpt = _ext().simulate(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, m,
-                                    opts.n_threads, opts.block, opts.every, b1)
-        ctx.save_for_backward(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1)
+                                    opts.n_threads, opts.block, opts.every, b1, b0_offset, conc, opts.conc_mode)
+        ctx.save_for_backward(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1, b0_offset,
+                              conc)
         return sig, m
 
     @staticmethod
     @once_differentiable
     def backward(ctx, g_sig, g_m):
         opts = ctx.opts
-        pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1 = ctx.saved_tensors
-        need = list(ctx.needs_input_grad[1:13])  # pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1
+        pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1, b0_offset, conc = ctx.saved_tensors
+        # pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc
+        need = list(ctx.needs_input_grad[1:15])
         if g_sig is None:  # sensitivities and receiver phase only reach the signal
             need[5] = need[9] = False
         if (g_sig is None and g_m is None) or not any(need):
-            return (None,) * 14
+            return (None,) * 16
         prep = lambda g: None if g is None else g.to(pd.dtype).contiguous()
-        # kernel order: dt, rf, grad, adc_phase, pos, pd, t1, t2, db0, sens, m, b1
-        needs = [*need[6:10], *need[:6], need[10], need[11]]
+        # kernel order: dt, rf, grad, adc_phase, pos, pd, t1, t2, db0, sens, m, b1, b0_offset, conc
+        needs = [*need[6:10], *need[:6], *need[10:]]
         out = _ext().adjoint(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, opts.every, sig,
-                             prep(g_sig), prep(g_m), needs, opts.n_threads, opts.block, b1)
-        g_dt, g_rf, g_grad, g_psi, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_m0, g_b1 = out
-        return None, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_dt, g_rf, g_grad, g_psi, g_m0, g_b1, None
+                             prep(g_sig), prep(g_m), needs, opts.n_threads, opts.block, b1, b0_offset, conc,
+                             opts.conc_mode)
+        g_dt, g_rf, g_grad, g_psi, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_m0, g_b1, g_off, g_conc = out
+        return (None, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_dt, g_rf, g_grad, g_psi, g_m0, g_b1, g_off, g_conc,
+                None)
 
 
 def simulate_fused(
@@ -129,9 +136,10 @@ def simulate_fused(
     n_threads: int | None = None,
     block: int | None = None,
     checkpoint_every: int | None = None,
+    scanner: Scanner | None = None,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``: same arguments and result as ``blochparty.simulate``,
-    gradients included.
+    gradients included (``scanner``: the field model, as in ``simulate``).
 
     n_threads: worker threads (default: all logical CPUs).
     block: spins per block, one of ``BLOCK_SIZES`` (default: ``default_block``).
@@ -162,17 +170,20 @@ def simulate_fused(
         m0 = real(m_init)
     flag = lambda bits, value: torch.tensor(bits, dtype=torch.uint8).reshape(len(seq)) * value
     flags = flag(seq.is_rf, _RF) | flag(seq.adc, _ADC) | flag(seq.spoil, _SPOIL)
-    inputs = (real(phantom.pos), real(pd), real(phantom.t1), real(phantom.t2), real(phantom.db0), sens.contiguous(),
+    fields = spin_fields(scanner, phantom.pos)
+    inputs = (real(fields.pos), real(pd), real(phantom.t1), real(phantom.t2), real(phantom.db0), sens.contiguous(),
               real(seq.dt), real(seq.rf), real(seq.grad), real(seq.adc_phase), real(m0),
-              None if phantom.b1 is None else real(phantom.b1))
+              None if phantom.b1 is None else real(phantom.b1),
+              None if seq.b0_offset is None else real(seq.b0_offset),
+              None if fields.conc is None else real(fields.conc))
     block = block or default_block(n, n_threads, dtype)
     if torch.is_grad_enabled() and any(t is not None and t.requires_grad for t in inputs):
         every = checkpoint_every or default_checkpoint_every(len(seq))
-        sig, m = _FusedSimulate.apply(_Opts(n_threads, block, every), *inputs, flags)
+        sig, m = _FusedSimulate.apply(_Opts(n_threads, block, every, fields.mode), *inputs, flags)
     else:
-        *spin_seq, m, b1 = (None if t is None else t.detach() for t in inputs)
+        *spin_seq, m, b1, b0_offset, conc = (None if t is None else t.detach() for t in inputs)
         m = m.clone()
-        sig, _ = _ext().simulate(*spin_seq, flags, m, n_threads, block, 0, b1)
+        sig, _ = _ext().simulate(*spin_seq, flags, m, n_threads, block, 0, b1, b0_offset, conc, fields.mode)
     assert sig.shape[0] == seq.n_adc
     return SimResult(torch.view_as_complex(sig).T, m)
 
