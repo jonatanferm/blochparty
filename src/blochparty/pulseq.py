@@ -93,7 +93,8 @@ def _check_extensions(seq) -> None:
 
 
 def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: float | None = None,
-                rf_raster: float | None = None, convention: str = "physical", **meta) -> Sequence:
+                rf_raster: float | None = None, max_rf_step: float | None = None, convention: str = "physical",
+                **meta) -> Sequence:
     """Convert a Pulseq sequence (``.seq`` path or ``pypulseq.Sequence``) to a ``Sequence``.
 
     ramp_raster: longest piece a sloped gradient section is cut into (default: the
@@ -102,6 +103,10 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
     rf_raster: same for time-shaped RF pulses that vary or carry a frequency offset
         (default: the RF raster time). Pulses on the default RF raster are always
         stepped sample by sample.
+    max_rf_step: also cut constant RF pieces (block pulses without a frequency offset)
+        into pieces <= this [s]. By default such a pulse is one segment, whose relaxation
+        is split around a single rotation: fine for short pulses, wrong for long saturation
+        pulses (a 1 s on-resonance block pulse: errors of 0.6 in Mz).
     convention: "physical" (default) or "mrzero"; see the module docstring.
     meta: extra entries for ``Sequence.meta`` (e.g. ``kspace_shape``).
     """
@@ -151,7 +156,9 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
                 edges = np.arange(len(t_rf) + 1) * rf_raster_def
             else:  # piecewise linear between (t, signal) points
                 sloped = (np.diff(sig) != 0) | (f_rf != 0)
-                edges = _subdivide(t_rf, sloped, rf_raster)
+                edges = np.sort(_subdivide(t_rf, sloped, rf_raster))
+                if max_rf_step:
+                    edges = _subdivide(edges, np.ones(len(edges) - 1, dtype=bool), max_rf_step)
             points += [rf.delay + edges, np.array([rf.delay + rf.center])]
             rf_lo, rf_hi = rf.delay + edges.min(), rf.delay + edges.max()
 

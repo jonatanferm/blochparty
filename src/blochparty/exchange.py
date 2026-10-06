@@ -15,8 +15,14 @@ absorption lineshape in BMCTool's normalisation (G = pi g, with g of unit area o
 
 * Lorentzian: G = T2b / (1 + x^2), x = 2 pi Delta T2b;
 * super-Lorentzian: G = T2b sqrt(2 pi) int_0^1 exp(-2 x^2 / (3u^2 - 1)^2) / |3u^2 - 1| du,
-  which diverges on resonance; it is held at its value at ``SL_CUTOFF`` = 1 kHz below that
-  offset (the cut of Gloor et al., MRM 2008, as described by Asslander et al., arXiv 2107.11000).
+  which diverges on resonance; it is held at its value at ``BoundPool.cutoff`` closer to
+  resonance. The default 1 kHz is the cut of Gloor et al. (MRM 2008, as described by
+  Asslander et al., arXiv 2107.11000) for bSSFP qMT; g = G / pi there is 1.5e-5 s at
+  T2b = 12 us, the order of the empirically calibrated G(0) = 2.0e-5 s (Soellinger et al.,
+  ISMRM 2010: bSSFP qMT, postmortem in-situ brain at 3 T, 6-20 C). BMCTool's own cut is ~150 Hz, with a rectangle-rule
+  integral outside it: near the pool (CEST offsets) the two conventions differ by up to 0.12
+  in Z (``validation/compare_bmctool.py``). The near-resonance super-Lorentzian is a model
+  choice, not physics this model can settle.
 
 Delta is the offset of the RF from the bound pool's resonance: the RF's instantaneous
 frequency (from the phase of consecutive RF samples, ``rf_frequency``) minus the spin's
@@ -38,7 +44,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-SL_CUTOFF = 1e3  # [Hz] the super-Lorentzian is held constant closer to resonance than this
+SL_CUTOFF = 1e3  # [Hz] default ``BoundPool.cutoff``
 
 LINESHAPES = ("superlorentzian", "lorentzian")
 
@@ -53,6 +59,7 @@ class BoundPool:
     t2: Tensor  # [s], sets the lineshape width (~10 us in tissue)
     dw: Tensor | float = 0.0  # resonance shift from water [Hz]
     lineshape: str = "superlorentzian"
+    cutoff: float = SL_CUTOFF  # [Hz] the super-Lorentzian is held constant closer to resonance
 
     def __post_init__(self):
         if self.lineshape not in LINESHAPES:
@@ -131,7 +138,7 @@ def lorentzian(delta: Tensor, t2: Tensor) -> Tensor:
 def lineshape(pool: BoundPool, delta: Tensor) -> Tensor:
     if pool.lineshape == "lorentzian":
         return lorentzian(delta, pool.t2)
-    return superlorentzian(delta, pool.t2)
+    return superlorentzian(delta, pool.t2, pool.cutoff)
 
 
 # ---------------------------------------------------------------- RF frequency
@@ -180,20 +187,25 @@ def z_exchange(mz: Tensor, mb: Tensor, t, pd: Tensor, r1: Tensor, pool: BoundPoo
     det = a11 * a22 - a12 * a21  # > 0: both eigenvalues negative
     z1 = -(a22 * c1 - a12 * c2) / det  # steady state -A^-1 c
     z2 = -(a11 * c2 - a21 * c1) / det
-    # exp(A t) = e^{m t} [cosh(q t) I + sinh(q t)/q (A - m I)], written with the eigenvalues
-    # m -/+ q (both <= 0) so nothing overflows, and expm1 so q -> 0 has no cancellation
+    # exp(A t) = e^{m t} [cosh(q t) I + sinh(q t)/q (A - m I)], applied in increment form,
+    # z0 + (exp(A t) - I)(z0 - z_ss), with e^{mt} cosh(qt) - 1 from expm1 of the eigenvalues
+    # m +/- q (both <= 0): no cancellation for short steps (1 us RF samples), where exp(A t) ~ I
+    # and the gradients otherwise lose ~ eps / (t |A|) (3 % in float32), and no overflow for
+    # long ones (expm1(2qt) only while 2qt < 1)
     m = 0.5 * (a11 + a22)
     h = 0.5 * (a11 - a22)
     q = torch.sqrt(h * h + a12 * a21)
-    lo = torch.exp((m - q) * t)  # slower decay is e^{(m+q)t} = lo * e^{2qt}
-    e2q = torch.expm1(2 * q * t)
-    ch = lo * (1 + 0.5 * e2q)  # e^{mt} cosh(qt)
+    chm1 = 0.5 * (torch.expm1((m + q) * t) + torch.expm1((m - q) * t))  # e^{mt} cosh(qt) - 1
+    small = 2 * q * t < 1
+    lo = torch.exp((m - q) * t)
+    e2q = torch.expm1(torch.where(small, 2 * q * t, torch.zeros_like(q)))
     qs = torch.where(q > 0, q, torch.ones_like(q))
-    sh = torch.where(q > 0, lo * 0.5 * e2q / qs, t * torch.exp(m * t))  # e^{mt} sinh(qt)/q
+    sh = torch.where(small, torch.where(q > 0, lo * 0.5 * e2q / qs, t * torch.exp(m * t)),
+                     0.5 * (torch.exp((m + q) * t) - lo) / qs)  # e^{mt} sinh(qt)/q
     d1, d2 = mz - z1, mb - z2
-    n1 = ch * d1 + sh * (h * d1 + a12 * d2)
-    n2 = ch * d2 + sh * (a21 * d1 - h * d2)
-    return z1 + n1, z2 + n2
+    n1 = chm1 * d1 + sh * (h * d1 + a12 * d2)
+    n2 = chm1 * d2 + sh * (a21 * d1 - h * d2)
+    return mz + n1, mb + n2
 
 
 def saturation_rate(pool: BoundPool, rf: Tensor, b1: Tensor | None, delta: Tensor) -> Tensor:

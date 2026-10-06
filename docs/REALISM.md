@@ -67,7 +67,7 @@ project's goals (training data, sequence development), at 0.55–7 T.
 | Physiological B0 fluctuation (respiration) | 2–7 Hz in the brain at 7 T, plus small gradients [19] | nobody | ◐ sinusoidal uniform + linear terms (`drift.respiration`) | time-varying low-order spherical-harmonic field from a breathing model | field-probe literature [19] |
 | **B1⁺ (transmit) inhomogeneity** | ±20–40 % at 3 T body, worse at 7 T (dielectric effects) | JEMRIS, MRiLab | ◐ analytic maps | import EM-simulated complex B1⁺ per channel (pTx = sum over channels with drive weights) | measured B1 maps; EM ground truth |
 | RF amplifier nonlinearity, droop, phase | slice-profile widening, flip-angle bias at low/high drive [20] | nobody | ✗ | AM/AM, AM/PM transfer curve + low-pass on the RF waveform | published amplifier curves; flip-angle sweeps |
-| RF coil ringdown, dead times | small; timing | – | ◐ (dead times in `System`) | – | – |
+| RF coil ringdown, dead times; played vs. written timing | small, but decisive when T2 ≈ echo spacing: the prime suspect (with local B1⁺) for the 6.5–8.7 % misfit of the 5–15 ms T2 spheres in the NIST TSE benchmark, which sits in the first echoes (`validation/real/RESULTS.md`) | – | ◐ (dead times in `System`) | shift/stretch the first refocusing interval; a B1⁺ map at the phantom | needs a dataset with a B1⁺ map, or scanner timing logs |
 
 **R1 status (October 2026).** Concomitant fields (leading order and exact |B|), gradient
 nonlinearity (encoding positions), GIRF / eddy currents incl. B0 and cross terms, per-segment
@@ -83,7 +83,7 @@ nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 
 | effect | magnitude / when it matters | who models it | us | how to model | how to verify |
 |---|---|---|---|---|---|
-| **Magnetization transfer (bound pool)** | incidental MT in multi-slice: MTR 33 % (1.5 T) → 46 % (3 T) in corpus callosum; up to 30 % signal loss and 20 % T1 bias in IR-EPI [21] | MRiLab, JEMRIS (CPU), MCMR, BMCTool | ✗ | Bloch–McConnell with a bound pool saturated by the RF lineshape (super-Lorentzian) and exchange | BMCTool / Pulseq-CEST library [10]; two-pool steady-state closed forms; qMT literature |
+| **Magnetization transfer (bound pool)** | incidental MT in multi-slice: MTR 33 % (1.5 T) → 46 % (3 T) in corpus callosum; up to 30 % signal loss and 20 % T1 bias in IR-EPI [21] | MRiLab, JEMRIS (CPU), MCMR, BMCTool | ◐ PyTorch core (`exchange.py`, `Phantom.bound`): two-pool rate model with super-Lorentzian/Lorentzian lineshape, saturation at each spin's offset from the RF (incidental MT); fused/Metal kernels next. Beyond it: the rate model misses the bound pool's rotation by short intense pulses (T_RF ≲ 0.3 ms) [30] | Bloch–McConnell with a bound pool saturated by the RF lineshape (super-Lorentzian) and exchange; for short pulses the generalized Bloch model [30] | BMCTool ✓ (Lorentzian: 6e-7 in Z; `validation/compare_bmctool.py`); two-pool ODE and CW steady state ✓; Pulseq-CEST library [10]; qMT literature |
 | Multi-compartment exchange (myelin water) | bias of T2/T1 mapping; mcDESPOT/MWF | MRiLab, JEMRIS | ✗ | same Bloch–McConnell engine, free pools with exchange | analytic two-pool exchange; published MWF |
 | CEST pools | CEST imaging | Pulseq-CEST | ✗ | same engine | Pulseq-CEST library data [10] |
 | **J-coupling (fat)** | "bright fat" in TSE vs SE; lipid echo modulation [22] | nobody among imaging simulators | ✗ | per-peak phase-evolution model for coupled lipid protons (density-matrix-lite), or empirical echo-spacing-dependent T2 | density-matrix simulation literature; SE vs TSE fat ratios |
@@ -146,7 +146,7 @@ nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 | step | effects | why first | verified against |
 |---|---|---|---|
 | R1 field model ✓ (except real-data checks) | vector-field core: gradient nonlinearity (SH), concomitant fields, GIRF/eddy (incl. B0 terms), drift and physiological fluctuation | largest unmodelled hardware effects; JEMRIS-only today and absent from every fast simulator | analytic concomitant phase, SH distortion maps, measured GIRFs, Bschorr et al. |
-| R2 spin system | Bloch–McConnell: bound pool (MT, lineshape), myelin water, CEST | incidental MT is a 30–45 % WM effect in every multi-slice scan | BMCTool, Pulseq-CEST library, two-pool closed forms |
+| R2 spin system (**started**: bound pool in the core, BMCTool ✓) | Bloch–McConnell: bound pool (MT, lineshape), myelin water, CEST | incidental MT is a 30–45 % WM effect in every multi-slice scan | BMCTool, Pulseq-CEST library, two-pool closed forms |
 | R3 real-data benchmark | NIST-phantom Pulseq raw data (open + own), realism metric, effect ablations | turns "realistic" into a number | – (it is the reference). **Started**: benchmark 1 predicts real 3 T IR-SE data to 1.5 % with nothing fitted (`validation/real/RESULTS.md`) |
 | R4 receive/transmit chain | EM-imported B1⁺/B1⁻/E, noise covariance from E fields, RF amplifier, ADC filter | noise and coil realism decide training-data usefulness | measured SNR/g-factor; EM ground truth |
 | R5 anatomy | χ-map → B0, BrainWeb/XCAT/MIDA, continuous phantoms, orientation-dependent R2* | anatomy realism + inverse crime | Guerquin-Kern closed forms; published orientation curves |
@@ -186,3 +186,4 @@ J-coupling and vibration slot in when R2/R1 are in place.
 27. Vessel-network Monte Carlo and static dephasing — [PMC3999331](https://pmc.ncbi.nlm.nih.gov/articles/PMC3999331); [Sci. Rep. 2017](https://link.springer.com/10.1038/s41598-017-15968-4)
 28. Open-source MRI acquisition: data and documentation for two validated pulse sequences — [doaj.org](https://doaj.org/article/12c0f01b03a54996b3006b4b13c6bfcf)
 29. OpenMRF (Pulseq MRF, NIST phantom, 0.55/1.5/3 T) — [arXiv 2604.22713](https://arxiv.org/pdf/2604.22713)
+30. Generalized Bloch model for pulsed MT (Assländer et al.) — [arXiv 2107.11000](https://arxiv.org/abs/2107.11000)

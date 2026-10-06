@@ -56,6 +56,40 @@ says where it came from so it can be re-checked.
   9-slice acquisition; every multi-slice simulation without a bound pool is biased.
   (`docs/REALISM.md` §3.2, ref 21)
 
+- **The super-Lorentzian has no value on resonance; every simulator picks one** (MT,
+  2026-10-06). ∫du/|3u²−1| diverges at the magic angle, so G(0) = ∞. Gloor et al. cut it at
+  1 kHz (bSSFP qMT); BMCTool switches to a spline at |Δω| < w0 with w0 = γB0 in rad/µs
+  *numerically*, i.e. exactly 1 ppm from the pool, and the spline and its outer formula do not
+  meet there, so G jumps (a 6e-3 jump in Z right at 1 ppm from the pool). Near the pool, at
+  the CEST offsets, the choice moves Z by up to 0.12. Normalisation varies too: BMCTool's G is
+  π·g, with g of unit area over rad/s; qMT papers quote g. blochparty makes the cut
+  per pool (`BoundPool.cutoff`, default 1 kHz: g there is 1.5e-5 s at T2b = 12 µs, the order of
+  the 2.0e-5 s calibrated by Soellinger et al., ISMRM 2010).
+- **BMCTool's super-Lorentzian integral is a 101-point rectangle rule** with both endpoints at
+  full weight: 0.5–2 % above the exact integral between 1 and 10 kHz, and up to 2× at very
+  large offsets, where the u = 1 endpoint dominates. Our table is Gauss–Legendre with nodes
+  clustered at the magic angle, written as |3u²−1| = 3|u−u0|(u+u0) because the direct form
+  rounds to 0 and gives 0/0 there; it matches SciPy's adaptive quadrature to 1e-11.
+- **Strang splitting fails silently when the step is commensurate with the precession**
+  (MT CW test, 2026-10-06). At 4 kHz off resonance a 250 µs RF step turns exactly 2π and a
+  1 ms step 8π. Relaxation is then applied at the same rotation phase every step, so the
+  error stops averaging out: a 1.7e-3 bias in the steady state that was *identical* for
+  both steps. My "convergence check" compared two commensurate steps and looked converged.
+  Pick non-round step sizes, or compare against an independent steady state. Real RF rasters
+  (1–10 µs) are far below this regime.
+
+- **Exact small linear systems need the increment form, or their gradients die in float32**
+  (MT exchange step, 2026-10-06). z' = z_ss + e^{At}(z0 − z_ss) is exact, but for a 1 µs RF
+  step e^{At} ≈ I, and the adjoint's (I − e^{At})ᵀλ is a difference of nearly equal numbers:
+  float32 gradients 3 % wrong (float64 1e-10), checked against autograd through
+  `torch.linalg.matrix_exp` of the augmented 3×3. Writing the step as z0 + (e^{At} − I)(z0 − z_ss),
+  with e^{mt}cosh(qt) − 1 = ½[expm1((m+q)t) + expm1((m−q)t)], brings float32 to 1.5e-5. The
+  first form also overflowed: e^{(m−q)t}·expm1(2qt) is 0·∞ once 2qt > 88 in float32
+  (a few-second free run), so expm1 only while 2qt < 1, else the two decaying exponentials.
+  My random test matrices also hid this at first: they allowed det A ≈ 0, which the physical
+  model never has (det = r1(r1b + k + W) + kf(r1b + W) > 0), so build tests from physical
+  parameters.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.
@@ -121,6 +155,12 @@ says where it came from so it can be re-checked.
   reference values, also check that a measured tail isn't noise: σ from the air (Rayleigh
   mean/std ≈ 1.9) put these tails 7–12σ above the floor.
 
+- **A block pulse without a frequency offset is one segment** in `read_pulseq` (shaped pulses
+  on the RF raster are stepped per sample; constant pieces are not cut). Relaxation is then
+  split around one rotation: harmless for a 100 µs hard pulse, but a 1 s CW saturation pulse
+  came out 0.6 off in Mz against BMCTool. Opt-in `max_rf_step=` cuts it (defaults stay
+  bit-identical).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -133,6 +173,16 @@ says where it came from so it can be re-checked.
   flow and speed. Its README roadmap is out of date.
 - **JEMRIS**: the hardware-realism leader on CPU, but its GPU port drops diffusion, exchange,
   pTx, MT, concomitant fields, nonlinear gradients and eddy currents.
+
+- **BMCTool / pulseq-cest (1.0.3, read before running)**: per RF sample, a Padé matrix
+  exponential of the full Bloch–McConnell matrix (exact for piecewise-constant RF). MT pool:
+  Mz only, exchange on z only, `k` from the pool to water (k_ab = f·k), W = ω1²·G with
+  G = π·g. Its sequence semantics are not an imaging simulator's: any block with only a z
+  gradient is an ideal spoiler, an ADC block records Mz (and by default resets to
+  equilibrium), gradients otherwise do nothing, and a frequency offset rotates the frame for the
+  pulse's duration, with phase bookkeeping (`accum_phase`) between pulses. Shaped pulses are
+  downsampled to `max_pulse_samples` (500 by default). With the Lorentzian lineshape it
+  agrees with blochparty to 6e-7 in Z (`validation/compare_bmctool.py`).
 
 ## Performance
 
