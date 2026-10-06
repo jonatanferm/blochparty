@@ -7,6 +7,13 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Multi-echo shapes constrain |B1⁺ − 1|, not its sign.** Refocusing at 180°·(1 ± δ) gives
+  nearly the same echo train, and the 90°'s scaling is absorbed by any per-sphere scale. On
+  the real NIST TSE the shape error is *highest* at nominal B1⁺ (2.57 %) and falls both ways
+  (0.85: 2.03 %, 1.15: 1.64 %). A single global B1⁺ scale is the wrong digital-twin model for
+  a 3 T water phantom (the scanner calibrates the average; the field varies spatially): fit a
+  spatial map, and expect sign ambiguity unless the model is smooth or excitation-sensitive
+  data is included. (`validation/real/nist_tse.py`)
 - **Spins per voxel side must exceed the cycles of dephasing that still carry signal.** Too
   few spins don't fail loudly: the image speckles and signal nulls stay shallow, because the
   magnitude of a few random phasors isn't zero. Real 3 T IR-SE with crushers (~1.7 cycles per

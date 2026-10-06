@@ -350,8 +350,11 @@ from the PyPulseq repo; round-trip read→write→read is lossless.
       scanner's own Pulseq files and raw data (Tong et al. 2022). With reference T1/T2 only
       and nothing fitted, the inversion-recovery curves are predicted to 1.49 % (spheres
       1–10) vs 25.9 % for the analytic formula; converged in spins per slice (`RESULTS.md`)
-- [ ] Benchmark 2: the same phantom's T2 plane, multi-echo TSE (stimulated echoes, slice
-      profile of refocusing pulses); data already fetched
+- [x] Benchmark 2 (`nist_tse.py`): the T2 plane, 23-echo CPMG. Echo-train shapes predicted to
+      2.25 % (spheres 1–10) vs 10.5 % for mono-exponential decay, nothing fitted; reproduces
+      the stimulated-echo signature. A global B1⁺ fit does not improve held-out spheres
+- [ ] Model the fill fluid (water around the spheres) and sphere walls: the main remaining
+      error source for short-T2 spheres in benchmark 2 and a suspect in benchmark 1
 - [ ] Absolute (not just shape) agreement: coil sensitivities and B1⁺ fitted from the data
       (digital twin, R7), fill fluid, temperature
 - [ ] More datasets: RRSG 2020 T1 challenge (multi-site NIST data), Pulseq-CEST phantom data

@@ -122,5 +122,13 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
 - **Result** (converged, nothing fitted): **2.35 %** shape error over 23 echoes vs **10.47 %**
   for mono-exponential decay with the reference T2; sphere 2 echo2/echo1 1.173 vs 1.213 on
   the scanner.
-- Next: global B1⁺ fitted on the even spheres, scored on the odd ones — the first
-  digital-twin step (running).
+- **First digital-twin step: B1⁺** (`nist_tse_b1.py`). The shape error is *highest* at nominal
+  B1⁺ and falls both ways: echo shapes constrain only |B1⁺ − 1|. A global scale fitted on
+  even spheres (1.144) does not improve the held-out odd spheres at converged density (2.09 %
+  either way); smooth maps overfit; even a free B1⁺ per sphere only reaches 1.6 %. An honest
+  negative result: B1⁺ is not the main remaining error.
+- **Diagnosis of what is**: short-T2 spheres plateau at late echoes at ~15–30× the thermal noise
+  floor — blurring from the unmodelled **fill fluid** (water, T2 ≈ 2 s) into ROIs that sit
+  ~0.7 px inside the spheres. Second suspect: T2 reference uncertainty (sphere 5's T2 is one the
+  manual withholds; MnCl2 T2 is temperature-sensitive).
+- Next: model the fill fluid and sphere walls (both benchmarks).

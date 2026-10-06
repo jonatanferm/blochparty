@@ -52,3 +52,37 @@ Not modelled yet, roughly in order of suspicion: phantom temperature (references
 spheres (partial volume and ringing into the ROIs), coil sensitivities and B1⁺ variation
 (constant per sphere for the shape metric, but not within a sphere's ROI), sphere wall
 thickness. Each is a next step for the digital twin (`docs/REALISM.md`, R7).
+
+## Benchmark 2: NIST phantom T2 plane, 3 T multi-echo spin echo (`nist_tse.py`)
+
+The scanner's 23-echo CPMG `.seq` (echo spacing 7 ms, 180° windowed-sinc refocusing, slice and
+readout crushers; two slices, the image is the second at x = −12 mm), simulated on a digital
+T2 plane: T2 of the MnCl2 spheres from the phantom manual (spheres 1 and 5: Jiang et al. 2016),
+T1 from the 3 T relaxivity ratio. Metric: per-sphere echo-train shape (one scale per sphere).
+
+Measured 2026-10-06, Apple M4, fused kernel, float32, 64 spin positions across the slice × 4
+per pixel along the readout (85 k spins), RF merged 4:1, 8 warm-up TRs before the imaged pass:
+
+| model | spheres 1–10 | odd 1–9 | per sphere 1..14 [%] |
+|---|---|---|---|
+| mono-exponential, reference T2 | 10.47 % | 9.27 % | 4.2 4.9 5.8 7.3 5.7 9.5 11.2 15.1 19.6 21.5 32.3 41.2 42.0 53.1 |
+| **Bloch on the scanner's .seq, nominal B1⁺** | **2.25 %** | **2.09 %** | 0.7 0.9 1.1 1.3 2.6 0.7 1.0 2.6 5.1 6.6 18.6 24.4 23.7 36.3 |
+| Bloch + global B1⁺ 1.144 (fit on even spheres) | 1.90 % | 2.09 % | 0.8 0.7 0.6 0.5 4.0 1.6 2.3 0.8 2.7 5.0 16.5 22.9 21.4 34.6 |
+
+![curves](nist_tse_curves.png)
+
+- **The stimulated-echo signature comes out of the physics**: echo 1 below echo 2 (sphere 2:
+  0.85 simulated vs 0.82 measured), and an apparent decay slower than T2 — both missed by the
+  mono-exponential model that T2 fitting assumes (why the authors dropped echoes 1–3).
+- **Convergence** (nominal B1⁺, spheres 1–10): 21 k spins 2.58 %, 85 k 2.25 %, 171 k 2.37 %,
+  343 k 2.35 % (two different splits) — converged at ~2.3 %.
+- **B1⁺ as a digital-twin parameter** (`nist_tse_b1.py`): echo shapes constrain |B1⁺ − 1| only,
+  and the error is *highest* at nominal B1⁺. A global scale fitted on the even spheres (1.144,
+  equivalently ~0.856) helps the fitted spheres but leaves the held-out odd spheres unchanged
+  at converged density (2.09 %); smooth low-order maps overfit; a free B1⁺ per sphere (an upper
+  bound, not a prediction) reaches 1.6 %. So B1⁺ is not the main remaining error.
+- **What is**: (1) the **fill fluid** is not modelled. The deionised water around the spheres has
+  T2 ≈ 2 s; at late echoes it blurs into the ROIs of short-T2 spheres (ROIs sit ~0.7 px inside
+  the spheres), which is the flat tail on spheres 9–14 — not thermal noise, which is ~15–30× lower.
+  (2) Reference-value uncertainty: the worst long-T2 sphere (5) is one whose T2 the manual
+  withholds; MnCl2 T2 is temperature-sensitive and the scan temperature is unknown.
