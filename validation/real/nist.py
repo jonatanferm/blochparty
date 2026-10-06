@@ -81,14 +81,16 @@ def sphere_radius(images: np.ndarray, roi: np.ndarray) -> float:
     return float(d * PIXEL)
 
 
-def slice_position(seq_file) -> float:
-    """Slice centre along x [m]: the excitation's frequency offset over its slice-select gradient
-    (Pulseq positions slices by frequency; with blochparty's default "physical" reading a
-    frequency offset f excites at +f/G). Works for trapezoids and extended trapezoids."""
+def slice_positions(seq_file) -> list[float]:
+    """Distinct slice centres along x [m], in order of first use: each slice-selective pulse's
+    frequency offset over its slice-select gradient (Pulseq positions slices by frequency; with
+    blochparty's default "physical" reading a frequency offset f excites at +f/G). Works for
+    trapezoids and extended trapezoids. Multi-slice files return several positions."""
     import pypulseq as pp
 
     s = pp.Sequence()
     s.read(str(seq_file))
+    out = []
     for i in range(1, len(s.block_events) + 1):
         b = s.get_block(i)
         if b.rf is None or b.gx is None:
@@ -97,8 +99,20 @@ def slice_position(seq_file) -> float:
         if not amp and getattr(b.gx, "waveform", None) is not None:
             amp = float(np.max(np.abs(b.gx.waveform)))
         if amp:
-            return float(b.rf.freq_offset / amp)
-    raise ValueError("no slice-selective pulse with a gradient on x")
+            x = float(b.rf.freq_offset / amp)
+            if all(abs(x - y) > 1e-6 for y in out):
+                out.append(x)
+    if not out:
+        raise ValueError("no slice-selective pulse with a gradient on x")
+    return out
+
+
+def slice_position(seq_file) -> float:
+    """The slice centre of a single-slice file (raises for multi-slice files)."""
+    xs = slice_positions(seq_file)
+    if len(xs) != 1:
+        raise ValueError(f"{len(xs)} slices at {[round(x * 1e3, 2) for x in xs]} mm; use slice_positions")
+    return xs[0]
 
 
 def phantom(rois, radii, t1_ms, t2_ms, x0, *, n_slice=48, sub=2, sub_read=None, seed=0,

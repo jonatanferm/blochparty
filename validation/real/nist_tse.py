@@ -33,7 +33,7 @@ from scipy import ndimage
 import blochparty as bp
 from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
-from nist import N, T2_MNCL2, coarsen_rf, phantom, recon, roi_means, shape_error, slice_position, sphere_radius, t1_of_mncl2
+from nist import N, T2_MNCL2, coarsen_rf, phantom, recon, roi_means, shape_error, slice_positions, sphere_radius, t1_of_mncl2
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "TSE_T2_mapping"
 SEQ = DATA / "acq" / "tse_multiecho_NIST_t2_sag.seq"
@@ -79,6 +79,14 @@ def sphere_rois() -> list[np.ndarray]:
     return [rois[i] for i in outer + inner]
 
 
+def imaged_slice() -> float:
+    """The file excites two slices, one per pass (x = +12 mm in TRs 0-128, -12 mm in 129-257);
+    the image (the authors' "discard the first 128 excitations") is the second pass's slice."""
+    xs = slice_positions(SEQ)
+    assert len(xs) == 2, xs
+    return xs[1]
+
+
 def sphere_radius_t1_plane() -> float:
     """Mean sphere radius [m] measured on the T1 plane. The spheres are the same size in both
     arrays, and the half-maximum estimate is unreliable here (weak sphere/fill contrast: it gives
@@ -117,6 +125,28 @@ def simulate(ph: bp.Phantom, seq: bp.Sequence, rois, b1: float | None = None) ->
     return roi_means(sim_images(simulate_fused(ph, seq).signal), rois)
 
 
+def plot_curves(real, rows, path):
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(2, 5, figsize=(16, 6), sharex=True)
+    te = TE * 1e3
+    for k, ax in enumerate(axes.flat):
+        ax.plot(te, real[:, k] / real[:, k].max(), "ko", ms=3.5, label="scanner")
+        for (name, _, curve), style in zip(rows, ("C1--", "C0-", "C2-")):
+            a = (curve[:, k] * real[:, k]).sum() / (curve[:, k] ** 2).sum()
+            ax.plot(te, a * curve[:, k] / real[:, k].max(), style, lw=1.4, label=name)
+        ax.set_title(f"sphere {k + 1}: T2 {T2_REF[k]:.0f} ms", fontsize=9)
+        ax.tick_params(labelsize=7)
+    axes[0, 0].legend(fontsize=6.5, loc="lower left")
+    fig.supxlabel("TE [ms]")
+    fig.suptitle("NIST phantom, 3 T multi-echo spin echo: scanner vs. blochparty (same .seq, reference T1/T2)")
+    fig.tight_layout()
+    fig.savefig(path, dpi=90)
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--n-slice", type=int, default=64, help="spin positions across the slice")
@@ -131,7 +161,7 @@ def main(argv=None):
     rois = sphere_rois()
     real = roi_means(real_img, rois)
     radii = [sphere_radius_t1_plane()] * 14
-    x0 = slice_position(SEQ)
+    x0 = imaged_slice()
     n_tr = N + 1 + args.warmup  # 128 lines + this pass's dummy + warm-up TRs of the first pass
     seq = coarsen_rf(last_trs(read_pulseq(SEQ), n_tr).to(dtype=torch.float32), args.rf_merge)
     ph, _ = phantom(rois, radii, T1_REF, T2_REF, x0, n_slice=args.n_slice, sub=args.sub, sub_read=args.sub_read)
@@ -159,6 +189,7 @@ def main(argv=None):
     for name, err, _ in rows:
         print(f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err[[0, 2, 4, 6, 8]].mean():.2f} % | "
               f"{' '.join(f'{v:.1f}' for v in 100 * err)} |")
+    plot_curves(real, rows, Path(__file__).with_name("nist_tse_curves.png"))
     return rows, real
 
 

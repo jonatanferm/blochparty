@@ -57,6 +57,18 @@ says where it came from so it can be re-checked.
 - **Multi-echo spin echo with imperfect refocusing**: echo 2 is ~20 % brighter than echo 1 in
   long-T2 spheres (stimulated-echo pathways), which is why T2 fits commonly drop the first
   echoes. (`validation/real/nist_tse.py`)
+- **"Discard the first N excitations" may mean "use the other slice".** The NIST TSE file is a
+  two-slice acquisition (x = +12 mm in pass 1, −12 mm in pass 2); the authors' recon keeps
+  pass 2. A phantom on the first slice found in the file is never excited in the imaged pass:
+  near-zero signal whose leftovers looked like growing, mis-centred echoes (61 % error that no
+  spin density fixed). Enumerate all slice positions (`nist.slice_positions`) and choose the
+  imaged one explicitly; sweep a pulse across x per pass when in doubt.
+- **When the simulation plateaus away from reality as spins increase, it's a model or setup
+  error, not convergence.** Diagnose by stripping down (one TR, spins only at the slice
+  centre: textbook CPMG decay is the expected answer). Core and fused agreeing proves the
+  kernels, not the inputs.
+- **Track k from the excitation centre, not the TR start**: integrating from the TR start
+  showed a fake ±350 /m slice-axis residual at every echo and briefly pointed at the importer.
 - **Pulseq files can contain dummy TRs without ADC**: the NIST TSE file plays 2 × (1 dummy +
   128 lines); split TRs by timing and count readout TRs separately.
 - **MATLAB-saved arrays reshape with `order="F"`** to reproduce MATLAB's `reshape`.

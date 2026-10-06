@@ -16,6 +16,9 @@ Goal: the most physically realistic simulator, judged against real scanners
 - **Record what you learn in `docs/LESSONS.md`**: anything that took more than a few minutes
   to figure out (physics, numerics, data/format quirks, tool behaviour, process), with where
   it came from.
+- **Keep `docs/JOURNAL.md` current**: after each milestone or work session, append a dated
+  entry — what was done and why, results with numbers, dead ends and corrections, commit
+  hashes — so the project can be written up later.
 
 ## Commands
 
