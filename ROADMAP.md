@@ -348,7 +348,7 @@ from the PyPulseq repo; round-trip read→write→read is lossless.
 
 - [x] Benchmark 1 (`validation/real/`): ISMRM/NIST phantom T1 plane, 3 T IR spin echo, the
       scanner's own Pulseq files and raw data (Tong et al. 2022). With reference T1/T2 only
-      and nothing fitted, the inversion-recovery curves are predicted to 1.44 % (spheres
+      and nothing fitted, the inversion-recovery curves are predicted to 1.49 % (spheres
       1–10) vs 25.9 % for the analytic formula; converged in spins per slice (`RESULTS.md`)
 - [ ] Benchmark 2: the same phantom's T2 plane, multi-echo TSE (stimulated echoes, slice
       profile of refocusing pulses); data already fetched

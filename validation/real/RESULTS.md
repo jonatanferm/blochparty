@@ -13,16 +13,21 @@ thicknesses × 2×2 per pixel (174 k spins), RF merged 4:1:
 | model | spheres 1–10 | 1–14 | per sphere 1..14 [%] |
 |---|---|---|---|
 | analytic IR formula, T1 v1 | 27.30 % | 21.11 % | 31.8 37.5 35.3 33.2 30.0 30.0 25.2 21.5 17.6 10.9 10.8 7.2 3.2 1.4 |
-| **Bloch on the scanner's .seq, T1 v1** | **2.67 %** | **2.31 %** | 4.0 7.2 5.1 2.8 1.2 1.3 1.3 0.2 1.7 1.9 2.6 2.1 0.6 0.2 |
+| **Bloch on the scanner's .seq, T1 v1** | **2.76 %** | **2.39 %** | 4.2 7.2 5.2 2.8 1.3 1.5 1.4 0.3 1.7 1.9 2.8 2.2 0.6 0.3 |
 | analytic IR formula, T1 v2 | 25.93 % | 19.88 % | 30.2 33.8 35.5 32.2 29.1 28.7 24.1 21.4 15.4 8.8 9.0 5.9 2.9 1.2 |
-| **Bloch on the scanner's .seq, T1 v2** | **1.44 %** | **1.24 %** | 2.1 3.3 5.2 1.8 0.5 0.3 0.2 0.3 0.4 0.3 1.3 1.2 0.4 0.2 |
+| **Bloch on the scanner's .seq, T1 v2** | **1.49 %** | **1.29 %** | 2.2 3.3 5.3 1.8 0.6 0.4 0.2 0.3 0.4 0.3 1.4 1.2 0.4 0.2 |
+
+**Correction (2026-10-06):** the first version of this table (1.44 % / 2.67 %) used T2 values
+that belong to the *MnCl2* (T2-plane) spheres. The NiCl2 spheres' T2 is now derived from their
+T1 with the 3 T relaxivity ratio (`nist.py`); the change is small because T2 only scales each
+curve at fixed TE.
 
 ![curves](nist_irse_curves.png)
 
 The analytic formula is what the dataset's authors fitted, plus a free offset that absorbs
 exactly the effects it lacks; without that offset it misses by ~26 %. Simulating the actual
 sequence (sinc pulses and their slice profiles, the real timing, crushers and spoilers) gets
-within ~1.4 % with no free parameter. Reference version 2 fits better than version 1
+within ~1.5 % with no free parameter. Reference version 2 fits better than version 1
 (consistent with, not proof of, a version-2 phantom; the serial isn't recorded).
 
 ### Convergence (T1 v2, RF merged 4:1)

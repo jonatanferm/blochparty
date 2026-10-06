@@ -23,8 +23,9 @@ files (PyPulseq 1.2) and raw data.
 
 - **Object**: the 14 NiCl2 spheres as 3D balls. Positions from the authors' ROI masks, radii
   from the images (geometry only). T1 from the CaliberMRI/NIST references at 3 T and 20 °C,
-  phantom version 1 *and* 2 (the dataset doesn't record the serial), T2 from Keenan et al.
-  (PMC5408299). Nothing is fitted to this data.
+  phantom version 1 *and* 2 (the dataset doesn't record the serial); T2, which no table gives
+  for these spheres, from T1 via the 3 T NiCl2 relaxivity ratio (`nist.py` lists all sources).
+  Nothing is fitted to this data.
 - **Sequence**: the scanner's `.seq` files, read with `read_pulseq`: sinc pulses on a 1 µs
   raster, slice at x = +57 mm (from the excitation's frequency offset), crushers, spoilers.
 - **Metric (shape)**: per sphere, ROI-mean magnitude across the 10 inversion times after one

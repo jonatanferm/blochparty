@@ -44,6 +44,25 @@ says where it came from so it can be re-checked.
 
 ## Pulseq, data and reference values
 
+- **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.
+  2016 (PMC5408299) Table 1 gives T1 of the NiCl2 spheres *and T2 of the MnCl2 spheres*;
+  benchmark 1 first used those T2 values for the NiCl2 spheres. Nobody tabulates the cross
+  terms (T2 of NiCl2, T1 of MnCl2): derive them from the 3 T relaxivities (Martin et al. 2023):
+  R2 = R2_w + (r2/r1)(R1 − R1_w). The derived MnCl2 T1s (2454 → 85 ms) land in the published
+  80–2480 ms range they weren't fitted to. (`validation/real/nist.py`)
+- **NIST phantom planes are mirror images**: T1-plane spheres 1–10 run clockwise on the outer
+  ring (−36° steps), T2-plane spheres counter-clockwise; spheres 11–14 on the inner ring
+  continue next to sphere 10. Identify spheres by geometry and confirm by decay rates, not by
+  a T2 fit: the authors' fitted T2 map is ~2 s almost everywhere on that plane.
+- **Multi-echo spin echo with imperfect refocusing**: echo 2 is ~20 % brighter than echo 1 in
+  long-T2 spheres (stimulated-echo pathways), which is why T2 fits commonly drop the first
+  echoes. (`validation/real/nist_tse.py`)
+- **Pulseq files can contain dummy TRs without ADC**: the NIST TSE file plays 2 × (1 dummy +
+  128 lines); split TRs by timing and count readout TRs separately.
+- **MATLAB-saved arrays reshape with `order="F"`** to reproduce MATLAB's `reshape`.
+- **A sphere-radius estimate from sphere/fill contrast fails when contrast is weak** (T2 plane:
+  0 mm and 9–10 mm vs 6–8 mm on the T1 plane); reuse the better-conditioned plane's geometry.
+
 - **Slices are positioned by RF frequency offset.** The NIST IR-SE slice is at x = +57 mm
   (15.2 kHz / 266.7 kHz/m); a phantom at x = 0 only sees far sidelobes (tiny, meaningless
   signal). Compute f/G from the `.seq` (`nist_irse.slice_position`). With blochparty's

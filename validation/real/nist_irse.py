@@ -7,8 +7,9 @@ whose relaxation times come from **independent references**, not from fitting th
 - T1 of the 14 NiCl2 spheres: CaliberMRI/NIST reference values at 3 T and 20 °C, phantom
   version 1 (serial < 43) or 2 (serial >= 43); the dataset does not say which, so both are
   reported (from the RRSG 2020 analysis code, github.com/rrsg2020/analysis, src/nist.py)
-- T2 of those spheres at 3 T: Keenan et al., PMC5408299, Table 1 (only affects a per-sphere
-  constant here, TE being fixed)
+- T2 of those spheres: not tabulated anywhere; derived from T1 with the 3 T NiCl2 relaxivity
+  ratio (see nist.py). TE being fixed, T2 only scales each sphere's curve here, apart from
+  relaxation during the pulses.
 
 Metric (shape): per sphere, the ROI-mean magnitude over the inversion times, after one
 least-squares scale per sphere (receiver gain, coil sensitivity, PD and T2 weighting are all
@@ -25,9 +26,7 @@ inversion times by gradient descent through the simulator and evaluated on the o
 from __future__ import annotations
 
 import argparse
-import math
 import time
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -38,26 +37,13 @@ from scipy import ndimage
 import blochparty as bp
 from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
+from nist import N, T1_NICL2, coarsen_rf, phantom, recon, roi_means, shape_error, slice_position, sphere_radius, t2_of_nicl2
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "IRSE_T1_mapping"
 TI = [50, 75, 100, 125, 150, 250, 1000, 1500, 2000, 3000]  # [ms]
 TR, TE = 4.5, 10e-3  # [s]
-N, FOV, SLICE = 128, 0.250, 6e-3
-PIXEL = FOV / N
-CENTRE = 63.5  # pixel index of position 0 in the authors' reconstruction (measured, see check_mapping)
-
-T1_REF = {  # [ms], 3 T, 20 °C
-    "v1": [1989, 1454, 984.1, 706, 496, 351.5, 247.13, 175.3, 125.9, 89.0, 62.7, 44.53, 30.84, 21.719],
-    "v2": [1883.97, 1330.16, 987.27, 690.08, 484.97, 341.58, 240.86, 174.95, 121.08, 85.75, 60.21, 42.89,
-           30.40, 21.44],
-}
-T2_REF = [581, 406, 292, 203, 143, 97, 71, 51, 37, 26, 20, 14, 13, 11]  # [ms], 3 T
-
-
-def recon(data: np.ndarray) -> np.ndarray:
-    """The authors' reconstruction: per-coil centred 2D iFFT of (samples, coils, lines), RSS."""
-    im = np.fft.fftshift(np.fft.ifft2(np.transpose(data, (1, 0, 2))), axes=(-2, -1))
-    return np.sqrt((np.abs(im) ** 2).sum(0))
+T1_REF = T1_NICL2
+T2_REF = {ver: t2_of_nicl2(t1) for ver, t1 in T1_NICL2.items()}  # [ms], from the relaxivity ratio
 
 
 def real_images() -> np.ndarray:
@@ -80,117 +66,10 @@ def sphere_rois() -> list[np.ndarray]:
     return sorted(rois, key=lambda m: -np.median(t1_map[m]))
 
 
-def sphere_radius(images: np.ndarray, roi: np.ndarray) -> float:
-    """Physical sphere radius [m] from the real images (geometry only): the half-maximum of the
-    sphere-vs-surroundings contrast in the radial profile, at the TI where that contrast is largest."""
-    r0, c0 = ndimage.center_of_mass(roi)
-    rr, cc = np.indices(roi.shape)
-    dist = np.hypot(rr - r0, cc - c0)
-    best = None
-    for im in images:
-        prof = np.array([im[(dist >= d - 0.5) & (dist < d + 0.5)].mean() for d in np.arange(0, 12)])
-        inside, outside = prof[:2].mean(), prof[9:].mean()
-        if best is None or abs(inside - outside) > best[0]:
-            best = (abs(inside - outside), prof, inside, outside)
-    _, prof, inside, outside = best
-    half = (inside + outside) / 2
-    sign = 1 if inside > outside else -1
-    k = int(np.argmax(sign * (prof - half) < 0))  # first radius past half-max
-    d = k - 1 + (sign * (prof[k - 1] - half)) / (sign * (prof[k - 1] - prof[k]))
-    return float(d * PIXEL)
-
-
-def slice_position(seq_file) -> float:
-    """Slice centre along x [m]: the excitation's frequency offset over its slice-select gradient
-    (Pulseq positions slices by frequency; with blochparty's default "physical" reading a
-    frequency offset f excites at +f/G)."""
-    import pypulseq as pp
-
-    s = pp.Sequence()
-    s.read(str(seq_file))
-    for i in range(1, len(s.block_events) + 1):
-        b = s.get_block(i)
-        if b.rf is not None and b.gx is not None and getattr(b.gx, "amplitude", None):
-            return float(b.rf.freq_offset / b.gx.amplitude)
-    raise ValueError("no slice-selective pulse with a trapezoid on x")
-
-
-def phantom(rois, radii, t1_ms, x0, *, n_slice=48, sub=2, seed=0, dtype=torch.float32) -> tuple[bp.Phantom, torch.Tensor]:
-    """Spheres as 3D balls centred on the slice at x0: in-plane spins at sub x sub per pixel
-    (stratified jitter), slice positions stratified over 1.5 slice thicknesses either side; the
-    slice axis is x, readout y, phase z (from the gradients of the .seq). Returns the phantom and
-    each spin's sphere index."""
-    g = torch.Generator().manual_seed(seed)
-    half = 1.5 * SLICE
-    xs = (torch.arange(n_slice, dtype=torch.float64) + torch.rand(n_slice, generator=g, dtype=torch.float64)) \
-        / n_slice * 2 * half - half
-    pos, sph, t1, t2 = [], [], [], []
-    for k, (roi, rad) in enumerate(zip(rois, radii)):
-        r0, c0 = ndimage.center_of_mass(roi)
-        y0, z0 = (r0 - CENTRE) * PIXEL, (c0 - CENTRE) * PIXEL
-        m = math.ceil(rad / PIXEL) + 1
-        grid = (torch.arange(-m * sub, m * sub, dtype=torch.float64) + 0.5) * (PIXEL / sub)
-        gy, gz = torch.meshgrid(grid, grid, indexing="ij")
-        gy = gy + (torch.rand(gy.shape, generator=g, dtype=torch.float64) - 0.5) * (PIXEL / sub)
-        gz = gz + (torch.rand(gz.shape, generator=g, dtype=torch.float64) - 0.5) * (PIXEL / sub)
-        for x in xs:
-            inside = gy**2 + gz**2 <= rad**2 - x**2
-            n = int(inside.sum())
-            if n == 0:
-                continue
-            pos.append(torch.stack([torch.full((n,), x0 + float(x), dtype=torch.float64), gy[inside] + y0,
-                                    gz[inside] + z0], -1))
-            sph.append(torch.full((n,), k))
-            t1.append(torch.full((n,), t1_ms[k] * 1e-3, dtype=torch.float64))
-            t2.append(torch.full((n,), T2_REF[k] * 1e-3, dtype=torch.float64))
-    pos, sph, t1, t2 = (torch.cat(v) for v in (pos, sph, t1, t2))
-    pd = torch.full_like(t1, (PIXEL / sub) ** 2 * (2 * half / n_slice) / (PIXEL**2 * SLICE))
-    ph = bp.Phantom(pos=pos, pd=pd, t1=t1, t2=t2, db0=torch.zeros_like(t1)).to(dtype=dtype)
-    return ph, sph
-
-
-def coarsen_rf(seq: bp.Sequence, k: int) -> bp.Sequence:
-    """Merge every k consecutive RF segments of a pulse into one with the same duration and
-    the same RF and gradient integrals (averages weighted by dt). The real files sample RF on a
-    1 us raster, which makes RF ~80 % of all segments; the error this introduces is measured in
-    the convergence study."""
-    if k == 1:
-        return seq
-    groups, s, n = [], 0, len(seq)
-    while s < n:
-        e = s + 1
-        if seq.is_rf[s]:
-            while e < n and e - s < k and seq.is_rf[e] and not seq.adc[e - 1] and not seq.spoil[e - 1]:
-                e += 1
-        groups.append((s, e))
-        s = e
-    idx = torch.tensor([a for a, _ in groups])
-    seg = torch.repeat_interleave(torch.arange(len(groups)), torch.tensor([b - a for a, b in groups]))
-    dt = torch.zeros(len(groups), dtype=seq.dt.dtype).index_add_(0, seg, seq.dt)
-    avg = lambda v: torch.zeros(len(groups), v.shape[1], dtype=v.dtype).index_add_(0, seg, v * seq.dt[:, None]) / dt[:, None]
-    last = torch.tensor([b - 1 for _, b in groups])
-    return replace(seq, dt=dt, rf=avg(seq.rf), grad=avg(seq.grad), adc_phase=seq.adc_phase[last],
-                   is_rf=[seq.is_rf[a] for a, _ in groups], adc=[seq.adc[b - 1] for _, b in groups],
-                   spoil=[seq.spoil[b - 1] for _, b in groups], meta=dict(seq.meta))
-
-
-def roi_means(images: np.ndarray, rois) -> np.ndarray:
-    """(n_TI, 14) ROI-mean magnitudes."""
-    return np.array([[im[r].mean() for r in rois] for im in images])
-
-
-def shape_error(sim: np.ndarray, real: np.ndarray, idx=None) -> np.ndarray:
-    """Per-sphere relative RMS error after one least-squares scale per sphere, over TIs ``idx``."""
-    idx = slice(None) if idx is None else idx
-    s, r = sim[idx], real[idx]
-    a = (s * r).sum(0) / (s * s).sum(0)
-    return np.sqrt(((a * s - r) ** 2).sum(0) / (r * r).sum(0))
-
-
-def analytic(t1_ms) -> np.ndarray:
+def analytic(t1_ms, t2_ms) -> np.ndarray:
     t1 = np.asarray(t1_ms)[None] * 1e-3
     ti = np.asarray(TI)[:, None] * 1e-3
-    return np.abs(1 - 2 * np.exp(-ti / t1) + np.exp(-TR / t1)) * np.exp(-TE / (np.asarray(T2_REF)[None] * 1e-3))
+    return np.abs(1 - 2 * np.exp(-ti / t1) + np.exp(-TR / t1)) * np.exp(-TE / (np.asarray(t2_ms)[None] * 1e-3))
 
 
 def simulate_all(ph: bp.Phantom, seqs, b1=None) -> list[torch.Tensor]:
@@ -259,6 +138,7 @@ def main(argv=None):
     p.add_argument("--sub", type=int, default=2, help="in-plane spins per pixel side")
     p.add_argument("--rf-merge", type=int, default=4, help="merge this many 1 us RF samples (1: exact)")
     p.add_argument("--fit-b1", action="store_true", help="also fit a global B1+ scale on 5 TIs (slow)")
+    p.add_argument("--t2", type=float, nargs=14, help="override the spheres' T2 [ms]")
     args = p.parse_args(argv)
 
     real_img = real_images()
@@ -274,8 +154,9 @@ def main(argv=None):
 
     rows = []
     for ver, t1 in T1_REF.items():
-        rows.append((f"analytic IR formula, T1 {ver}", shape_error(analytic(t1), real), analytic(t1)))
-        ph, _ = phantom(rois, radii, t1, x0, n_slice=args.n_slice, sub=args.sub)
+        t2 = args.t2 or T2_REF[ver]
+        rows.append((f"analytic IR formula, T1 {ver}", shape_error(analytic(t1, t2), real), analytic(t1, t2)))
+        ph, _ = phantom(rois, radii, t1, t2, x0, n_slice=args.n_slice, sub=args.sub)
         t0 = time.perf_counter()
         sim = roi_means(np.stack([sim_images(s) for s in simulate_all(ph, seqs)]), rois)
         print(f"{ver}: {len(ph)} spins, 10 sequences simulated in {time.perf_counter() - t0:.0f} s", flush=True)
