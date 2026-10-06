@@ -19,7 +19,7 @@ simulators come from their papers, documentation or source code (noted where it 
 | **Penn State EM-Bloch** [11] | finite-difference Bloch + full EM fields | B1⁺, B1⁻ and **E fields** per coil → realistic noise and SAR, validated SNR against experiment | not open / not maintained as a general tool |
 | **Vector-field framework** (Bschorr et al., 2025) [12] | matrix-based, MATLAB | full vector fields: B0 direction changes, concomitant (perpendicular) components, low field; claims no other simulator handles the full vector field | narrow scope |
 | **Virtual Scanner** [13] | digital-twin platform | end-to-end with Pulseq, hardware-aware B0/B1⁻ | simplified physics |
-| **blochparty (now)** | isochromats; closed-form free runs; fused C++ kernel with adjoint | fast *and* differentiable; sub-voxel spins, T2′, B0/B1⁺ maps, fat, real spoiling, ramps, slice selection; validated vs ODE, EPG, signal equation, MRzero | everything in §3 marked ✗ |
+| **blochparty (now)** | isochromats; closed-form free runs; fused C++ kernel with adjoint | fast *and* differentiable; sub-voxel spins, T2′, B0/B1⁺ maps, fat, real spoiling, ramps, slice selection; validated vs ODE, EPG, signal equation, MRzero; field model (concomitant, nonlinearity, GIRF/eddy, drift) differentiable in the hardware parameters | everything in §3 marked ✗ |
 
 **What nobody does.** Each simulator owns one layer (hardware → JEMRIS, microstructure → MCMR,
 exchange → Pulseq-CEST, flow → CMRsim, EM noise → Penn State). Nobody combines them, nobody is
@@ -58,16 +58,26 @@ project's goals (training data, sequence development), at 0.55–7 T.
 | effect | magnitude / when it matters | who models it | us | how to model | how to verify |
 |---|---|---|---|---|---|
 | B0 inhomogeneity from anatomy (air–tissue χ) | 10s–100s Hz near sinuses/ear canals at 3 T; EPI distortion, dropout | JEMRIS, POSSUM, MRzero (map) | ◐ maps, sphere/cylinder, shims | χ map → field by Fourier dipole convolution (we already validate against it for spheres) | analytic sphere/cylinder ✓; real B0 maps of phantoms |
-| **Gradient nonlinearity** | mm-scale distortion at FOV edge; b-value errors; vendors correct to 5th order, 9th–10th order leaves ~0.4 mm [14] | JEMRIS (CPU) | ✗ | per-axis spherical-harmonic expansion of the encoding field; per-spin effective gradient (and b-matrix) | distortion of a grid phantom vs gradunwarp-style analytic maps; field-camera data |
-| **Concomitant (Maxwell) fields** | ∝ G²/B0: signal errors up to 100 % at low field + strong gradients [15]; spiral/EPI/DWI, 0.55 T systems | JEMRIS (CPU), Bschorr [12] | ✗ | evaluate |B| of the full vector field (B0 + G·r + concomitant terms from ∇·B = ∇×B = 0) instead of Bz only | Bernstein's analytic phase for PC/spiral; Bschorr's results |
-| **Eddy currents / GIRF** | trajectory errors, EPI/spiral blurring and ghosts, bSSFP steady-state disruption [16] | JEMRIS (CPU, exponential), POSSUM (DWI) | ✗ | linear time-invariant system per axis (GIRF convolution) incl. B0 and cross terms | measured GIRFs (thin-slice method); trajectory vs field-camera data |
-| Gradient delays, amplifier bandwidth | k-space shifts, EPI ghosts | via GIRF | ✗ | part of GIRF | – |
-| Mechanical vibration | oscillating B0/phase in EPI; odd/even shifts, residual Nyquist ghosts [17] | nobody | ✗ | resonances in the GIRF (narrow-band poles), B0 modulation | published GIRF magnitude spectra with resonances |
-| B0 drift (gradient/passive-shim heating) | median < 1 Hz / 5 min at 3 T, worse on some systems [18] | nobody | ✗ | time-dependent global (and linear) offset driven by gradient duty | multi-site drift data [18] |
-| Physiological B0 fluctuation (respiration) | 2–7 Hz in the brain at 7 T, plus small gradients [19] | nobody | ✗ | time-varying low-order spherical-harmonic field from a breathing model | field-probe literature [19] |
+| **Gradient nonlinearity** | mm-scale distortion at FOV edge; b-value errors; vendors correct to 5th order, 9th–10th order leaves ~0.4 mm [14] | JEMRIS (CPU) | ✓ encoding positions (`GradientNonlinearity`, gradunwarp files); ✗ b-matrix | per-axis spherical-harmonic expansion of the encoding field; per-spin effective gradient (and b-matrix) | distortion of a grid phantom vs gradunwarp-style analytic maps; field-camera data |
+| **Concomitant (Maxwell) fields** | ∝ G²/B0: signal errors up to 100 % at low field + strong gradients [15]; spiral/EPI/DWI, 0.55 T systems | JEMRIS (CPU), Bschorr [12] | ✓ leading order (closed form) and exact |B| (`Scanner(field_strength=)`) | evaluate |B| of the full vector field (B0 + G·r + concomitant terms from ∇·B = ∇×B = 0) instead of Bz only | Bernstein's analytic phase for PC/spiral; Bschorr's results |
+| **Eddy currents / GIRF** | trajectory errors, EPI/spiral blurring and ghosts, bSSFP steady-state disruption [16] | JEMRIS (CPU, exponential), POSSUM (DWI) | ✓ `apply_girf`: GIRF taps / transfer functions, multi-exponential eddy currents, B0 and cross terms | linear time-invariant system per axis (GIRF convolution) incl. B0 and cross terms | measured GIRFs (thin-slice method); trajectory vs field-camera data |
+| Gradient delays, amplifier bandwidth | k-space shifts, EPI ghosts | via GIRF | ✓ (GIRF delays; bandwidth via taps) | part of GIRF | – |
+| Mechanical vibration | oscillating B0/phase in EPI; odd/even shifts, residual Nyquist ghosts [17] | nobody | ◐ (any measured GIRF incl. resonances; no mechanical model) | resonances in the GIRF (narrow-band poles), B0 modulation | published GIRF magnitude spectra with resonances |
+| B0 drift (gradient/passive-shim heating) | median < 1 Hz / 5 min at 3 T, worse on some systems [18] | nobody | ◐ linear / exponential drift (`drift.py`); not yet driven by gradient duty | time-dependent global (and linear) offset driven by gradient duty | multi-site drift data [18] |
+| Physiological B0 fluctuation (respiration) | 2–7 Hz in the brain at 7 T, plus small gradients [19] | nobody | ◐ sinusoidal uniform + linear terms (`drift.respiration`) | time-varying low-order spherical-harmonic field from a breathing model | field-probe literature [19] |
 | **B1⁺ (transmit) inhomogeneity** | ±20–40 % at 3 T body, worse at 7 T (dielectric effects) | JEMRIS, MRiLab | ◐ analytic maps | import EM-simulated complex B1⁺ per channel (pTx = sum over channels with drive weights) | measured B1 maps; EM ground truth |
 | RF amplifier nonlinearity, droop, phase | slice-profile widening, flip-angle bias at low/high drive [20] | nobody | ✗ | AM/AM, AM/PM transfer curve + low-pass on the RF waveform | published amplifier curves; flip-angle sweeps |
 | RF coil ringdown, dead times | small; timing | – | ◐ (dead times in `System`) | – | – |
+
+**R1 status (October 2026).** Concomitant fields (leading order and exact |B|), gradient
+nonlinearity (encoding positions), GIRF / eddy currents incl. B0 and cross terms, per-segment
+uniform fields, linear / exponential drift and a periodic respiratory field are in both
+simulators, forward and adjoint, opt-in and bit-identical to before when off. Verified against
+Bernstein's analytic phase, a Maxwell-compensated echo, |B| in 50-digit arithmetic, gradunwarp's
+basis, Laplace's equation, point-grid images, closed-form eddy responses, an FFT
+transfer-function convolution, closed-form drift phases and finite differences (numbers in
+`ROADMAP.md`, Phase 2b). Not yet: measured GIRFs / field-camera data, b-matrix with
+nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 
 ### 3.2 Spin system
 
@@ -135,7 +145,7 @@ project's goals (training data, sequence development), at 0.55–7 T.
 
 | step | effects | why first | verified against |
 |---|---|---|---|
-| R1 field model | vector-field core: gradient nonlinearity (SH), concomitant fields, GIRF/eddy (incl. B0 terms), drift and physiological fluctuation | largest unmodelled hardware effects; JEMRIS-only today and absent from every fast simulator | analytic concomitant phase, SH distortion maps, measured GIRFs, Bschorr et al. |
+| R1 field model ✓ (except real-data checks) | vector-field core: gradient nonlinearity (SH), concomitant fields, GIRF/eddy (incl. B0 terms), drift and physiological fluctuation | largest unmodelled hardware effects; JEMRIS-only today and absent from every fast simulator | analytic concomitant phase, SH distortion maps, measured GIRFs, Bschorr et al. |
 | R2 spin system | Bloch–McConnell: bound pool (MT, lineshape), myelin water, CEST | incidental MT is a 30–45 % WM effect in every multi-slice scan | BMCTool, Pulseq-CEST library, two-pool closed forms |
 | R3 real-data benchmark | NIST-phantom Pulseq raw data (open + own), realism metric, effect ablations | turns "realistic" into a number | – (it is the reference). **Started**: benchmark 1 predicts real 3 T IR-SE data to 1.4 % with nothing fitted (`validation/real/RESULTS.md`) |
 | R4 receive/transmit chain | EM-imported B1⁺/B1⁻/E, noise covariance from E fields, RF amplifier, ADC filter | noise and coil realism decide training-data usefulness | measured SNR/g-factor; EM ground truth |

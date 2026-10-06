@@ -18,6 +18,13 @@
 // last few of each and recomputes only on a miss, so a readout of n identical segments
 // costs one sin/cos per spin, not n; the inputs are the same, so the results are too.
 //
+// Field model (see fields.py): a lane's off-resonance in segment s is
+//     lin = pos.g + db0 + b0_offset[s]  plus  the concomitant field f_c(g),
+// f_c = conc . (gx^2, gy^2, gz^2, gx gy, gx gz, gy gz) at leading order (conc: (n, 6)), or
+// in exact mode (conc: (n, 7) = ax, ay, f0) |B| - f0 - lin = t^2 / (sqrt(u^2 + t^2) + u) with
+// t = (ax.g, ay.g) and u = f0 + lin. Without it the arithmetic is that of the ideal model
+// (b0_offset adds an exact zero), so results are unchanged bit for bit.
+//
 // One deliberate difference in form: relaxation is m += (m - m0) * expm1(-t / T)
 // instead of m = m0 + (m - m0) * exp(-t / T). Algebraically identical; in float32 it
 // keeps the small per-step decrement exact (exp(-dwell / T1) rounds to ~1).
@@ -52,10 +59,13 @@ struct Spins {
     const T* db0;     // (n,) [Hz]
     const T* sens;    // (n, C, 2) receive sensitivities, (re, im) interleaved
     const T* b1;      // (n,) transmit scale of every RF pulse, or null for 1
+    const T* conc;    // (n, 6) or (n, 7) concomitant-field coefficients (see conc_mode), or null
+    int conc_mode;    // kConcNone, kConcLeading (conc is (n, 6)) or kConcExact ((n, 7))
 
     Spins(int64_t n, int64_t n_coils, const T* pos, const T* pd, const T* t1, const T* t2, const T* db0,
-          const T* sens, const T* b1 = nullptr)
-        : n(n), n_coils(n_coils), pos(pos), pd(pd), t1(t1), t2(t2), db0(db0), sens(sens), b1(b1) {}
+          const T* sens, const T* b1 = nullptr, const T* conc = nullptr, int conc_mode = 0)
+        : n(n), n_coils(n_coils), pos(pos), pd(pd), t1(t1), t2(t2), db0(db0), sens(sens), b1(b1), conc(conc),
+          conc_mode(conc ? conc_mode : 0) {}
 };
 
 template <typename T>
@@ -66,7 +76,16 @@ struct Segments {
     const T* grad;         // (n, 3) [Hz/m]
     const T* adc_phase;    // (n,) [rad]
     const uint8_t* flags;  // (n,) kRF | kADC | kSpoil
+    const T* b0_offset = nullptr;  // (n,) uniform off-resonance [Hz], or null for 0
+
+    T offset(int64_t s) const { return b0_offset ? b0_offset[s] : T(0); }
 };
+
+// Concomitant-field modes (Spins::conc_mode)
+constexpr int kConcNone = 0;
+constexpr int kConcLeading = 1;
+constexpr int kConcExact = 2;
+constexpr int kConcMax = 7;  // coefficients per spin in exact mode
 
 // Gradient outputs; a null pointer means "not needed". Sequence gradients are summed
 // over spins; everything else is per spin.
@@ -84,6 +103,8 @@ struct Grads {
     T* sens = nullptr;       // (n, C, 2): d/d(re), d/d(im)
     T* b1 = nullptr;         // (n,)
     T* m = nullptr;          // (n, 3) initial magnetization
+    T* b0_offset = nullptr;  // (n_seg,)
+    T* conc = nullptr;       // (n, 6) or (n, 7), as Spins::conc
 };
 
 inline int64_t count_adc(const uint8_t* flags, int64_t n) {
@@ -131,13 +152,16 @@ template <typename T, int B>
 struct Block {
     alignas(64) T px[B], py[B], pz[B], db0[B], pd[B], r1[B], r2[B], b1[B];
     alignas(64) T mx[B], my[B], mz[B];
+    alignas(64) T cf[kConcMax][B];  // concomitant-field coefficients (Spins::conc)
+    alignas(64) T pf[2][B];         // precession factors including a uniform offset (precession())
+    int mode = kConcNone;
     std::vector<T> sr, si;  // (C, B) sensitivities
     // Relaxation over a duration: expm1(-t * R1), expm1(-t * R2). Key: t.
     Cache<T, B, 1, 2, 8> relax;
-    // Free precession: cos and sin of the phase. Key: dt, grad.
-    Cache<T, B, 4, 2, 8> prec;
-    // RF rotation: cos(phi), sin(phi) / phi, (1 - cos(phi)) / phi^2 and wz. Key: dt, rf, grad.
-    Cache<T, B, 6, 4, 4> rot;
+    // Free precession: cos and sin of the phase. Key: dt, grad, b0_offset.
+    Cache<T, B, 5, 2, 8> prec;
+    // RF rotation: cos(phi), sin(phi) / phi, (1 - cos(phi)) / phi^2 and wz. Key: dt, rf, grad, b0_offset.
+    Cache<T, B, 7, 4, 4> rot;
 
     explicit Block(int64_t n_coils) : sr(n_coils * B), si(n_coils * B) {}
 
@@ -146,6 +170,15 @@ struct Block {
     void load(const Spins<T>& sp, const T* m, int64_t start) {
         const int64_t nc = sp.n_coils;
         relax.clear(), prec.clear(), rot.clear();
+        mode = sp.conc_mode;
+        const int n_cf = mode == kConcExact ? 7 : 6;
+        for (int q = 0; q < kConcMax; ++q)
+            for (int l = 0; l < B; ++l) {
+                // lanes past the end get a huge f0 in exact mode (no transverse field), so that
+                // u = f0 + offset > 0 and their excess is 0, not 0 / 0
+                const T pad = mode == kConcExact && q == 6 ? T(1e15) : T(0);
+                cf[q][l] = mode && q < n_cf && start + l < sp.n ? sp.conc[n_cf * (start + l) + q] : pad;
+            }
         for (int l = 0; l < B; ++l) {
             const int64_t i = start + l;
             const bool in = i < sp.n;
@@ -225,11 +258,24 @@ struct Block {
         return d;
     }
 
+    // Off-resonance [Hz] of lane i in a segment with gradient g and uniform offset f.
+    T offset(int i, T gx, T gy, T gz, T f) const {
+        const T lin = px[i] * gx + py[i] * gy + pz[i] * gz + db0[i] + f;
+        if (mode == kConcNone) return lin;
+        if (mode == kConcLeading)
+            return lin + (cf[0][i] * (gx * gx) + cf[1][i] * (gy * gy) + cf[2][i] * (gz * gz) +
+                          cf[3][i] * (gx * gy) + cf[4][i] * (gx * gz) + cf[5][i] * (gy * gz));
+        const T tx = cf[0][i] * gx + cf[1][i] * gy + cf[2][i] * gz;
+        const T ty = cf[3][i] * gx + cf[4][i] * gy + cf[5][i] * gz;
+        const T t2 = tx * tx + ty * ty, u = cf[6][i] + lin;
+        return lin + t2 / (std::sqrt(u * u + t2) + u);
+    }
+
     // Rotation factors of an RF segment for lane i: cos(phi), sin(phi) / phi,
     // (1 - cos(phi)) / phi^2 and wz, for the rotation vector w = (wx, wy, wz) (wx, wy
     // already scaled by the lane's b1).
-    void rotation(T (*r)[B], int i, T w, T wx, T wy, T gx, T gy, T gz) const {
-        const T wz = w * (px[i] * gx + py[i] * gy + pz[i] * gz + db0[i]);
+    void rotation(T (*r)[B], int i, T w, T wx, T wy, T gx, T gy, T gz, T f) const {
+        const T wz = w * offset(i, gx, gy, gz, f);
         const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
         const T hp = T(0.5) * phi;
         const T sh = std::sin(hp) / hp;
@@ -245,6 +291,7 @@ struct Block {
         const T w_per_s = T(-2.0 * kPi);  // as in bloch.py: w = -TWO_PI * dt, rounded to T
         const T dt = seq.dt[s];
         const T gx = seq.grad[3 * s], gy = seq.grad[3 * s + 1], gz = seq.grad[3 * s + 2];
+        const T f = seq.offset(s);
         const T w = w_per_s * dt;
         bool fill;
         if (seq.flags[s] & kRF) {
@@ -253,9 +300,9 @@ struct Block {
             const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1];
             const T wx0 = w * rx, wy0 = w * ry;
             const T (*d)[B] = relaxation(T(0.5) * dt);
-            T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz}, fill);
+            T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz, f}, fill);
             if (fill)
-                for (int i = 0; i < B; ++i) rotation(r, i, w, wx0 * b1[i], wy0 * b1[i], gx, gy, gz);
+                for (int i = 0; i < B; ++i) rotation(r, i, w, wx0 * b1[i], wy0 * b1[i], gx, gy, gz, f);
             for (int i = 0; i < B; ++i) {
                 const T wx = wx0 * b1[i], wy = wy0 * b1[i];
                 const T x = mx[i] + mx[i] * d[1][i], y = my[i] + my[i] * d[1][i];
@@ -272,13 +319,7 @@ struct Block {
         } else {
             // exact precession about z, then exact relaxation (they commute)
             const T (*d)[B] = relaxation(dt);
-            T (*p)[B] = prec.find({dt, gx, gy, gz}, fill);
-            if (fill)
-                for (int i = 0; i < B; ++i) {
-                    const T phi = w * (px[i] * gx + py[i] * gy + pz[i] * gz + db0[i]);
-                    p[0][i] = std::cos(phi);
-                    p[1][i] = std::sin(phi);
-                }
+            T (*p)[B] = precession(dt, w, gx, gy, gz, f);
             for (int i = 0; i < B; ++i) {
                 const T x = p[0][i] * mx[i] - p[1][i] * my[i];
                 const T y = p[1][i] * mx[i] + p[0][i] * my[i];
@@ -287,6 +328,29 @@ struct Block {
                 mz[i] = mz[i] + (mz[i] - pd[i]) * d[0][i];
             }
         }
+    }
+
+    // cos and sin of the free-precession phase w * offset for every lane. Except in exact
+    // mode the uniform offset f only adds the same angle w f to every lane, so the cache is
+    // keyed on the gradient alone and that rotation is applied on top (into `pf`): a
+    // time-varying f then costs one sin / cos per segment, not one per lane.
+    T (*precession(T dt, T w, T gx, T gy, T gz, T f))[B] {
+        bool fill;
+        const bool split = mode != kConcExact && f != T(0);
+        T (*p)[B] = prec.find({dt, gx, gy, gz, split ? T(0) : f}, fill);
+        if (fill)
+            for (int i = 0; i < B; ++i) {
+                const T phi = w * offset(i, gx, gy, gz, split ? T(0) : f);
+                p[0][i] = std::cos(phi);
+                p[1][i] = std::sin(phi);
+            }
+        if (!split) return p;
+        const T cf_ = std::cos(w * f), sf_ = std::sin(w * f);
+        for (int i = 0; i < B; ++i) {
+            pf[0][i] = p[0][i] * cf_ - p[1][i] * sf_;
+            pf[1][i] = p[1][i] * cf_ + p[0][i] * sf_;
+        }
+        return pf;
     }
 
     void spoil() {
@@ -382,6 +446,8 @@ void simulate_blocks(const Spins<T>& sp, const Segments<T>& seq, T* m, T* signal
 //   free:  A = E(dt) Rz(phi), phi = -2 pi dt (pos.g + db0); E = diag(e2, e2, e1);
 //   RF:    A = E(dt/2) R(w) E(dt/2), R = c I + s1 [w]x + s2 w w^T (Rodrigues), so
 //          R^T = c I - s1 [w]x + s2 w w^T; w = -2 pi dt (b1 rf_x, b1 rf_y, pos.g + db0).
+// With the field model, pos.g + db0 is the full offset (Block::offset); its partial
+// derivatives come from Adjoint::field.
 // m_{s-1} comes from checkpoints: the forward stores m before every `every` segments;
 // the backward replays one interval at a time into a (every, 3, B) buffer and sweeps it
 // in reverse. Relaxation and spoiling are never inverted. Work: one forward replay plus
@@ -390,10 +456,10 @@ void simulate_blocks(const Spins<T>& sp, const Segments<T>& seq, T* m, T* signal
 // over threads in thread order).
 
 // Segment gradient slots, accumulated in double per thread.
-enum { kGdt, kGrx, kGry, kGgx, kGgy, kGgz, kNSeg };
+enum { kGdt, kGrx, kGry, kGgx, kGgy, kGgz, kGoff, kNSeg };
 
 // Per-spin gradient rows of Adjoint::total ahead of the sensitivities.
-enum { kGpx, kGpy, kGpz, kGdb0, kGpd, kGr1, kGr2, kGb1, kNSpin };
+enum { kGpx, kGpy, kGpz, kGdb0, kGpd, kGr1, kGr2, kGb1, kGc0, kNSpin = kGc0 + kConcMax };
 
 // Per-spin gradients are summed in T and moved into double after every segment whose
 // index is a multiple of this: few enough terms for float32, and the same grouping for
@@ -422,15 +488,16 @@ struct Adjoint {
     alignas(64) T lx[B], ly[B], lz[B];  // lambda
     // Per-spin gradients, summed in T over at most kFlush segments and then into `total`.
     alignas(64) T gpx[B], gpy[B], gpz[B], gdb0[B], gpd[B], gr1[B], gr2[B], gb1[B];
-    std::vector<double> total;  // (kNSpin + 2C, B): gpx, ..., gr2, gb1, d/d sens (re), (im)
+    alignas(64) T gcf[kConcMax][B];  // concomitant-field coefficients
+    std::vector<double> total;  // (kNSpin + 2C, B): gpx, ..., gr2, gb1, gcf, d/d sens (re), (im)
     std::vector<T> buf;         // (every, 3, B): m before each segment of the current interval
     // Sensitivity gradients are sums over ADC samples of h (x) m_transverse; samples are
     // collected here and summed in register tiles by flush().
     std::vector<T> obuf;        // (kFlush, 2, B): (mx, my) at each ADC sample since the last flush
     std::vector<const T*> hbuf; // (kFlush,): its dL/d(raw coil sums)
     int64_t n_obuf = 0;
-    // RF rotation: c, s1, s2, wz (as Block::rot) plus f1, f2. Key: dt, rf, grad.
-    Cache<T, B, 6, 6, 4> rot;
+    // RF rotation: c, s1, s2, wz (as Block::rot) plus f1, f2. Key: dt, rf, grad, b0_offset.
+    Cache<T, B, 7, 6, 4> rot;
 
     Adjoint(int64_t n_coils, int64_t every)
         : fw(n_coils), total((kNSpin + 2 * n_coils) * B), buf(3 * B * every), obuf(2 * B * kFlush), hbuf(kFlush) {}
@@ -444,6 +511,7 @@ struct Adjoint {
             ly[l] = in ? g_m[3 * i + 1] : T(0);
             lz[l] = in ? g_m[3 * i + 2] : T(0);
             gpx[l] = gpy[l] = gpz[l] = gdb0[l] = gpd[l] = gr1[l] = gr2[l] = gb1[l] = T(0);
+            for (int q = 0; q < kConcMax; ++q) gcf[q][l] = T(0);
         }
         std::fill(total.begin(), total.end(), 0.0);
         n_obuf = 0;
@@ -478,6 +546,7 @@ struct Adjoint {
     // Move the per-spin sums into `total`.
     void flush(int64_t n_coils) {
         T* part[kNSpin] = {gpx, gpy, gpz, gdb0, gpd, gr1, gr2, gb1};
+        for (int q = 0; q < kConcMax; ++q) part[kGc0 + q] = gcf[q];
         for (int q = 0; q < kNSpin; ++q)
             for (int i = 0; i < B; ++i) total[q * B + i] += part[q][i], part[q][i] = T(0);
         if (n_obuf) {
@@ -502,6 +571,10 @@ struct Adjoint {
             if (g.t1) g.t1[i] = T(-t[kGr1 * B + l] * r1 * r1);  // r1 = 1 / t1
             if (g.t2) g.t2[i] = T(-t[kGr2 * B + l] * r2 * r2);
             if (g.b1) g.b1[i] = T(t[kGb1 * B + l]);
+            if (g.conc) {
+                const int n_cf = fw.mode == kConcExact ? 7 : 6;
+                for (int q = 0; q < n_cf; ++q) g.conc[n_cf * i + q] = T(t[(kGc0 + q) * B + l]);
+            }
             if (g.sens)
                 for (int64_t c = 0; c < nc; ++c) {
                     g.sens[2 * (i * nc + c)] = T(t[(kNSpin + c) * B + l]);
@@ -565,34 +638,114 @@ struct Adjoint {
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wpass-failed"
 #endif
+    // Partial derivatives of lane i's offset (Block::offset) for gradient g and uniform
+    // offset f: its value bz, d/d(lin) with lin = pos.g + db0 + f, and d/dg. Exact mode
+    // also returns tx / S, ty / S and d/df0 = -t^2 / (S (S + u)), with S = |B|.
+    template <int M>
+    void field(int i, T gx, T gy, T gz, T f, T& bz, T& dlin, T& dgx, T& dgy, T& dgz, T& ex, T& ey,
+               T& ef0) const {
+        const T *px = fw.px, *py = fw.py, *pz = fw.pz;
+        const T lin = px[i] * gx + py[i] * gy + pz[i] * gz + fw.db0[i] + f;
+        const T(*c)[B] = fw.cf;
+        if constexpr (M == kConcLeading) {
+            bz = lin + (c[0][i] * (gx * gx) + c[1][i] * (gy * gy) + c[2][i] * (gz * gz) + c[3][i] * (gx * gy) +
+                        c[4][i] * (gx * gz) + c[5][i] * (gy * gz));
+            dlin = T(1);
+            dgx = px[i] + T(2) * c[0][i] * gx + c[3][i] * gy + c[4][i] * gz;
+            dgy = py[i] + T(2) * c[1][i] * gy + c[3][i] * gx + c[5][i] * gz;
+            dgz = pz[i] + T(2) * c[2][i] * gz + c[4][i] * gx + c[5][i] * gy;
+            ex = ey = ef0 = T(0);
+        } else {
+            const T tx = c[0][i] * gx + c[1][i] * gy + c[2][i] * gz;
+            const T ty = c[3][i] * gx + c[4][i] * gy + c[5][i] * gz;
+            const T t2 = tx * tx + ty * ty, u = c[6][i] + lin;
+            const T S = std::sqrt(u * u + t2);
+            bz = lin + t2 / (S + u);
+            dlin = u / S, ex = tx / S, ey = ty / S;
+            ef0 = -t2 / (S * (S + u));
+            dgx = dlin * px[i] + ex * c[0][i] + ey * c[3][i];
+            dgy = dlin * py[i] + ex * c[1][i] + ey * c[4][i];
+            dgz = dlin * pz[i] + ex * c[2][i] + ey * c[5][i];
+        }
+    }
+
+    // Lane i's gradient of the concomitant-field coefficients, given gb = dL/d(offset);
+    // q: the gradient monomials (leading order).
+    template <int M>
+    void accumulate_field(int i, T gb, T gx, T gy, T gz, const T* q, T ex, T ey, T ef0) {
+        if constexpr (M == kConcLeading) {
+            for (int k = 0; k < 6; ++k) gcf[k][i] += gb * q[k];
+        } else {
+            const T a = gb * ex, b = gb * ey;
+            gcf[0][i] += a * gx, gcf[1][i] += a * gy, gcf[2][i] += a * gz;
+            gcf[3][i] += b * gx, gcf[4][i] += b * gy, gcf[5][i] += b * gz;
+            gcf[6][i] += gb * ef0;
+        }
+    }
+
+    // dL/d(offset) = gb of lane i into the per-spin gradients; returns the offset and
+    // lane i's terms of the segment gradients (grad, b0_offset).
+    template <int M>
+    T offset_grads(int i, T gb, T gx, T gy, T gz, T f, const T* q, T& sgx, T& sgy, T& sgz, T& soff) {
+        const T *px = fw.px, *py = fw.py, *pz = fw.pz;
+        if constexpr (M == kConcNone) {
+            gdb0[i] += gb;
+            gpx[i] += gb * gx, gpy[i] += gb * gy, gpz[i] += gb * gz;
+            sgx = gb * px[i], sgy = gb * py[i], sgz = gb * pz[i], soff = gb;
+            return px[i] * gx + py[i] * gy + pz[i] * gz + fw.db0[i] + f;
+        } else {
+            T bz, dlin, dgx, dgy, dgz, ex, ey, ef0;
+            field<M>(i, gx, gy, gz, f, bz, dlin, dgx, dgy, dgz, ex, ey, ef0);
+            const T gl = gb * dlin;
+            gdb0[i] += gl;
+            gpx[i] += gl * gx, gpy[i] += gl * gy, gpz[i] += gl * gz;
+            sgx = gb * dgx, sgy = gb * dgy, sgz = gb * dgz, soff = gl;
+            accumulate_field<M>(i, gb, gx, gy, gz, q, ex, ey, ef0);
+            return bz;
+        }
+    }
+
     // Reverse through segment s; m_{s-1} is at buf slot j, lambda holds dL/dm_s.
     // h: dL/d(raw coil sums) of this segment's ADC sample, or null.
     void reverse(const Segments<T>& seq, int64_t s, int64_t j, const T* h, int64_t n_coils, bool sens,
                  double* gseg) {
+        switch (fw.mode) {
+            case kConcLeading: return reverse_mode<kConcLeading>(seq, s, j, h, n_coils, sens, gseg);
+            case kConcExact: return reverse_mode<kConcExact>(seq, s, j, h, n_coils, sens, gseg);
+            default: return reverse_mode<kConcNone>(seq, s, j, h, n_coils, sens, gseg);
+        }
+    }
+
+    template <int M>
+    void reverse_mode(const Segments<T>& seq, int64_t s, int64_t j, const T* h, int64_t n_coils, bool sens,
+                      double* gseg) {
         const T w_per_s = T(-2.0 * kPi);
         const T* x0 = &buf[3 * B * j];
         const T *y0 = x0 + B, *z0 = x0 + 2 * B;
-        const T *px = fw.px, *py = fw.py, *pz = fw.pz, *db0 = fw.db0, *pd = fw.pd, *r1 = fw.r1, *r2 = fw.r2;
+        const T *pd = fw.pd, *r1 = fw.r1, *r2 = fw.r2;
         const T* b1 = fw.b1;
         const T dt = seq.dt[s];
         const T gx = seq.grad[3 * s], gy = seq.grad[3 * s + 1], gz = seq.grad[3 * s + 2];
-        const uint8_t f = seq.flags[s];
+        const T f = seq.offset(s);
+        const T q[6] = {gx * gx, gy * gy, gz * gz, gx * gy, gx * gz, gy * gz};
+        const uint8_t fl = seq.flags[s];
         const T w = w_per_s * dt;
-        if (f & kSpoil)
+        if (fl & kSpoil)
             for (int i = 0; i < B; ++i) lx[i] = T(0), ly[i] = T(0);
         bool fill;
+        T sgx = 0, sgy = 0, sgz = 0, soff = 0;
         // sums over lanes for the segment gradients
-        T sdt = 0, sgx = 0, sgy = 0, sgz = 0, swx = 0, swy = 0;
-        if (f & kRF) {
+        T sdt = 0, swx = 0, swy = 0;
+        if (fl & kRF) {
             const T h_dt = T(0.5) * dt;
             const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1];
             const T wx0 = w * rx, wy0 = w * ry;  // times b1[i] per lane, as in Block::advance
             const T (*d)[B] = fw.relaxation(h_dt);
-            T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz}, fill);
+            T (*r)[B] = rot.find({dt, rx, ry, gx, gy, gz, f}, fill);
             if (fill)
                 for (int i = 0; i < B; ++i) {
                     const T wx = wx0 * b1[i], wy = wy0 * b1[i];
-                    fw.rotation(r, i, w, wx, wy, gx, gy, gz);
+                    fw.rotation(r, i, w, wx, wy, gx, gy, gz, f);
                     const T wz = r[3][i];
                     const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
                     rotation_derivatives(phi, r[0][i], r[1][i], r[2][i], r[4][i], r[5][i]);
@@ -619,7 +772,7 @@ struct Adjoint {
                 }
                 sample(h, n_coils);
             }
-#pragma omp simd reduction(+ : sdt, sgx, sgy, sgz, swx, swy)
+#pragma omp simd reduction(+ : sdt, sgx, sgy, sgz, soff, swx, swy)
             for (int i = 0; i < B; ++i) {
                 T m1x, m1y, m1z, dot, nx, ny, nz;
                 fwd(i, m1x, m1y, m1z, dot, nx, ny, nz);
@@ -651,13 +804,11 @@ struct Adjoint {
                 gr1[i] -= gd1 * h_dt * e1;
                 gr2[i] -= gd2 * h_dt * e2;
                 gpd[i] += gpd_;
-                // wz = w (pos.g + db0)
-                const T gb = gwz * w;
-                gdb0[i] += gb;
-                gpx[i] += gb * gx, gpy[i] += gb * gy, gpz[i] += gb * gz;
-                const T bz0 = px[i] * gx + py[i] * gy + pz[i] * gz + db0[i];
+                // wz = w * offset
+                T tgx, tgy, tgz, toff;
+                const T bz0 = offset_grads<M>(i, gwz * w, gx, gy, gz, f, q, tgx, tgy, tgz, toff);
+                sgx += tgx, sgy += tgy, sgz += tgz, soff += toff;
                 sdt += w_per_s * gwz * bz0 - T(0.5) * (gd1 * r1[i] * e1 + gd2 * r2[i] * e2);
-                sgx += gb * px[i], sgy += gb * py[i], sgz += gb * pz[i];
                 // (wx, wy) = b1 (wx0, wy0): the sequence sees dL/dw times b1, the spin dL/dw . w0
                 swx += gwx * b1[i], swy += gwy * b1[i];
                 gb1[i] += gwx * wx0 + gwy * wy0;
@@ -669,13 +820,7 @@ struct Adjoint {
             }
         } else {
             const T (*d)[B] = fw.relaxation(dt);
-            T (*p)[B] = fw.prec.find({dt, gx, gy, gz}, fill);
-            if (fill)
-                for (int i = 0; i < B; ++i) {
-                    const T phi = w * (px[i] * gx + py[i] * gy + pz[i] * gz + db0[i]);
-                    p[0][i] = std::cos(phi);
-                    p[1][i] = std::sin(phi);
-                }
+            T (*p)[B] = fw.precession(dt, w, gx, gy, gz, f);
             if (h) {
                 if (sens) {
                     T* o = collect(h);
@@ -686,7 +831,7 @@ struct Adjoint {
                 }
                 sample(h, n_coils);
             }
-#pragma omp simd reduction(+ : sdt, sgx, sgy, sgz)
+#pragma omp simd reduction(+ : sdt, sgx, sgy, sgz, soff)
             for (int i = 0; i < B; ++i) {
                 const T c = p[0][i], sn = p[1][i];
                 const T e1 = T(1) + d[0][i], e2 = T(1) + d[1][i];
@@ -698,17 +843,18 @@ struct Adjoint {
                 lx[i] = ax + ax * d[1][i], ly[i] = ay + ay * d[1][i], lz[i] = lz[i] + lz[i] * d[0][i];
                 gr1[i] -= gd1 * dt * e1;
                 gr2[i] -= gd2 * dt * e2;
-                // phi = w (pos.g + db0)
-                const T gb = gphi * w;
-                gdb0[i] += gb;
-                gpx[i] += gb * gx, gpy[i] += gb * gy, gpz[i] += gb * gz;
-                const T bz0 = px[i] * gx + py[i] * gy + pz[i] * gz + db0[i];
+                // phi = w * offset
+                T tgx, tgy, tgz, toff;
+                const T bz0 = offset_grads<M>(i, gphi * w, gx, gy, gz, f, q, tgx, tgy, tgz, toff);
+                sgx += tgx, sgy += tgy, sgz += tgz, soff += toff;
                 sdt += w_per_s * gphi * bz0 - (gd1 * r1[i] * e1 + gd2 * r2[i] * e2);
-                sgx += gb * px[i], sgy += gb * py[i], sgz += gb * pz[i];
             }
             if (gseg) gseg[kGdt] += double(sdt);
         }
-        if (gseg) gseg[kGgx] += double(sgx), gseg[kGgy] += double(sgy), gseg[kGgz] += double(sgz);
+        if (gseg) {
+            gseg[kGgx] += double(sgx), gseg[kGgy] += double(sgy), gseg[kGgz] += double(sgz);
+            gseg[kGoff] += double(soff);
+        }
     }
 #if defined(__clang__)
 #pragma clang diagnostic pop
@@ -723,7 +869,7 @@ void adjoint_blocks(const Spins<T>& sp, const Segments<T>& seq, const T* ckpt, i
     const int64_t n_blocks = (sp.n + B - 1) / B;
     const int64_t n_ckpt = count_checkpoints(ns, every);
     n_threads = clamp_threads(n_threads, n_blocks);
-    const bool need_seg = g.dt || g.rf || g.grad;
+    const bool need_seg = g.dt || g.rf || g.grad || g.b0_offset;
 
     // dL/d(raw coil sums) = conj-free rotation of dL/dsignal by exp(+i * adc_phase); ADC sample
     // number at every checkpoint
@@ -780,6 +926,7 @@ void adjoint_blocks(const Spins<T>& sp, const Segments<T>& seq, const T* ckpt, i
             if (g.dt) g.dt[s] = T(v[kGdt]);
             if (g.rf) g.rf[2 * s] = T(v[kGrx]), g.rf[2 * s + 1] = T(v[kGry]);
             if (g.grad) g.grad[3 * s] = T(v[kGgx]), g.grad[3 * s + 1] = T(v[kGgy]), g.grad[3 * s + 2] = T(v[kGgz]);
+            if (g.b0_offset) g.b0_offset[s] = T(v[kGoff]);
         }
     // receiver phase: signal = raw * exp(-i psi), so dsignal/dpsi = -i signal
     if (g.adc_phase)
