@@ -86,3 +86,51 @@ per pixel along the readout (85 k spins), RF merged 4:1, 8 warm-up TRs before th
   the spheres), which is the flat tail on spheres 9–14 — not thermal noise, which is ~15–30× lower.
   (2) Reference-value uncertainty: the worst long-T2 sphere (5) is one whose T2 the manual
   withholds; MnCl2 T2 is temperature-sensitive and the scan temperature is unknown.
+
+## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
+
+Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
+image's (zero-mean) MC noise into an upward bias E|s + n| ≈ |s| + σ²/2|s|, largest where the
+signal is small. The tools: scrambled-Sobol spin placement (Cranley–Patterson shift per pixel),
+importance sampling for the water fill, K independent seeds averaged in the complex domain, the
+bias σ² removed using the seed spread, and jackknife error bars over seeds.
+
+**Validation** on a uniform water patch through the real TSE sequence (8 seeds each, Apple GPU):
+
+| spins / pixel | stratified: per-pixel MC error of one run | Sobol | bias-corrected level, echo 1 / 15 |
+|---|---|---|---|
+| 64 | 0.40 | 0.17–0.22 | 0.595–0.600 / 0.659–0.668 |
+| 256 | 0.23 | 0.07–0.09 | 0.593–0.594 / 0.661–0.662 |
+| 1024 | 0.12 | 0.03–0.04 | 0.594–0.595 / 0.663 |
+
+Stratified falls as N^-1/2, Sobol ≈ N^-0.75 (≈ 12× fewer spins than stratified at 1024 for the
+same error); the bias-corrected level agrees to ~1 % at every density.
+
+**Benchmark 2 with Monte Carlo estimation and the water fill** (Sobol 256 spins/pixel, water within
+8 px of a wall, full density within 3 px and ¼ beyond, 1 mm walls, water T1/T2 3.0/2.0 s; 4 seeds,
+± jackknife SE; Apple GPU, ~18 min):
+
+| model | spheres 1–10 | per sphere 1..14 [%] |
+|---|---|---|
+| mono-exponential, reference T2 | 10.47 % | 4.2 4.9 5.8 7.3 5.7 9.5 11.2 15.1 19.6 21.5 32.3 41.2 42.0 53.1 |
+| Bloch MC, spheres only | 2.38 ± 0.06 % | 0.6 0.8 1.2 1.4 2.5 1.0 1.3 2.6 5.7 6.6 19.4 28.8 27.2 39.1 |
+| **Bloch MC + water fill** | **2.20 ± 0.04 %** | 0.7 0.8 1.2 1.5 2.9 1.1 1.3 2.8 3.6 6.1 **7.8 13.4 15.2 22.1** |
+
+The spheres-only MC result reproduces the converged brute-force runs (2.25–2.37 %). The water
+fill, which looked harmful when undersampled (5.75 % with 64 stratified spins/pixel: MC bias),
+roughly halves the error of the short-T2 spheres 9 and 11–14 once estimated properly, as the
+original hypothesis predicted; long-T2 spheres are unchanged within error.
+
+**Benchmark 1 with Monte Carlo estimation** (T1 v2; Sobol 256 spins/pixel; 4 seeds, ± jackknife SE;
+Apple GPU: 3 min spheres only, 20 min with water):
+
+| model | spheres 1–10 | per sphere 1..14 [%] |
+|---|---|---|
+| analytic IR formula | 25.93 % | 30.2 33.8 35.5 32.2 29.1 28.7 24.1 21.4 15.4 8.8 9.0 5.9 2.9 1.2 |
+| Bloch MC, spheres only | 1.77 ± 0.19 % | 1.7 4.9 4.6 1.0 0.8 0.9 0.8 1.1 1.2 0.6 1.2 1.3 0.4 0.2 |
+| Bloch MC + water fill | 1.88 ± 0.20 % | 1.9 4.7 4.6 1.3 1.8 1.1 0.8 0.8 1.0 0.8 1.0 1.6 0.4 0.5 |
+
+Consistent with the brute-force 1.49 % within ~1.5 SE; the water fill makes no significant
+difference on this plane (long-T2 NiCl2 spheres next to long-T2 water). The error bars are
+dominated by spheres 2–3 (±1.3 / ±0.3 %), whose curves pass near the null at TI 1000 ms where
+the bias correction is least certain.

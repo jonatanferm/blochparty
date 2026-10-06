@@ -156,3 +156,12 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   Block-buffered reductions doubled speed. On the real NIST TSE workload (1 coil, long RF trains,
   23 echoes) it is **5.8× the CPU kernel (40 s vs 232 s)**; on 8-coil synthetic GRE still slower
   — the next optimisation (simdgroup matrix multiply) is noted. 8 tests vs the float64 core.
+
+### Monte Carlo validated; the water fill vindicated
+- Water-patch validation on the GPU (8 seeds): Sobol placement falls ≈ N^-0.75 vs N^-1/2 for
+  stratified (≈ 12× fewer spins at equal error); the bias-corrected level agrees to ~1 % even at 64
+  spins/pixel.
+- Benchmark 2 in MC mode: spheres only 2.38 ± 0.06 % (matches brute force); **with the water fill
+  2.20 ± 0.04 %**, and the short-T2 spheres roughly halve (sphere 11: 19.4 → 7.8 %, 14: 39.1 →
+  22.1 %). The earlier "water makes it worse" (5.75 %) was Monte Carlo bias from undersampling:
+  the original hypothesis was right, the first test of it was not.
