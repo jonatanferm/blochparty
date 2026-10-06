@@ -250,3 +250,13 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
 - Next candidates: an incidental-MT demonstration (multi-slice signal loss in white matter
   vs the literature's 30–45 %); free-pool exchange (myelin water, CEST) in the same engine;
   the generalized Bloch model for short pulses.
+
+## 2026-10-07 (night, autonomous) — incidental MT, free-pool exchange, generalized Bloch
+
+- **Incidental MT** (`validation/incidental_mt.py`, `RESULTS_INCIDENTAL_MT.md`) against Shin et
+  al. 2009 (3 T LL-EPI with fat saturation, 1 → 9 slices: ~30 % loss). Nothing tuned. The
+  model gives a linear growth with slice count and 97–99 % at 1 slice, with MT 2/3–3/4 of
+  the loss for long pulses. The magnitude scales with the unknown fat-sat RF power: 6–19 % for
+  10 ms Gaussians at 90–180°; ~30 % needs ~2× the power of 10 ms at 180°. Short pulses are
+  ruled out by the measured single-slice value. A plausibility check, not a validation:
+  the paper does not give the pulse.
