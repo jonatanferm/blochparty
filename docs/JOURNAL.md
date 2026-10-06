@@ -239,3 +239,14 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   without a frequency offset is one RF segment in `read_pulseq`: `max_rf_step=` (opt-in).
 - **Next**: the fused CPU kernel forward and adjoint for the bound pool (the 2×2 adjoint is
   derived and prototyped against autograd through `matrix_exp`), then Metal forward.
+- **Fused CPU kernel** (5776f82): the bound pool as a fourth component; the exact exchange
+  step, with a closed-form adjoint, in place of longitudinal relaxation. Forward 1e-15 vs
+  the core; every gradient, pool parameters and RF frequency included, ≤ 7e-13 vs autograd;
+  gradcheck. 1.45× the plain kernel once saturated steps are cached on |rf|². Bug found: NaN
+  from padding lanes (det A = 0).
+- **Apple GPU**: `step_mt` in both coil-reduction kernels (one uniform branch, dummy buffers
+  without MT); 2e-6 vs the core, +15 % runtime; coil benchmark unchanged. R2's bound pool is
+  now in all three engines; defaults bit-identical throughout.
+- Next candidates: an incidental-MT demonstration (multi-slice signal loss in white matter
+  vs the literature's 30–45 %); free-pool exchange (myelin water, CEST) in the same engine;
+  the generalized Bloch model for short pulses.

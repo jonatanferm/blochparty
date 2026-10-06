@@ -218,6 +218,18 @@ says where it came from so it can be re-checked.
   the sum. The sensitivities go in a zero-padded (2, 8·tiles, grid) layout, so tile loads never
   need bounds checks and padded spins contribute zero.
 
+- **Padding lanes must stay well-posed, not just zero** (fused MT, 2026-10-06). Padded lanes
+  got r1 = f = k = 0, so the exchange step's det A = 0 and z_ss = 0/0; their sensitivity is
+  zero, but 0·NaN = NaN poisoned every coil sum. The final magnetization looked fine, since
+  only real lanes are stored; only the signal showed it. Padding lanes now get unit rates.
+- **Cache physics on what it depends on, not on the raw inputs** (fused MT). The saturated
+  exchange step depends on the RF through |B1|² only, so caching it on (dt, |rf|², grad,
+  offset, f_rf) rather than (rf_x, rf_y) lets RF-spoiled repeats hit. MT then costs 1.45×
+  the plain CPU kernel on a 3D GRE (2.8× uncached) and +15 % on the GPU.
+- **float32 swallows `n − 1 − 1e-9`**: clamping an interpolation position below the last
+  node that way does nothing in float32, so `floor` can reach the last node and read past
+  the table. Clamp the cell index to n − 2 instead (and let the last cell include its end).
+
 ## Process and tooling
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:

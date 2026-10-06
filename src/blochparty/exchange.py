@@ -115,8 +115,8 @@ def _sl_table(dtype, device):
 def _interp(xq: Tensor, xp: Tensor, fp: Tensor) -> Tensor:
     """Linear interpolation on a uniform grid ``xp``, clamped at its ends; differentiable in xq."""
     h = xp[1] - xp[0]
-    pos = ((xq - xp[0]) / h).clamp(0, len(xp) - 1 - 1e-9)
-    i = pos.detach().floor().long()
+    pos = ((xq - xp[0]) / h).clamp(0, len(xp) - 1)
+    i = pos.detach().floor().long().clamp(max=len(xp) - 2)  # the last cell includes its right end
     a = pos - i
     return fp[i] * (1 - a) + fp[i + 1] * a
 

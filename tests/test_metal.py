@@ -78,3 +78,23 @@ def test_scanner_model_not_supported():
     ph, seq = random_case(0)
     with pytest.raises(NotImplementedError):
         metal.simulate_metal(ph, seq, scanner=object())
+
+
+@pytest.mark.parametrize("mma", [False, True])
+@pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
+def test_magnetization_transfer(shape, mma):
+    from dataclasses import replace
+
+    from test_exchange import bm_case
+    from test_fused import with_readout
+
+    ph, seq = bm_case(0, shape)
+    ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64))
+    seq = with_readout(seq)
+    coils = bp.birdcage_sensitivities(ph.pos, 4)
+    m0 = torch.randn(len(ph), 4, dtype=torch.float64, generator=torch.Generator().manual_seed(1))
+    for m_init in (None, m0):
+        ref = bp.simulate(ph, seq, coils, m_init=m_init)
+        out = metal.simulate_metal(ph, seq, coils, m_init=m_init, mma=mma)
+        assert rel(out.signal, ref.signal) < 1e-4 and rel(out.m, ref.m) < 1e-4
+        assert float((out.m_bound.double() - ref.m_bound).abs().max() / ref.m.abs().max()) < 1e-4

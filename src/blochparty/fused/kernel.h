@@ -80,10 +80,10 @@ struct Lineshape {
         const bool low = x < xmin;
         const T lx = std::log(low ? xmin : x);
         T pos = (lx - x0) / h;
-        const T top = T(n - 1) - T(1e-9);
+        const T top = T(n - 1);
         const bool clamped = pos < T(0) || pos > top;
         pos = pos < T(0) ? T(0) : (pos > top ? top : pos);
-        const int64_t i = static_cast<int64_t>(std::floor(pos));
+        const int64_t i = std::min<int64_t>(static_cast<int64_t>(std::floor(pos)), n - 2);  // last cell: both ends
         const T a = pos - T(i);
         const T val = std::exp(log_f[i] * (T(1) - a) + log_f[i + 1] * a);
         // d val / dx = val * dlogF/dlogx / x, zero where log x or the table position is clamped
