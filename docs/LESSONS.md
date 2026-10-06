@@ -78,9 +78,11 @@ says where it came from so it can be re-checked.
   for physics) and pypulseq's 42.576 MHz/T (`PULSEQ_GAMMA_BAR`, only for hardware limits so
   gradient designs equal pypulseq's).
 - **NIST phantom references**: T1 of the NiCl2 array at 3 T / 20 °C for version 1 (serial < 43)
-  and 2 (≥ 43) are in the RRSG 2020 code (`rrsg2020/analysis`, `src/nist.py`); T2 of the same
-  spheres at 3 T in Keenan et al. (PMC5408299, Table 1). The Tong et al. dataset records neither
-  serial nor temperature; v2 fits it better (1.4 % vs 2.7 %).
+  and 2 (≥ 43) are in the RRSG 2020 code (`rrsg2020/analysis`, `src/nist.py`); version 2 and
+  T2 of the MnCl2 array are the phantom-manual values in Carr et al. 2021 (Table 2); 3 T
+  relaxivities for the cross terms in Martin et al. 2023 (Table 1). All in
+  `validation/real/nist.py`. The Tong et al. dataset records neither serial nor temperature;
+  v2 fits it better (1.5 % vs 2.8 %).
 - **Mendeley Data's API rejects Python's urllib** (403); `curl` works.
   (`validation/real/fetch_data.py`)
 
