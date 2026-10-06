@@ -3,6 +3,9 @@
 A small, differentiable MRI simulator in PyTorch: phantom + coils + sequence → raw k-space.
 Everyone's invited, as long as they precess.
 Every feature is checked against an independent reference (see [ROADMAP.md](ROADMAP.md)).
+What other simulators do and the realism plan: [docs/REALISM.md](docs/REALISM.md); hard-won
+lessons: [docs/LESSONS.md](docs/LESSONS.md); comparison with real scanner data:
+[validation/real/](validation/real/).
 
 ```bash
 uv sync

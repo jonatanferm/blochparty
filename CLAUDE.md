@@ -1,0 +1,34 @@
+# Bloch Party
+
+Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
+implementation) and a fused C++ kernel with a hand-written adjoint (`src/blochparty/fused/`).
+Goal: the most physically realistic simulator, judged against real scanners
+(`docs/REALISM.md`); roadmap in `ROADMAP.md`.
+
+## Working rules
+
+- **Nothing is done without an independent check**: closed forms, the SciPy ODE solver, EPG,
+  the signal equation, MRzero (`validation/`), or real data (`validation/real/`).
+- **Defaults stay bit-identical.** New physics is opt-in. Before and after a core change run
+  `uv run python tools/snapshot.py save <file>` and `compare <before> <after>`.
+- **Every new term goes into the PyTorch core and the fused kernel's forward and adjoint**,
+  with gradients checked against autograd and finite differences.
+- **Record what you learn in `docs/LESSONS.md`**: anything that took more than a few minutes
+  to figure out (physics, numerics, data/format quirks, tool behaviour, process), with where
+  it came from.
+
+## Commands
+
+```bash
+uv sync --extra pulseq --extra mrzero
+uv run pytest                      # full suite (fused tests need a C++ compiler + ninja)
+uv run pytest -m crosscheck        # opt-in MRzero agreement
+uv run python benchmarks/bench.py [--backend fused] [--record]
+uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py
+```
+
+## Conventions
+
+Pulseq units (RF Hz, gradients Hz/m, s, m); dM/dt = γ M×B, a pulse along +x tips +z to +y;
+Mxy = Mx + iMy evolves as e^{−i2πft}; arrays ordered (z, y, x); ADC sample i at (i+½)·dwell.
+Physical γ is `constants.GAMMA_BAR` (CODATA); `PULSEQ_GAMMA_BAR` only for hardware limits.
