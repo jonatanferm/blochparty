@@ -167,6 +167,8 @@ says where it came from so it can be re-checked.
   and push, drafts included (it can take a few seconds).
 - **The Mac sleeps with the lid closed** (clamshell, especially on battery); long runs pause
   and `caffeinate -i` doesn't prevent it. Watch for wall time ≫ CPU time.
+- **Scripts must not overwrite tracked outputs by default**: test runs of `nist_tse.py` replaced
+  the published benchmark figure; figures are now written only with `--figure`.
 - **`while pgrep -f "<text>"` can wait forever**: the waiting shell's own command line contains
   `<text>`. Wait on a PID (`while kill -0 <pid>`) instead.
 - **`cmd | grep` buffers background output** until the command ends; use `python -u` without a

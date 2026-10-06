@@ -169,6 +169,7 @@ def main(argv=None):
     p.add_argument("--fill-margin", type=float, default=5, help="water simulated within this many pixels of a sphere wall (0: none)")
     p.add_argument("--wall", type=float, default=1.0, help="sphere wall thickness [mm]")
     p.add_argument("--water", type=float, nargs=2, default=[WATER_T1 * 1e3, WATER_T2 * 1e3], help="water T1 T2 [ms]")
+    p.add_argument("--figure", action="store_true", help=f"write {name} (the figure RESULTS.md shows)")
     args = p.parse_args(argv)
 
     real_img = real_images()
@@ -210,7 +211,8 @@ def main(argv=None):
     for name, err, _ in rows:
         print(f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err[[0, 2, 4, 6, 8]].mean():.2f} % | "
               f"{' '.join(f'{v:.1f}' for v in 100 * err)} |")
-    plot_curves(real, rows, Path(__file__).with_name("nist_tse_curves.png"))
+    if args.figure:
+        plot_curves(real, rows, Path(__file__).with_name("nist_tse_curves.png"))
     return rows, real
 
 
