@@ -281,6 +281,18 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 **Verify:** k-space agreement with MRzero/KomaMRI on GRE, SE, TSE, bSSFP, EPI examples
 from the PyPulseq repo; round-trip read→write→read is lossless.
 
+## Realism benchmark against real scanners (docs/REALISM.md, R3)
+
+- [x] Benchmark 1 (`validation/real/`): ISMRM/NIST phantom T1 plane, 3 T IR spin echo, the
+      scanner's own Pulseq files and raw data (Tong et al. 2022). With reference T1/T2 only
+      and nothing fitted, the inversion-recovery curves are predicted to 1.44 % (spheres
+      1–10) vs 25.9 % for the analytic formula; converged in spins per slice (`RESULTS.md`)
+- [ ] Benchmark 2: the same phantom's T2 plane, multi-echo TSE (stimulated echoes, slice
+      profile of refocusing pulses); data already fetched
+- [ ] Absolute (not just shape) agreement: coil sensitivities and B1⁺ fitted from the data
+      (digital twin, R7), fill fluid, temperature
+- [ ] More datasets: RRSG 2020 T1 challenge (multi-site NIST data), Pulseq-CEST phantom data
+
 ## Phase 4 – Differentiable sequence design
 
 - [ ] Parameterized sequence API: which tensors are free, bounds, reparameterizations
