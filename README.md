@@ -6,7 +6,7 @@ Every feature is checked against an independent reference (see [ROADMAP.md](ROAD
 
 ```bash
 uv sync
-uv run pytest                              # 233 verification tests, ~1 min
+uv run pytest                              # 281 verification tests, ~1 min
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--fused: C++ adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
@@ -137,6 +137,48 @@ seq.meta["adc_per_readout"], seq.meta["kspace_trajectory"]  # samples per ADC; k
   `uv run python validation/compare_mrzero.py` (writes [validation/RESULTS.md](validation/RESULTS.md))
   or `uv run pytest -m crosscheck`.
 
+## Scanner field model
+
+Real gradients are not ideal. All of this is opt-in (`scanner=None`, no `b0_offset`: results
+unchanged bit for bit), runs in `simulate` and `simulate_fused` (forward and adjoint), and is
+differentiable in the hardware parameters, so a scanner's imperfections can be fitted:
+
+```python
+from blochparty.fields import GradientNonlinearity, Scanner
+from blochparty.girf import GIRF, EddyCurrents, apply_girf
+from blochparty.drift import linear_drift, respiration
+
+scanner = Scanner(field_strength=0.55,                      # concomitant fields (leading order)
+                  nonlinearity=GradientNonlinearity.from_file("coil.grad"))  # gradunwarp-style
+played = apply_girf(seq, [GIRF.identity(delay=[2e-6, 2e-6, 3e-6]),            # per-axis delays
+                          EddyCurrents.per_axis([[0.01], [0.01], [0.02]], [[0.5e-3]] * 3,
+                                                b0_amplitude=[[1e-5]] * 3, b0_time_constant=[[1e-3]] * 3)])
+played = respiration(linear_drift(played, rate=0.01), amplitude=3.0, period=4.0, gradient=(0.0, 20.0, 5.0))
+kspace = simulate_fused(phantom, played, coils, scanner=scanner).signal
+```
+
+- **Concomitant (Maxwell) fields** (`Scanner(field_strength=B0)`): the transverse field
+  components a cylindrical coil must have (div B = curl B = 0) shift the precession
+  frequency by f_c = [(gx² + gy²) z² + gz² (x² + y²)/4 − gx gz xz − gy gz yz] / (2 f0)
+  (Bernstein; `z_asymmetry` for asymmetric z coils). It is a per-spin quadratic form in g, so
+  free runs stay closed form (cumulative ∫gᵢgⱼ dt). `concomitant="exact"` uses |B| of the full
+  vector field instead (very low field, checks). Ramps on the raster are staircases: their
+  ∫g² is low by (step)²·dt/12 per segment.
+- **Gradient nonlinearity** (`GradientNonlinearity(alpha, beta, r0)` or `.from_file`):
+  per-axis solid-harmonic deviation of each coil (gradunwarp's Siemens convention, `.grad`
+  `A( n, m)` lines or `alpha_x n m` lines); spins are encoded at f(r) = r + d(r). Gradients reach
+  the coefficients.
+- **GIRF and eddy currents** (`apply_girf(seq, model)`, a sequence transform): `GIRF` impulse
+  responses (taps on the gradient raster, or `from_transfer_function`, with delays and cross
+  terms, row 4 = B0), `EddyCurrents` multi-exponential terms (amplitudes and time constants
+  differentiable, B0 terms included). Each segment gets the exact average of the response to
+  the nominal staircase, so k-space is exact at every segment end.
+- **Uniform field per segment**: `Sequence.b0_offset` (S,) [Hz] (None = zeros) adds to every
+  spin's off-resonance, also during RF; B0 eddy currents and drift land there.
+- **Drift and physiology** (`blochparty.drift`): `linear_drift`, `exponential_drift`,
+  `respiration` (uniform + linear terms with a period) add exact segment averages to
+  `b0_offset` and (for linear fields) to the gradients.
+
 ## Memory-bounded gradients
 
 Backprop through `simulate` keeps every spin's state at every segment, so memory grows as
@@ -236,6 +278,9 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
 | `pulseq.py` | `read_pulseq()`: `.seq` / pypulseq → `Sequence` |
+| `fields.py` | `Scanner` field model: concomitant fields, gradient nonlinearity (solid harmonics, coefficient files) |
+| `girf.py` | `apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents (incl. B0 terms) |
+| `drift.py` | B0 drift and respiratory fields as sequence transforms |
 | `design.py` | hardware / safety constraints and penalties, image metrics, Cramér–Rao bound, `minimize`, `design_report()` |
 
 ## Conventions

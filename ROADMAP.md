@@ -243,6 +243,69 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 - Default builders: bit-identical sequences to before (sha256); autograd through flip angles
   of the new blocks matches finite differences.
 
+## Phase 2b – Scanner field model (`docs/REALISM.md` R1)
+
+- [x] Concomitant (Maxwell) fields, leading order as a per-spin quadratic form (free runs stay
+      closed form via cumulative ∫gᵢgⱼ dt) and exact |B| of the full vector field
+      (`fields.Scanner(field_strength=, concomitant="leading" | "exact", z_asymmetry=)`)
+- [x] Gradient nonlinearity: per-axis solid-harmonic deviation (gradunwarp's Siemens
+      convention), coefficient files (`A( n, m)` `.grad` / `.coef` lines, `alpha_x n m` lines),
+      encoding positions f(r) = r + d(r) (`fields.GradientNonlinearity`); ✗ b-matrix
+- [x] GIRF and eddy currents as a sequence transform (`girf.apply_girf`): delta-train impulse
+      responses on the raster or transfer functions, delays, cross terms and B0 rows;
+      multi-exponential eddy currents (amplitudes, time constants differentiable)
+- [x] Per-segment uniform field `Sequence.b0_offset` (None = zeros) in both kernels, forward and
+      adjoint, and in `simulate_chunked`
+- [x] Drift (linear, exponential) and respiratory fields (uniform + linear, periodic) as
+      sequence transforms (`drift.py`)
+- [ ] Concomitant terms of nonlinear coils; b-matrix with nonlinearity; drift driven by
+      gradient duty; mechanical resonance models; fitting a GIRF / eddy model to measured data
+
+**Verified** (`tests/test_fields_*.py`, `tests/test_girf.py`, `tests/test_drift.py`, 48 tests, ~1 min):
+- Defaults unchanged: `scanner=None` and no `b0_offset` give bit-identical signals, final
+  magnetization and gradients of every input vs `main` (184/184 tensors: core, checkpointed
+  core, fused at one thread; float64 / float32; random busy sequence with B1⁺ and coils, 2D
+  RF-spoiled GRE with ramps, 3D GRE); a zero-deviation coefficient file is bit-identical too.
+- Concomitant: the coil field obeys div B = curl B = 0 (autograd Jacobian traceless and
+  symmetric); the quadratic form equals Bernstein's formula to 2e-16 and is the 1/f0 term of
+  |B| − f0 − g·r evaluated in 50 digits; exact − leading falls as 1/B0² (ratio per doubling
+  3.998 / 3.999, 0.55 → 2.2 T) and equals −t²·(g·r)/(2f0²) to < 5 %; the stable |B| form
+  matches 50 digits to 2e-16. Bipolar (phase-contrast) pair on x and z at 0.55 T: phase =
+  Bernstein's analytic −2π f_c·2δ to 4e-12 (phases up to 21 rad, core and fused); trapezoids
+  equal the raster-staircase ∫g² to 5e-12 and the true ramps to 1e-3. A Maxwell-compensated
+  spin echo (equal area and ∫g² either side of the 180°) leaves 4e-13 rad; the uncompensated
+  one leaves up to 2.8 rad, equal to the analytic residual to 9e-12. Exact mode vs |B| in 50
+  digits 1e-13 at 0.05 / 0.1 T (exact − leading up to 0.33 rad, ratio 3.8–4.2 per halving).
+  Fused vs core 2e-14 (signal), gradients of B0, positions, db0, gradients, dt, b0_offset
+  ≤ 3e-14 (both modes); d/dB0 vs central differences 1e-9.
+- Nonlinearity: basis vs gradunwarp's `siemens_B` (spherical coordinates, SciPy `lpmv`,
+  Siemens normalisation) 9e-16 to n = 10; Laplacian of all 242 basis fields to n = 10 ≤ 1.5e-15
+  of their second derivatives; synthetic coefficient file in both layouts (R0 in m or mm);
+  linear terms act as exact gradient scale errors (1e-12); a 7×7 point grid at z = 4 cm with
+  up to 2.4 px distortion images at the analytically mapped positions to 0.002 px (core and
+  fused; the ideal scanner at the true grid); coefficient gradients fused vs core 5e-15, vs
+  central differences 2e-9 (with concomitant fields on as well).
+- GIRF / eddy: a per-axis delay (3 and 23.5 µs, also negative) gives k-space equal to the
+  nominal moment interpolated at t − d to 1e-11 /m (|k| ≤ 7000 /m); a single exponential on a
+  trapezoid equals the closed-form staircase response to 3e-15 (of a·G) and the true-ramp
+  response to 3e-4, the moment lost by the end of the plateau matches the closed form to 1e-6
+  relative and vanishes after decay (1e-12 of 896 /m); random taps with cross terms and B0
+  rows equal an FFT transfer-function convolution to 2e-14 (also via
+  `from_transfer_function`); a B0 eddy current gives the analytic uniform phase to 3e-14
+  (core and fused, up to 0.43 rad); eddy amplitude / time-constant / B0-term / delay gradients
+  fused vs core 7e-15, vs central differences 2e-6; the blocked scan equals the recurrence
+  to 1e-12; `simulate_chunked` carries `b0_offset` (1e-12).
+- Drift / respiration: phases equal the closed-form field integrals (uniform + linear terms) to
+  ≤ 3e-14 for linear drift (32 rad), exponential drift (16 rad) and respiration (3.4 rad), core
+  and fused; parameter gradients (amplitude, period, phase, rate, τ) vs central differences
+  1e-6 relative, fused vs core 1e-10.
+- Cost (fused, 3D 32³ GRE, 8 coils, float32, 200 dummies, 8.8k spins × 37k segments, 4 vCPUs):
+  ideal 0.21 s forward / ~0.9 s forward + backward; concomitant leading 0.20 / 0.87 s, exact
+  0.24 / 1.07 s; nonlinearity (order 5) 0.22 / 0.75 s (all within noise: the per-segment factors
+  are cached by gradient); time-varying `b0_offset` (respiration) 0.31 / 0.98 s (a uniform
+  offset is one rotation per segment on top of the cache); GIRF + eddy currents 1.4 / 4.8 s,
+  since every segment's gradient then differs (`apply_girf` itself 0.14 s).
+
 ## Phase 3 – Pulseq in/out and cross-simulator validation
 
 - [x] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
@@ -341,5 +404,5 @@ analytic ghosting for periodic motion; comparison with real fastMRI-style data s
 ## Ideas parking lot
 
 Phase distribution graph (PDG) backend for speed; magnetization transfer / multi-pool;
-non-Cartesian trajectories + NUFFT recon; gradient non-linearity and eddy currents;
-concomitant fields.
+non-Cartesian trajectories + NUFFT recon (gradient non-linearity, eddy currents and
+concomitant fields: done, Phase 2b).
