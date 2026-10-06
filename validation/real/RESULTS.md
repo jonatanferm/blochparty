@@ -121,6 +121,44 @@ fill, which looked harmful when undersampled (5.75 % with 64 stratified spins/pi
 roughly halves the error of the short-T2 spheres 9 and 11–14 once estimated properly, as the
 original hypothesis predicted; long-T2 spheres are unchanged within error.
 
+**Wall-thickness sensitivity** (the sphere walls are not in the real-data images; 1 mm was a
+guess). Same settings, 3 seeds for 0.5 / 1.5 mm:
+
+| wall | spheres 1–10 | 9 | 10 | 11 | 12 | 13 | 14 |
+|---|---|---|---|---|---|---|---|
+| 0.5 mm | 2.93 ± 0.16 % | 6.0 | 11.4 | 9.9 | 10.8 | 15.8 | 23.3 |
+| 1.0 mm | 2.20 ± 0.04 % | 3.6 | 6.1 | 7.8 | 13.4 | 15.2 | 22.1 |
+| 1.5 mm | 2.10 ± 0.11 % | 3.6 | 5.0 | 7.5 | 12.7 | 16.1 | 27.6 |
+
+The wall matters for spheres 9–10: a thin wall lets too much water blur in. Between 1 and 1.5 mm
+the difference is within ~1 SE. The shortest-T2 spheres 13–14 hardly respond to the wall, so
+something other than the wall limits them.
+
+**What limits the short-T2 spheres.** In the measured curves, spheres 11–14 level off at 8–12 %
+of echo 1, 7–12σ above the noise floor (σ measured in the air, Rayleigh-consistent). That is
+water blurring in, not noise. Two tests, each varying one thing:
+
+1. *Simulated vs measured curves* (water fill, 2 seeds): the simulated tail level is wrong in
+   both directions, too high on spheres 10, 11, 13 and 14 (sphere 14: 17 % vs 12 %) and too
+   low on 12. This level depends on where the spheres sit relative to the slice and the ROIs,
+   which we only know approximately. The echo 2 / echo 1 ratio is also too low, more so the
+   shorter T2 is (sphere 12: 0.76 sim vs 0.91 measured; 13: 0.66 vs 0.80; 14: 0.51 vs 0.72).
+2. *Spheres only with T2 scaled, fitted as a·sim + b·e^(−TE/2 s)* (tail amplitude b free, so
+   the water geometry drops out; relative RMS residual, %):
+
+| sphere | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| T2 × 1.0 | 0.7 | 0.9 | 1.0 | 1.2 | 2.6 | 0.9 | 1.3 | 1.7 | 2.3 | 2.3 | 6.5 | 8.0 | 7.6 | 8.7 |
+| T2 × 1.25 | 1.5 | 1.8 | 2.6 | 3.5 | 7.6 | 7.1 | 8.8 | 7.7 | 5.9 | 8.1 | 9.7 | 11.8 | 8.6 | 6.9 |
+| T2 × 1.5 | 2.3 | 3.1 | 4.5 | 6.3 | 11.0 | 12.2 | 15.1 | 15.2 | 13.8 | 15.3 | 15.0 | 17.0 | 13.5 | 9.7 |
+
+The reference T2 values are right: longer T2 is worse for spheres 1–13; only sphere 14 (5.3 ms)
+prefers a slightly longer value. With the tail level free, spheres 9–10 drop to 2.3 %, so their
+error was the water geometry. Spheres 11–14 stay at 6.5–8.7 %. Their residual misfit is in the
+first echoes, where T2 is comparable to the 7 ms echo spacing and the odd/even stimulated-echo
+balance depends on refocusing details (B1⁺ and the refocusing pulse at the sphere positions).
+That is the open question, not the reference values.
+
 **Benchmark 1 with Monte Carlo estimation** (T1 v2; Sobol 256 spins/pixel; 4 seeds, ± jackknife SE;
 Apple GPU: 3 min spheres only, 20 min with water):
 
@@ -134,3 +172,14 @@ Consistent with the brute-force 1.49 % within ~1.5 SE; the water fill makes no s
 difference on this plane (long-T2 NiCl2 spheres next to long-T2 water). The error bars are
 dominated by spheres 2–3 (±1.3 / ±0.3 %), whose curves pass near the null at TI 1000 ms where
 the bias correction is least certain.
+
+At **1024 Sobol spins/pixel** (spheres only, 4 seeds, 22 min on the Apple GPU):
+
+| model | spheres 1–10 | per sphere 1..14 [%] |
+|---|---|---|
+| Bloch MC, T1 v2, 1024 spins/pixel | **1.51 ± 0.05 %** | 2.4 4.0 5.2 1.5 0.4 0.5 0.3 0.2 0.3 0.3 1.2 1.2 0.4 0.2 |
+
+The error bar shrinks 4× for 4× the spins, faster than the N^-0.75 Sobol rate predicts (2.8×),
+because at 256 spins it was dominated by the near-null bias of spheres 2–3. The result matches
+the brute-force 1.49 %. What remains is a model misfit on spheres 1–3 (the longest T1),
+not sampling noise.

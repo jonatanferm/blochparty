@@ -112,6 +112,15 @@ says where it came from so it can be re-checked.
 - **Mendeley Data's API rejects Python's urllib** (403); `curl` works.
   (`validation/real/fetch_data.py`)
 
+- **To test a reference value, give the nuisance its own free amplitude** (benchmark 2,
+  2026-10-06). The short-T2 spheres' misfit mixed two things: water blurring in (a flat tail
+  whose level depends on geometry we only know roughly) and the decay itself. Fitting
+  real ≈ a·sim(T2) + b·e^(−TE/T2_water) per sphere removes the geometry and leaves the T2
+  question: the reference values held (scaling T2 by 1.25 made 13 of 14 spheres worse), and
+  the remaining 6.5–8.7 % on spheres 11–14 sits in the first echoes. Before blaming the
+  reference values, also check that a measured tail isn't noise: σ from the air (Rayleigh
+  mean/std ≈ 1.9) put these tails 7–12σ above the floor.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -148,6 +157,16 @@ says where it came from so it can be re-checked.
   coil (the real-data benchmarks) the GPU is 5.8× the CPU; with 8 coils still ~0.4–0.8×.
 - **float32 and large phases**: RF spoiling grows receiver phases to thousands of radians; wrap
   them modulo 2π in float64 before casting to float32.
+
+- **A GPU coil sum is a matrix product; do it on the matrix hardware** (Metal, 2026-10-06). The
+  signal of C coils at a block of samples is (C × spins) · (spins × samples). Doing it as 2C
+  `simd_sum` shuffle reductions per sample made the cost linear in C: 8 coils 3× slower than 1.
+  Buffering 8 samples per simdgroup and multiplying on 8×8 `simdgroup_float8x8` tiles, with
+  complex numbers as P = Sr·Mr − Si·Mi, Q = Si·Mr + Sr·Mi (store −Mi as well, so there is no
+  elementwise negation of a matrix), makes 1–8 coils cost the same (0.41 s vs 0.42 s, 48³ GRE)
+  and 32 coils 5.6× faster. Demodulation e^(−iψ) is the same for every spin, so it moves after
+  the sum. The sensitivities go in a zero-padded (2, 8·tiles, grid) layout, so tile loads never
+  need bounds checks and padded spins contribute zero.
 
 ## Process and tooling
 
