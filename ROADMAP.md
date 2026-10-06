@@ -11,6 +11,9 @@ Goals, in order of how much they shape design decisions:
 beyond them (real-data benchmark, calibrated digital twin) is in
 [docs/REALISM.md](docs/REALISM.md).
 
+**Digital phantoms**: generative, physically consistent phantoms, and lifting reconstructed
+scans (DICOM) to believable raw multi-coil k-space, are in [docs/PHANTOMS.md](docs/PHANTOMS.md).
+
 **Ground rule: nothing is "done" without an independent check.** Each phase lists what it is
 verified against. References, from cheapest to strongest:
 closed-form physics → SciPy ODE integration → our own independent signal-equation /
@@ -330,6 +333,8 @@ by Pulseq's own checks.
 ## Phase 6 – Training-data generation
 
 - [ ] Realistic phantoms: BrainWeb tissue maps, XCAT / MRXCAT; random augmentations
+      (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
+- [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
 - [ ] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)
 - [ ] Motion (rigid, then deformable), flow, diffusion
 - [ ] Dataset writer (ISMRMRD / HDF5) with full provenance (sequence, phantom, seed)
