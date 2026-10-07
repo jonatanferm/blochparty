@@ -470,7 +470,10 @@ by Pulseq's own checks.
       priors and sub-voxel partial-volume spins; separate susceptibility/scanner shim maps.
       PD conservation <1e-12, GPU/core error 3.23e-7; full 1-mm head RF/FID 7.77 M spins/s.
       [Validation and limits](validation/anatomy/RESULTS.md); spatial variability remains M4.
-- [ ] Further realistic phantoms: QSM, XCAT / MRXCAT; random augmentations
+- [ ] Anatomy M3: QSM loader and public Sim1/Sim2 checks implemented (forward RMS
+      2.11e-16 / 3.76e-16 Hz vs independent Python reference). Full-source R1/R2*/M0
+      validation and original MATLAB check need authorized data; [details](validation/anatomy/QSM.md).
+- [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
 - [ ] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)

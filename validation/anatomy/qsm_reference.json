@@ -1,0 +1,9 @@
+{
+  "source": "https://github.com/astewartau/qsm-forward",
+  "commit": "92149383b0f43f47d9a351ceb4f525c0c4ee8299",
+  "url": "https://raw.githubusercontent.com/astewartau/qsm-forward/92149383b0f43f47d9a351ceb4f525c0c4ee8299/qsm_forward/qsm_forward.py",
+  "sha256": "81b147021cc0815402a085d872ae0ff3936cf2e6f561241c93f482e09bfdf228",
+  "license": "GPL-3.0",
+  "functions": ["generate_field", "_generate_3d_dipole_kernel"],
+  "role": "Independent public Python implementation based on Marques 2021; not the original restricted MATLAB package"
+}

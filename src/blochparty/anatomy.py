@@ -196,8 +196,8 @@ class Anatomy:
     """CPU fractional volumes; missing mass is non-signalling air.
 
     Fractions may sum to less than one, but not exceed one. Background is an
-    optional explicit air class. Maps are intensive voxel averages (M0 relative
-    water content, R1/R2/R2star in 1/s, intrinsic_r2prime in 1/s). Map names not
+    optional explicit air class. M0 is total water density per voxel volume;
+    R1/R2/R2star and intrinsic_r2prime are rates in 1/s. Map names not
     consumed by assembly are retained by spatial utilities. Origin is a voxel
     centre, not a corner; axis directions must already be positive x/y/z.
     """
@@ -206,10 +206,16 @@ class Anatomy:
     origin: tuple[float, float, float]
     chi: Tensor | None = None
     maps: dict[str, Tensor] = field(default_factory=dict)
+    chi_background: float = AIR_CHI  # same SI reference as chi
+    map_field_T: float | None = None  # acquisition field of measured relaxation maps
 
     def __post_init__(self):
         self.voxel = _triple(self.voxel, "voxel", True)
         self.origin = _triple(self.origin, "origin")
+        if not math.isfinite(self.chi_background):
+            raise ValueError("chi_background must be finite SI susceptibility")
+        if self.map_field_T is not None and (not math.isfinite(self.map_field_T) or self.map_field_T <= 0):
+            raise ValueError("map_field_T must be positive or None")
         if not self.fractions:
             raise ValueError("anatomy requires at least one tissue")
         ref = next(iter(self.fractions.values()))
@@ -250,7 +256,8 @@ class Anatomy:
         origin = tuple(o + lo*h for o,(lo,_,_),h in zip(self.origin,reversed(bounds),reversed(self.voxel)))
         take = lambda v: v[region]
         return Anatomy({k:take(v) for k,v in self.fractions.items()}, self.voxel, origin,
-                       None if self.chi is None else take(self.chi), {k:take(v) for k,v in self.maps.items()})
+                       None if self.chi is None else take(self.chi), {k:take(v) for k,v in self.maps.items()},
+                       self.chi_background, self.map_field_T)
 
     def slab(self, z0, thickness):
         """Physical z interval [z0,z0+thickness], snapped outward to cell boundaries."""
@@ -267,14 +274,25 @@ class Anatomy:
         """Volume-weighted cell averages; preserves sum(fraction)*voxel_volume.
 
         Lower outer boundary is fixed; upper edge expands by <1 new voxel if
-        needed. Exterior is air (fractions/maps zero; chi=AIR_CHI). This is not
+        needed. Exterior has fractions/maps zero and chi=chi_background. This is not
         nearest-neighbour labelling or recovery of unknown sub-cell anatomy.
+        With M0 present, relaxation rates are M0-weighted averages, so empty air
+        does not dilute rates. Coarsening rates remains a compartment approximation:
+        an average rate cannot preserve a general multi-exponential time course.
         """
         voxel = _triple(voxel,"voxel",True)
         origin = tuple(o+(b-a)/2 for o,a,b in zip(self.origin,reversed(self.voxel),reversed(voxel)))
+        maps = {k:_resample(v,self.voxel,voxel) for k,v in self.maps.items()}
+        if "M0" in maps:
+            density = maps["M0"]
+            for name in ("R1", "R2", "R2star", "intrinsic_r2prime"):
+                if name in maps:
+                    weighted = _resample(self.maps[name]*self.maps["M0"],self.voxel,voxel)
+                    maps[name] = torch.where(density > 0,weighted/density.clamp_min(torch.finfo(density.dtype).tiny),0.)
         return Anatomy({k:_resample(v,self.voxel,voxel).clamp(0,1) for k,v in self.fractions.items()},
-            voxel,origin,None if self.chi is None else _resample(self.chi,self.voxel,voxel,AIR_CHI),
-            {k:_resample(v,self.voxel,voxel) for k,v in self.maps.items()})
+            voxel,origin,None if self.chi is None else _resample(self.chi,self.voxel,voxel,self.chi_background),
+            maps,
+            self.chi_background,self.map_field_T)
 
 
 def load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32) -> Anatomy:
@@ -338,6 +356,131 @@ def load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32) -> Ana
     return Anatomy(fractions,new,origin)
 
 
+# Label IDs published with the QSM Challenge 2.0 head model; independently
+# listed in qsm-forward/label.json, commit 92149383b0f43f47d9a351ceb4f525c0c4ee8299.
+QSM_LABELS = {1: "caudate", 2: "globus_pallidus", 3: "putamen", 4: "red_nucleus",
+              5: "dentate_nucleus", 6: "substantia_nigra", 7: "thalamus", 8: "wm",
+              9: "gm", 10: "csf", 11: "vessels", 12: "fat", 13: "skull",
+              14: "background", 15: "muscle", 16: "calcification"}
+
+
+def _file_sha256(path):
+    """Hash decompressed bytes so a gzip header change does not change identity."""
+    digest = hashlib.sha256()
+    with (gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb")) as stream:
+        for block in iter(lambda: stream.read(1024*1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def load_qsm2(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
+    """Load locally supplied QSM Challenge 2.0 maps using root/qsm2.json pins.
+
+    Optional dependency: pip install 'blochparty[anatomy]'. The full-head source
+    directory (chimodel, maps, masks) must be obtained under its access terms;
+    validation/anatomy/prepare_qsm2.py records a reviewed local manifest. This
+    function never downloads or authenticates. Both chi models can be selected
+    by preparing distinct manifests/roots; no filename guessing at load time.
+
+    NIfTI arrays are reoriented to positive RAS axes without interpolation, then
+    transposed to z/y/x. Axis-aligned permutations/flips are supported; oblique
+    or sheared grids raise rather than silently drop their affine. All maps must
+    share a grid after reorientation. Spatial units are declared in the manifest
+    (and checked against the header if set). Chi is converted from ppm to SI,
+    retaining its original reference and explicit surrounding chi_background.
+
+    ``resolution`` is 'native', '0.64mm', '1mm', or a (dz,dy,dx) tuple in m;
+    non-native grids use conservative cell averages, not k-space truncation.
+    A manifest with kind='challenge' loads the public challenge ground truth
+    (chi and segmentation only): background susceptibility is zero, no measured
+    relaxation/density maps are invented, and its brain mask is derived from
+    labels 1..11 and 16. It is distinct from the full-head source package.
+
+    Sixteen tissue memberships are retained; original background label 0 joins
+    air label 14. M0, R1, R2star and brain_mask are retained as maps. R1/R2star
+    belong to the manifest's acquisition field (normally 7 T), not automatically
+    to the requested simulation field. There is no measured R2 map in this
+    release: full Bloch assembly needs an explicit tissue table for T2, including
+    the deep-grey labels. Observed R2star must still follow to_phantom's
+    macroscopic/intrinsic separation policy; it is never silently used as R2.
+    """
+    try:
+        import nibabel as nib
+    except ImportError as exc:
+        raise ImportError("load_qsm2 requires the anatomy extra: pip install 'blochparty[anatomy]'") from exc
+    if dtype not in (torch.float32, torch.float64):
+        raise ValueError("dtype must be float32 or float64")
+    root = Path(root).resolve()
+    manifest = json.loads((root/"qsm2.json").read_text())
+    if manifest.get("schema") != 1 or manifest.get("chi_unit") != "ppm":
+        raise ValueError("unsupported QSM manifest schema or chi units")
+    kind = manifest.get("kind", "full-head")
+    if kind not in ("full-head", "challenge"):
+        raise ValueError("unknown QSM package kind")
+    unit = manifest.get("spatial_unit")
+    units = {"mm": .001, "meter": 1., "micron": 1e-6}
+    if unit not in units:
+        raise ValueError("manifest needs an explicit NIfTI spatial_unit")
+    scale = units[unit]
+    background = float(manifest["chi_background_ppm"])*1e-6
+    map_field = float(manifest["map_field_T"]) if kind == "full-head" else None
+    arrays = {}
+    affine = shape = None
+    keys = ("chi", "M0", "R1", "R2star", "segmentation", "brain_mask") if kind == "full-head" else ("chi", "segmentation")
+    for key in keys:
+        entry = manifest["files"][key]
+        path = (root/entry["path"]).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("QSM manifest paths must stay inside root")
+        if _file_sha256(path) != entry["sha256"]:
+            raise ValueError(f"checksum mismatch: {path}")
+        img = nib.load(path)
+        header_unit = img.header.get_xyzt_units()[0]
+        if header_unit not in ("unknown", unit):
+            raise ValueError(f"NIfTI/manifest spatial unit mismatch: {key}")
+        img = nib.as_closest_canonical(img)
+        mat = img.affine.copy()
+        if len(img.shape) != 3 or min(img.shape) < 1 or not np.isfinite(mat).all():
+            raise ValueError("QSM maps must have a finite affine and nonempty 3D grid")
+        linear = mat[:3, :3]
+        if (np.diag(linear) <= 0).any() or not np.allclose(linear, np.diag(np.diag(linear)), rtol=0, atol=1e-6):
+            raise ValueError("oblique/sheared QSM grids need explicit common-grid resampling first")
+        if affine is None:
+            affine, shape = mat, img.shape
+        elif img.shape != shape or not np.allclose(mat, affine, rtol=0, atol=1e-5):
+            raise ValueError(f"QSM maps do not share a physical grid: {key}")
+        data = img.get_fdata(dtype=np.float64 if dtype == torch.float64 else np.float32)
+        arrays[key] = torch.from_numpy(np.ascontiguousarray(data.transpose(2,1,0)))
+        if not torch.isfinite(arrays[key]).all():
+            raise ValueError(f"non-finite QSM map: {key}")
+    labels = arrays.pop("segmentation")
+    if (labels != labels.round()).any() or (labels < 0).any() or (labels > 16).any():
+        raise ValueError("unknown QSM segmentation labels; expected integers 0..16")
+    if kind == "full-head":
+        if (arrays["M0"] < 0).any() or (arrays["brain_mask"] < 0).any() or (arrays["brain_mask"] > 1).any():
+            raise ValueError("QSM M0 must be nonnegative and brain mask in [0,1]")
+        for key in ("R1", "R2star"):
+            if (arrays[key] < 0).any() or (arrays[key][arrays["M0"] > 0] <= 0).any():
+                raise ValueError(f"QSM {key} must be positive where M0 is nonzero")
+    else:
+        if background != 0:
+            raise ValueError("challenge brain-only chi requires zero exterior susceptibility")
+        arrays["brain_mask"] = (((labels >= 1) & (labels <= 11)) | (labels == 16)).to(dtype)
+    fractions = {name: (labels == label).to(dtype) for label,name in QSM_LABELS.items()
+                 if (labels == label).any()}
+    fractions["background"] = ((labels == 0) | (labels == 14)).to(dtype)
+    chi = arrays.pop("chi")*1e-6
+    voxel = tuple((np.diag(affine)[:3]*scale)[::-1])
+    origin = tuple(affine[:3,3]*scale)
+    anatomy = Anatomy(fractions,voxel,origin,chi,arrays,background,map_field)
+    if isinstance(resolution, str):
+        options = {"native": None, "0.64mm": (.00064,)*3, "1mm": (.001,)*3}
+        if resolution not in options:
+            raise ValueError("resolution must be native, 0.64mm, 1mm, or a voxel tuple")
+        resolution = options[resolution]
+    return anatomy if resolution is None else anatomy.resample(resolution)
+
+
 def _properties(anatomy, table, field_T):
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T; provide explicit values (no field interpolation)")
@@ -358,20 +501,22 @@ def anatomy_field_maps(anatomy, table=DEFAULT_TISSUES, field_T=3., *, shim_order
     computation precedes any spin-region crop. Empty/planar masks cannot fit
     all 3D harmonics: choose a lower order or use shim_order=None explicitly.
     """
-    props = _properties(anatomy,table,field_T)
     ref = next(iter(anatomy.fractions.values()))
     chi = anatomy.chi
     if chi is None:
+        props = _properties(anatomy,table,field_T)
         chi = torch.full_like(ref,AIR_CHI)
         for name,frac in anatomy.fractions.items():
             if name in props:
                 chi = chi + frac*(props[name].chi.mean-AIR_CHI)
-    df = susceptibility_to_b0(chi,anatomy.voxel,field_T,b0_dir=b0_dir,padding=padding,background=AIR_CHI)
+    background = anatomy.chi_background if anatomy.chi is not None else AIR_CHI
+    df = susceptibility_to_b0(chi,anatomy.voxel,field_T,b0_dir=b0_dir,padding=padding,background=background)
     correction = torch.zeros_like(df)
     if shim_order is not None:
         if brain_mask is None:
-            brain_mask = sum((anatomy.fractions[k] for k in ("wm","gm","csf") if k in anatomy.fractions),
-                             torch.zeros_like(ref)) > .5
+            brain_mask = (anatomy.maps["brain_mask"] > .5 if "brain_mask" in anatomy.maps else
+                sum((anatomy.fractions[k] for k in ("wm","gm","csf") if k in anatomy.fractions),
+                    torch.zeros_like(ref)) > .5)
         residual,_ = shim(df,brain_mask,shim_order,voxel=anatomy.voxel,origin=anatomy.origin)
         correction = residual-df
     args = (anatomy.origin,tuple(reversed(anatomy.voxel)))
@@ -405,7 +550,9 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     Quantile assignments use a separate fixed RNG; spatial seed does not alter
     their distribution. Fat classes use phantom.FAT_PEAKS (Ren et al. 2008).
 
-    Optional maps R1/R2/M0 override tissue rates/density voxelwise. MT converts
+    Optional R1/R2 maps override tissue rates voxelwise. M0 gives total voxel
+    density, distributed among signal-producing tissues in proportion to their
+    memberships (not multiplied by the air fraction a second time). MT converts
     total bound fraction p to BoundPool.f=p/(1-p), assumes bound T1=free T1,
     and uses model='rate'. Missing requested MT/diffusion parameters raise.
     ``field_maps`` can reuse a precomputed (tissue, scanner-shim) pair. This
@@ -426,6 +573,8 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         raise ValueError("invalid sampling or jitter mode")
     if t2star not in ("auto","off","table"):
         raise ValueError("t2star must be auto, off or table")
+    if anatomy.map_field_T is not None and field_T != anatomy.map_field_T:
+        raise ValueError(f"relaxation maps were acquired at {anatomy.map_field_T} T; no automatic field scaling")
     counts = _subvoxel_counts(spins_per_voxel,3)
     k = math.prod(counts)
     props = _properties(anatomy,table,field_T)
@@ -449,6 +598,12 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     qgen = torch.Generator().manual_seed(0)
     cells = torch.cartesian_prod(*(torch.arange(c) for c in counts)).reshape(k,3)
     names = sorted(name for name,p in props.items() if name in anatomy.fractions and p.pd.mean > 0)
+    signal_fraction = None
+    if "M0" in anatomy.maps:
+        density = anatomy.maps["M0"]
+        signal_fraction = sum((anatomy.fractions[name] for name in names),torch.zeros_like(ref))
+        if (density < 0).any() or ((density > 0) & (signal_fraction == 0)).any():
+            raise ValueError("M0 must be nonnegative and supported by signal-producing tissue")
     category = None
     if sampling == "categorical":
         # Sequential thresholds avoid a (voxels,K,tissues) temporary.
@@ -465,6 +620,8 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         p = props[name]
         fraction = anatomy.fractions[name]
         mask = fraction > 0 if category is None else (category == ti).any(-1)
+        if "M0" in anatomy.maps:
+            mask = mask & (anatomy.maps["M0"] > 0)
         if not mask.any():
             continue
         idx = mask.nonzero()
@@ -478,6 +635,8 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         expand = lambda value: (value[:,None].expand(-1,k) if value.ndim else value.expand(n,k))[select]
         parameter = lambda key,default: anatomy.maps[key][mask] if key in anatomy.maps else ref.new_tensor(default)
         density = parameter("M0",p.pd.mean)
+        if signal_fraction is not None:
+            density = density/signal_fraction[mask]
         r1, r2 = parameter("R1",1/p.t1.mean),parameter("R2",1/p.t2.mean)
         if (density < 0).any() or (r1 <= 0).any() or (r2 <= 0).any():
             raise ValueError("M0 must be nonnegative; R1 and R2 positive")

@@ -5,6 +5,9 @@ and assembles separate tissue spins. No simulator engine or existing phantom def
 changes. Numerical checks, reference contrasts and measured throughput are in
 [RESULTS.md](RESULTS.md).
 
+QSM source loading and public challenge checks are documented separately in
+[QSM.md](QSM.md).
+
 ## Obtain the data
 
 From the repository root:
@@ -87,6 +90,11 @@ by voxel volume to compare absolute signal at different anatomy resolutions.
 `crop` takes z/y/x slices; `slab(z0, thickness)` takes metres and snaps outward to
 cell boundaries. Cropping the anatomy itself discards susceptibility sources.
 Use `fov_region` on the full head for a thin-slab simulation with full-head B0.
+
+If a measured `maps["M0"]` is supplied, it represents total voxel water density;
+assembly apportions that density among signal-producing tissue memberships.
+When resampling measured rates with M0, use M0-weighted averages to avoid diluting
+rates with empty air. Such averaging is still a compartment approximation.
 
 Fractions specify cell-average densities, not an unknown boundary's position
 inside that cell. Decouple the anatomy grid from reconstruction and refine anatomy

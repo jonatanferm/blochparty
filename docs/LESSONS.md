@@ -7,6 +7,22 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Susceptibility units do not specify its reference.** QSM full-head chi is referenced
+  to water (air around +9.2 ppm), while challenge chi is brain-only with zero exterior;
+  neither should inherit the absolute-air value +0.36 ppm blindly. Preserve a separate
+  `chi_background` in the same reference through crop/resampling. A constant shift of
+  both chi and exterior must leave the field unchanged. (`anatomy.py`, QSM M3)
+- **Measured M0 is already voxel density.** Multiplying it by a tissue/air fraction a
+  second time underestimates partial-volume signal. Distribute M0 among signal-producing
+  memberships, and use M0 weights to average rates when coarsening; zero-density air
+  cannot dilute R1. This preserves density integral but not a general multi-exponential
+  time course. (`test_measured_density_and_rates_do_not_double_count_partial_volume`)
+- **Cross-solver DC conventions can dominate an otherwise exact comparison.** The pinned
+  qsm-forward kernel sets D(0)=1/3 while ours uses zero, giving ~375 Hz constant offsets
+  for synthetic water/air heads at 3 T. After removing only the ROI mean difference,
+  residuals are <6.83e-13 Hz. Match the exact encoded exterior/corner and padding first;
+  do not hide disagreement with a slope or spatial fit. (`validation/anatomy_qsm.py`)
+
 - **Fuzzy membership is a density, not subcell geometry.** Keep each tissue's T1/T2 and
   weight its spins by fraction × PD; averaging relaxation constants gives the wrong
   mixture signal. Jitter decouples spin positions from reconstruction, but a sharp
@@ -380,6 +396,18 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **QSM Challenge releases are not interchangeable.** Radboud's complete head package
+  declares restricted access and RU-DI-HD-1.0, despite the initial spec's CC BY guess.
+  The old Stage-1 short link is a closed registration form. An author's lab separately
+  links a public SURFdrive challenge share with both chi/segmentation ground truths,
+  but no R1/R2*/M0 or phantom-generation code. Read-only WebDAV listing avoided a 12.65 GB
+  bulk download; needed GT files total ~107 MB. (`validation/anatomy/QSM.md`, 2026-10-07)
+- **Nominal resolution is not the NIfTI affine.** QSM challenge GT headers use 0.999024391 mm
+  while frequency/mask images use exactly 1 mm. Preserve and check affine geometry, and
+  do not silently zip arrays of equal shape as if they occupied identical positions.
+  The supplied frequency maps also include phase estimation/noise/downsampling, so are
+  not exact convolution references for the distributed GT. (`validation/anatomy/QSM.md`)
 
 - **Verify delivered BrainWeb bytes, not just its legacy format page.** Subject-04
   fuzzy files are 0.5-mm (362,434,362), unlike its separate 1-mm T1 reference. The

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "kind": "challenge",
+  "source": "https://surfdrive.surf.nl/index.php/s/uTvrxJ5NELbnGa5",
+  "linked_by": "https://www.martinos.org/~berkin/software.html",
+  "snapshot": "2026-10-07",
+  "model": 1,
+  "chi_unit": "ppm",
+  "chi_background_ppm": 0.0,
+  "spatial_unit": "mm",
+  "files": {
+    "chi": {
+      "path": "Chi.nii.gz",
+      "sha256": "caf47d3bd3a97c9ce250846437902cea43517f421c52888f800c6ed077b41867",
+      "url": "https://surfdrive.surf.nl/public.php/dav/files/uTvrxJ5NELbnGa5/Sim1GT/Chi.nii.gz"
+    },
+    "segmentation": {
+      "path": "Segmentation.nii.gz",
+      "sha256": "1ee28bd4e50123b7df0b1be6194327a829b727005027128f8a3bad6d4522a54e",
+      "url": "https://surfdrive.surf.nl/public.php/dav/files/uTvrxJ5NELbnGa5/Sim1GT/Segmentation.nii.gz"
+    }
+  }
+}

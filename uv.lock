@@ -17,6 +17,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+anatomy = [
+    { name = "nibabel" },
+]
 mrzero = [
     { name = "mrzerocore" },
 ]
@@ -38,11 +41,12 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "mrzerocore", marker = "extra == 'mrzero'", specifier = ">=1.1" },
+    { name = "nibabel", marker = "extra == 'anatomy'", specifier = ">=5" },
     { name = "numpy" },
     { name = "pypulseq", marker = "extra == 'pulseq'", specifier = ">=1.5" },
     { name = "torch", specifier = ">=2.4" },
 ]
-provides-extras = ["pulseq", "mrzero"]
+provides-extras = ["anatomy", "pulseq", "mrzero"]
 
 [package.metadata.requires-dev]
 dev = [

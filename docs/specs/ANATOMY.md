@@ -1,8 +1,10 @@
 # Spec: realistic anatomy and susceptibility-driven B0
 
-Status: M1–M2 implemented and checked, 2026-10-07; M3–M5 open.
+Status: M1–M2 complete; M3 loader and public-data checks implemented, full-source
+validation pending; M4–M5 open (2026-10-07).
 M2 results and remaining clinical-validation limits: [RESULTS](../../validation/anatomy/RESULTS.md).
-The QSM forward-field cross-check remains part of M3. Coordination rules at the end.
+M3 progress/access requirements: [QSM notes](../../validation/anatomy/QSM.md).
+Coordination rules at the end.
 Read first: `CLAUDE.md` (working rules), `docs/REALISM.md` (rows "Realistic anatomy and fuzzy
 tissue", "Continuous anatomy (inverse crime)", "B0 inhomogeneity from anatomy"),
 `src/blochparty/phantom.py` (`Phantom`, `phantom_from_maps`, `TISSUES`, `b0_sphere`,
@@ -54,7 +56,7 @@ everything maps onto existing `Phantom` fields. If one seems needed, stop and wr
 | Source | What | Access / licence (to verify) | Use |
 |---|---|---|---|
 | BrainWeb, 20 normal anatomical models (Aubert-Broche et al., NeuroImage 2006; brainweb.bic.mni.mcgill.ca) | fuzzy membership volumes per tissue class (background, CSF, GM, WM, fat, muscle, muscle/skin, skull, vessels, around-fat, dura, bone marrow), 0.5 mm isotropic, (362,434,362) z/y/x; T1 reference is a separate 1-mm grid | public form verified 2026-10-07; optional identity fields, citation request, no explicit redistribution licence found; do not redistribute | M2 primary anatomy |
-| QSM Challenge 2.0 head phantom (Marques et al., MRM 2021, doi:10.1002/mrm.28716; data doi:10.34973/m20r-jt17) | chi (two models), R1, R2*, M0, 16-label segmentation, 0.64 mm and 1 mm, plus simulation code | CC BY 4.0; Radboud/Donders repository, may need an account (verify) | M3 anatomy + chi for M1; its forward field is an independent check of M1 |
+| QSM Challenge 2.0 head phantom (Marques et al., MRM 2021, doi:10.1002/mrm.28716; data doi:10.34973/m20r-jt17) | chi (two models), R1, R2*, M0, 16-label segmentation, 0.64 mm and 1 mm, plus simulation code | Radboud metadata verified 2026-10-07: restrictedAccess, RU-DI-HD-1.0 (not CC BY); obtain an authorized local copy. Author-linked public challenge share separately provides chi + segmentation only | M3 full-head loader; public Sim1/Sim2 forward checks completed, complete source/MATLAB validation pending |
 | MIDA, XCAT, Virtual Population | whole-head / body models | licences required | not used |
 
 Rules: data goes under a git-ignored directory (e.g. `validation/anatomy/data/` or a user cache);
@@ -120,14 +122,19 @@ class Anatomy:
     fractions: dict[str, Tensor]      # tissue -> (nz, ny, nx) membership in [0, 1]
     voxel: tuple[float, float, float] # (dz, dy, dx) [m]
     origin: tuple[float, float, float]# position of voxel (0, 0, 0) centre, (x, y, z) [m]
-    chi: Tensor | None = None         # optional susceptibility map [dimensionless SI], same grid
+    chi: Tensor | None = None         # susceptibility in SI, same grid; reference explicit below
     maps: dict[str, Tensor] = field(default_factory=dict)  # optional measured maps (R1, R2*, M0, ...)
+    chi_background: float = AIR_CHI   # exterior in the same SI reference as chi
+    map_field_T: float | None = None  # acquisition field of measured relaxation maps
 ```
 
 Fractions need not sum to 1 (background); document how the remainder is treated.
 Convert ppm source data by 1e-6 on loading, keeping the Anatomy and M1 units identical. Loaders:
 `load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32)`;
-`load_qsm2(root, resolution="1mm")` follows in M3. Utilities:
+`load_qsm2(root, resolution="1mm", *, dtype=torch.float32)` reads a reviewed local manifest.
+M3 supports axis-aligned NIfTI permutations/flips; oblique/sheared grids raise. The optional
+`anatomy` extra supplies nibabel. Public challenge manifests contain chi/segmentation only;
+full-head manifests also require R1/R2star/M0/brain_mask. Unknown maps are not invented. Utilities:
 `crop`, `slab(z0, thickness)`, `resample(voxel)` (fraction-preserving, i.e. area/volume
 weighted, not nearest neighbour), `reorient` if a source uses another axis convention (state the
 conventions explicitly in the docstring; ours are (z, y, x) arrays, positions in (x, y, z) m).
@@ -232,6 +239,23 @@ M2 delivered API and limits:
   scalar tissue/air/bone priors. A measured field comparison is still pending M3.
 - 449 tests pass with Apple GPU access; 4 opt-in crosschecks deselected. Existing output
   and gradient snapshots are bit-identical. No engine, `phantom.py` or `maps.py` edits.
+
+## M3 implementation status (2026-10-07)
+
+- `load_qsm2` preserves source geometry, 16-label memberships, susceptibility reference and
+  measured-map acquisition field. Conservative resampling preserves M0 volume; M0-weighted
+  rates do not dilute relaxation with air. Coarsened rates remain a compartment approximation.
+- Public Sim1/Sim2 data was obtained from the SURFdrive share linked by an author's lab;
+  decompressed checksums are pinned. Source header spacing is 0.999024391 mm, distinct from
+  the exactly 1-mm estimated frequency images. The full-head package remains access-restricted.
+- Both public chi maps agree with pinned independent `qsm-forward` code: brain RMS
+  2.11e-16 / 3.76e-16 Hz after subtracting only a constant reference difference, 3 T, 2× padding.
+  That code is a public Python implementation based on the paper, not the unavailable original
+  MATLAB package. Synthetic air/exterior cases agree to <6.83e-13 Hz maximum.
+- Full-source R1/R2*/M0 ingestion is unit-tested with synthetic NIfTI files, but not yet tested
+  on the restricted original files. The original MATLAB cross-check also remains pending;
+  M3 is therefore not marked complete. Reproduction and access details are in
+  [QSM.md](../../validation/anatomy/QSM.md).
 
 ## 6. M4: within-tissue variability
 
