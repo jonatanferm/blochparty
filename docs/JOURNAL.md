@@ -367,3 +367,12 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   per-spin fields (1e-12); a spin moving through a linear B0 map = a static gradient (1e-12);
   a translated object under mapped coils = the moved static object; GPU = core 1e-6 with flow,
   rigid motion, diffusion and maps together. Plain kernels unchanged (0.38 s).
+- **Receive chain** (`receive.py`): oversampled readouts (segments split at the finer sample
+  times), a centred windowed-sinc decimation filter (even length for even os, odd for odd: no
+  delay), thermal noise with channel covariance, coherent interference tones, spikes, gain
+  drift, quantisation; `ReceiveChain.acquire` in the scanner's order. Checks: measured |H| =
+  designed |H| to 1e-5 at os 2/3/4 including the band-edge roll-off (−20 % at 0.9 of
+  Nyquist), zero phase; noise power through the filter = σ² Σh²; quantisation error step²/12
+  and clipping; a tone lands in the image column of its frequency. Test mistake: I expected a
+  zipper line, but a tone coherent with the TR lands at one phase-encode point; real zippers are
+  lines because interference is incoherent.
