@@ -223,6 +223,13 @@ says where it came from so it can be re-checked.
   is the *shortest* inversion time (3 ms), although their T2* comment says 5 s. TI carries a
   timing correction 12 x 22.8 us + (13 x 15.065 − 5) us and is counted from the pulse centre.
 
+- **PTB spiral TSE (Zenodo 18749100)**: the ISMRMRD trajectory is in matrix-index units
+  (+-80 for 160) and each readout spirals out from the k-space centre at sample 0 — the header's
+  `center_sample` 45 is wrong. Each echo of a TR uses a different spiral rotation.
+- **T1MES reference values are from a 1.4 T relaxometer** (Captur et al. 2016, Table 2); the
+  shared tubes have no 3 T values, and agarose T2 depends on field and echo spacing (here 35–50 %
+  below the references). Not an independent 3 T T2 reference.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -306,6 +313,13 @@ says where it came from so it can be re-checked.
   within ±11 %. The first ~0.1 s of a single-spoke-per-frame transient is unrecoverable either way.
   Always push a digital twin of the acquisition (measured coil maps, trajectory, noise) through
   the same pipeline before reading physics into reconstructed curves.
+
+- **A Pipe-style density compensation built from the NUFFT Gram operator diverges**:
+  w <- w / |A A^H w| with A A^H a sinc-like (not positive) kernel oscillated for 30 iterations
+  (weights spanning 1e-15 to 1e-3), so gridded images and the coil maps derived from them changed
+  from run to run. CG-SENSE with those maps produced a plausible-looking but wrong echo train
+  (a spurious "anomalous" tube). Use per-coil least squares (no DCF) for coil-map images, or a
+  positive kernel, and check reconstructions run to run.
 
 ## Process and tooling
 

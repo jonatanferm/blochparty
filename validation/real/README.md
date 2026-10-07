@@ -19,6 +19,9 @@ Benchmark 3 (radial IR-bSSFP, Scholand et al. 2023, Zenodo 7654462, CC BY 4.0, ~
 Benchmark 4 (generalized Bloch on BSA / MnCl2 NMR, Asslaender et al. 2022, MIT, ~240 MB):
 `uv run python validation/real/fetch_asslaender.py && uv run python validation/real/asslaender_ir.py`.
 
+Benchmark 5 (the scanner's Pulseq spiral TSE of a T1MES phantom, Schuenke & Kolbitsch, Zenodo
+18749100, CC BY 4.0, ~22 MB): `uv run python validation/real/spiral_tse.py` (fetches the data).
+
 Additional diffusion, CEST, MT and hardware-validation sources, with verified raw-data
 formats and remaining metadata gaps: [SOURCES.md](SOURCES.md).
 

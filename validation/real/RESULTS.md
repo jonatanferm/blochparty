@@ -158,6 +158,35 @@ T2* from the FID), compared with their published fits. Measured 2026-10-07, core
   22.8 us vs 0.15–0.6 % for the rest), a pulse-length-dependent inversion efficiency of the
   hardware that a constant factor does not capture — the same in both samples.
 
+## Benchmark 5: the scanner's own Pulseq spiral multi-echo TSE, T1MES phantom (`spiral_tse.py`)
+
+Schuenke & Kolbitsch (Zenodo 18749100): the `.seq` played on a 3 T Siemens Cima.X (PTB, 16
+channels) and its raw data: 10 echoes 16 ms apart, 160 spiral-out interleaves, TR 4 s. The
+exact `.seq` is simulated (first three TRs, 1024 spins across 4 slice thicknesses, nominal
+B1); measured curves from CG-SENSE (`spiral_tse_recon.py`). No independent 3 T T2 exists (the
+T1MES values are from a 1.4 T relaxometer; agarose T2 is field- and echo-spacing-dependent, and
+measures 35–50 % shorter here), so T2 is fitted per tube and the test is the echo-train shape.
+Measured 2026-10-07, Apple M4 GPU:
+
+| tube | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+|---|---|---|---|---|---|---|---|---|---|
+| fitted T2 [ms] (Bloch) | 28.7 | 34.1 | 180.9 | 31.9 | 29.5 | 30.2 | 111.5 | 119.1 | 117.7 |
+| mono-exponential residual | 4.25 % | 3.93 % | 1.68 % | 3.91 % | 5.41 % | 4.77 % | 1.89 % | 1.95 % | 1.77 % |
+| **Bloch, exact `.seq`, nominal B1** | **1.06 %** | **1.76 %** | **1.58 %** | **1.95 %** | **2.73 %** | **2.44 %** | **1.71 %** | **2.32 %** | **2.33 %** |
+| method floor (digital twin, measured noise) | 0.40 % | 0.44 % | 0.16 % | 0.62 % | 0.44 % | 0.34 % | 0.18 % | 0.18 % | 0.21 % |
+
+- **The stimulated-echo pattern comes out of the scanner's sequence**: 2–4x lower residuals
+  than a mono-exponential for the short-T2 tubes; equal for the long-T2 ones, where the
+  pattern is weak. The fitted global B1 is 1.00 (nominal is optimal), and a free B1 per tube
+  changes nothing.
+- **What is left** is < 1 % of echo 1 at every echo, 3–10x the method's floor: in the long-T2
+  tubes the late even echoes sit low (a stronger odd/even modulation than predicted), in the
+  short-T2 tubes the echo-1/echo-2 step. Not B0, B1, T1 or the refocusing scale (all tested).
+  Candidates: the agarose's bound pool (saturated by the refocusing train), eddy-current phase
+  errors (needs this scanner's GIRF), non-mono-exponential agarose T2.
+- An earlier analysis reported a "tube 3 anomaly" (Bloch 3.8 % vs mono 1.2 %): an artefact of
+  coil maps from a non-converging density compensation (`LESSONS.md`).
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
