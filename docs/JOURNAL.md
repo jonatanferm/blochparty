@@ -310,3 +310,10 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   the generalized arrays (and earlier the MT/field-model state) slowed the plain kernels 10–30 %
   through register pressure. Each kernel is now compiled in three variants (plain / rate
   MT + field model / generalized), and the plain kernel is back at 0.40 s.
+- **Free pools in the fused kernel** (ac01fc6, `fused/bm.h`): the exact engine per spin
+  (Padé-13 matrix exponential, reused across identical segments). Adjoint by the block-matrix
+  Fréchet trick, chained through A's entries. Forward 1e-14; every gradient ~1e-13 vs autograd
+  through the core, after one bug (RF gradients credited to segments without RF).
+- Not ported: free pools on Metal (a dense ~17×17 exponential per thread and segment, which
+  overflows registers; pools are used for spectra and few spins, where the CPU kernel suffices),
+  and the Metal adjoint (the whole reverse sweep for every physics variant: the largest port).

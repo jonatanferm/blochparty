@@ -269,7 +269,10 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
       engine in the PyTorch core (one matrix exponential per segment)
 - [x] Generalized Bloch model of the bound pool (`generalized_bloch.py`, Assländer et al.):
       a pulse-level reference solver
-- [ ] Free pools in the fused and Metal kernels; a faster engine for imaging with pools
+- [x] Free pools in the fused kernel (`fused/bm.h`): the same exact engine per spin, forward and
+      adjoint (Fréchet derivative of the exponential by the block-matrix trick); ~1e-13 vs autograd
+- [ ] Free pools on Metal (a dense per-thread matrix exponential: little gain for the few-spin
+      workloads pools are used for); a faster engine for imaging with pools
 - [x] Generalized Bloch in the engines (`BoundPool(model="generalized")`): the Green's function as
       complex exponential modes (super-Lorentzian with a 100 T2 memory taper: 30 modes, error
       2.4e-5); under RF the pool rotates like a Bloch pool and each mode takes its share. In the
