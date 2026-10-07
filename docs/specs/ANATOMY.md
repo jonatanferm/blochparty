@@ -1,6 +1,7 @@
 # Spec: realistic anatomy and susceptibility-driven B0
 
-Status: open, 2026-10-07. Owner: a separate agent; coordination rules at the end.
+Status: M1 implemented and analytically checked, 2026-10-07; M2–M5 open.
+The QSM forward-field cross-check remains part of M3. Coordination rules at the end.
 Read first: `CLAUDE.md` (working rules), `docs/REALISM.md` (rows "Realistic anatomy and fuzzy
 tissue", "Continuous anatomy (inverse crime)", "B0 inhomogeneity from anatomy"),
 `src/blochparty/phantom.py` (`Phantom`, `phantom_from_maps`, `TISSUES`, `b0_sphere`,
@@ -33,6 +34,14 @@ In scope (in this order; each milestone is a separate, tested, committed step):
 - **M4 within-tissue variability**: smooth, seeded random fields modulating properties.
 - **M5 example and docs**: `examples/anatomy_brain.py` (a 2D slice and a 3D GPU run),
   REALISM rows, LESSONS, JOURNAL.
+
+M1 API: `susceptibility_to_b0(chi, voxel, field_T=3.0, *, b0_dir=(0, 0, 1),
+padding=2.0, background=0.0)` and `shim(df, mask, order=2, *, voxel=(1, 1, 1), origin=None)`.
+Both are exported from `blochparty`. `voxel` is (dz, dy, dx) in m; `origin` is
+(x, y, z) in m, defaulting to a grid centred on zero. Shim coefficients use the exact
+`b0_shim` names/units, describe the subtracted field, and require a full-rank mask.
+Tests report sphere inside/outside RMS 0.439/0.108 Hz at 64³, cylinder RMS < 1.77 Hz
+at all three orientations, and harmonic removal < 1e-12 Hz (3 T, dchi=9.4e-6).
 
 Out of scope: body / cardiac anatomy (XCAT and MIDA are licence-restricted), anatomical motion
 (the existing `motion.py` applies to any phantom), EM coil maps (separate item), perfusion /
@@ -67,14 +76,23 @@ Physics (SI chi, dimensionless; field in Hz at the Larmor frequency):
 - Zero-padding (default 2x per axis, configurable) against wrap-around; voxel size and B0
   direction (`b0_dir`, default (0, 0, 1) in (x, y, z)) as parameters; arrays in the project's
   (z, y, x) order.
+- Subtract an explicit surrounding susceptibility (`background`, SI, default zero) before
+  zero-padding: absolute head maps need air outside, not a vacuum boundary. k=0 sets the
+  mean over the padded domain, not the returned crop. Even-grid Nyquist cross terms are
+  averaged over both signs of each Nyquist axis to preserve joint rotation covariance.
 - Optional anti-aliasing: the kernel sampled on a finer grid then averaged, or the
   "continuous kernel" variant; measure which one the analytic tests need.
+  M1 measurements meet the above accuracy with partial-volume input and the standard
+  kernel; an extra anti-alias kernel is deferred unless data validation shows a need.
 - `shim(df, mask, order=2)`: least-squares fit of the real spherical harmonics up to
   `order` (reuse the term definitions of `phantom.b0_shim` for 0th-2nd order) over a mask,
   returning the shimmed map and the coefficients. Scanners shim to 2nd order.
 - Output: a Hz map usable as `Phantom.db0` (tissue-attached) or `FieldMaps.b0` (scanner frame).
   Explain in the docstring when to use which (moving subjects: the susceptibility field moves
   with the tissue, the shim field stays with the scanner; `maps.py` already separates them).
+  This tissue-attached approximation is exact for rigid translation of the source;
+  rotation relative to B0 changes the induced field and requires recomputation using the
+  new object-frame `b0_dir`. Do not attach the scanner shim to the tissue.
 - Typical values (cite primary sources in code): water -9.05 ppm, air +0.36 ppm, so air-tissue
   ~ +9.4 ppm; cortical bone ~ -2 ppm relative to water; deep grey matter iron +0.05-0.2 ppm.
 
@@ -101,11 +119,12 @@ class Anatomy:
     fractions: dict[str, Tensor]      # tissue -> (nz, ny, nx) membership in [0, 1]
     voxel: tuple[float, float, float] # (dz, dy, dx) [m]
     origin: tuple[float, float, float]# position of voxel (0, 0, 0) centre, (x, y, z) [m]
-    chi: Tensor | None = None         # optional susceptibility map [ppm SI], same grid
+    chi: Tensor | None = None         # optional susceptibility map [dimensionless SI], same grid
     maps: dict[str, Tensor] = field(default_factory=dict)  # optional measured maps (R1, R2*, M0, ...)
 ```
 
-Fractions need not sum to 1 (background); document how the remainder is treated. Loaders:
+Fractions need not sum to 1 (background); document how the remainder is treated.
+Convert ppm source data by 1e-6 on loading, keeping the Anatomy and M1 units identical. Loaders:
 `load_brainweb(subject: int, root)`, `load_qsm2(root, resolution="1mm")`. Utilities:
 `crop`, `slab(z0, thickness)`, `resample(voxel)` (fraction-preserving, i.e. area/volume
 weighted, not nearest neighbour), `reorient` if a source uses another axis convention (state the

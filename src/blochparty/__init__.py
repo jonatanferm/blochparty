@@ -16,6 +16,7 @@ from .phantom import (Phantom, b0_cylinder, b0_shim, b0_sphere, grid_positions, 
 from .recon import coil_combine, ifft2c, ifft3c, ifftnc, kspace_grid, reconstruct, rss
 from .sequence import (Sequence, SequenceBuilder, System, block_pulse, gradient_waveform, sinc_pulse,
                        trapezoid)
+from .susceptibility import shim, susceptibility_to_b0
 
 __all__ = [
     "GAMMA_BAR", "BoundPool", "ExchangePool", "FieldMaps", "Motion", "Phantom", "Restriction", "Sequence", "SequenceBuilder", "SimResult", "System", "add_noise", "b0_cylinder",
@@ -23,6 +24,7 @@ __all__ = [
     "cartesian_kspace", "cartesian_recon", "coil_combine", "design", "epg", "epi_2d", "exchange", "fused",
     "gradient_waveform", "gre_2d", "gre_3d", "gre_cartesian", "grid_positions", "ifft2c", "ifft3c", "ifftnc",
     "kspace_grid", "phantom_from_maps", "readout_bandwidth_per_pixel", "reconstruct", "reference", "rss",
-    "se_2d", "shepp_logan", "shepp_logan_maps", "simulate", "simulate_chunked", "sinc_pulse", "trapezoid",
+    "se_2d", "shepp_logan", "shepp_logan_maps", "shim", "simulate", "simulate_chunked", "sinc_pulse",
+    "susceptibility_to_b0", "trapezoid",
     "tse_2d",
 ]

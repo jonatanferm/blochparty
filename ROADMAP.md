@@ -462,6 +462,10 @@ by Pulseq's own checks.
 
 ## Phase 6 – Training-data generation
 
+- [x] Anatomy M1: susceptibility maps → B0 with padded Fourier dipole convolution and
+      order 0–2 shimming (`susceptibility_to_b0`, `shim`); sphere inside/outside RMS
+      0.439/0.108 Hz at 3 T, long cylinders < 1.77 Hz, harmonic removal < 1e-12 Hz.
+      BrainWeb/QSM loaders and continuous anatomy follow in [the anatomy spec](docs/specs/ANATOMY.md).
 - [ ] Realistic phantoms: BrainWeb tissue maps, XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data

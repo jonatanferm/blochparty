@@ -7,6 +7,29 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Even-grid dipole kernels need a Nyquist sign convention.** The usual `(k.b)^2`
+  formula followed by `ifft(...).real` breaks joint object/B0 rotation covariance when
+  two axes are at Nyquist (~2 Hz in a random small-grid test). Average over the two
+  possible signs independently for every Nyquist axis: retain squared terms and zero
+  their cross terms. Odd/even-grid quarter turns then agree to < 2e-12 Hz.
+  (`susceptibility.py`, `tests/test_susceptibility.py`, anatomy M1)
+- **Padding controls periodic copies, not tissue-boundary discretisation.** For a 10-mm
+  partial-volume sphere at 3 T, far-field RMS falls 4.287 → 0.134 → 0.0216 Hz at
+  1×/2×/3× padding; interior RMS improves 0.908 → 0.439 Hz from 32³ to 64³ at 2×.
+  A long cylinder needs more transverse padding (4× here): 2× gave a ~6.1 Hz constant
+  error even in its central plane. Subtract the surrounding susceptibility before
+  padding absolute maps; zero padding an absolute head map otherwise puts vacuum,
+  rather than air, outside the array. (`tests/test_susceptibility.py`; Jordan et al.,
+  JMRI 2013, [doi:10.1002/jmri.23762](https://doi.org/10.1002/jmri.23762))
+- **A susceptibility field does not simply rotate with the head.** Translation can
+  carry the static field with tissue, but rotation changes the susceptibility/B0
+  orientation and needs recomputation. Keep the scanner shim in `FieldMaps`, not in
+  a moving phantom's combined `db0`. (`susceptibility.py`, `maps.py`)
+- **Large float32 shim fits need explicit rank tolerances.** The default N*eps cutoff
+  approaches one on multi-million-voxel masks, despite fitting only nine scaled
+  harmonics. Set the relative cutoff from the number of columns. For order 0, use the
+  mean directly: a one-column QR on >8 million voxels lost ~0.001 Hz even for a constant
+  17 Hz map. (`susceptibility.py`, `test_float32_shim_large_mask`)
 - **Speckle biases magnitude images upward, worst where the signal is small.** Spins are a
   Monte Carlo sample of the continuum; the complex image's MC noise is ~zero-mean, but
   E|s + n| ≈ |s| + σ²/2|s|. A water fill simulated at sphere-level density (64 spins/pixel)
