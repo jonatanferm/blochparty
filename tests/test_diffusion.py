@@ -85,3 +85,67 @@ def test_deterministic_and_merge_independent():
     assert (a.signal - c.signal).abs().max() > 1e-3 * a.signal.abs().max()
     assert torch.allclose(a.signal, d.signal, atol=1e-10 * float(a.signal.abs().max()))
     assert torch.allclose(a.m, d.m, atol=1e-12)
+
+
+def epg_cpmg_diffusion(alpha, n_echo, esp, d, dk):
+    """|echo| of a CPMG train (90x, then refocusing alpha about y), each half echo spacing a
+    crusher of dephasing dk [rad/m]; extended phase graphs with isotropic diffusion (Weigel et
+    al., JMR 2010): over an interval tau with k -> k + dk, transverse states attenuate by
+    exp(-d tau (k^2 + k dk + dk^2 / 3)), longitudinal ones by exp(-d tau k^2). No relaxation."""
+    kmax = 2 * n_echo + 4
+    fp, fm, z = (np.zeros(kmax, complex) for _ in range(3))
+    z[0] = 1.0
+
+    def rf(a, phi):
+        nonlocal fp, fm, z
+        c2, s2, sa = math.cos(a / 2) ** 2, math.sin(a / 2) ** 2, math.sin(a)
+        e = np.exp(1j * phi)
+        fp, fm, z = (c2 * fp + e**2 * s2 * fm - 1j * e * sa * z,
+                     np.conj(e) ** 2 * s2 * fp + c2 * fm + 1j * np.conj(e) * sa * z,
+                     -0.5j * np.conj(e) * sa * fp + 0.5j * e * sa * fm + math.cos(a) * z)
+
+    def interval(tau):
+        nonlocal fp, fm, z
+        n = np.arange(kmax)
+        kp, km = n * dk, -n * dk
+        fp = fp * np.exp(-d * tau * (kp**2 + kp * dk + dk**2 / 3))
+        fm = fm * np.exp(-d * tau * (km**2 + km * dk + dk**2 / 3))
+        z = z * np.exp(-d * tau * kp**2)
+        fp = np.concatenate([[0], fp[:-1]])
+        fm = np.concatenate([fm[1:], [0]])
+        fp[0] = np.conj(fm[0])
+
+    rf(math.pi / 2, 0.0)
+    echoes = []
+    for _ in range(n_echo):
+        interval(esp / 2)
+        rf(alpha, math.pi / 2)
+        interval(esp / 2)
+        echoes.append(abs(fp[0]))
+    return np.array(echoes)
+
+
+def test_cpmg_stimulated_echoes_match_epg_with_diffusion():
+    # crushers make every echo a sum of spin- and stimulated-echo pathways, each attenuated by
+    # its own diffusion history; walkers spread uniformly over whole crusher wavelengths
+    metal = pytest.importorskip("blochparty.metal")
+    if not metal.available():
+        pytest.skip("no Apple GPU")
+    n, d, esp, n_echo, alpha = 1_000_000, 2.5e-9, 10e-3, 8, math.radians(150)
+    g = 2.0e6  # [Hz/m] for esp / 2: dk = 2 pi g esp / 2
+    dk = 2 * math.pi * g * esp / 2
+    wavelength = 1 / (g * esp / 2)
+    x = (torch.arange(n, dtype=f64) + 0.5) / n * 50 * wavelength
+    ph = bp.Phantom(pos=torch.stack([x, torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64)], -1),
+                    pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64), t2=torch.full((n,), 1e6, dtype=f64),
+                    db0=torch.zeros(n, dtype=f64), diffusion=torch.full((n,), d, dtype=f64))
+    b = bp.SequenceBuilder().rf(1e-6, flip_deg=90.0)
+    for _ in range(n_echo):
+        b.delay(esp / 2 - 1e-6, grad=(g * esp / 2 / (esp / 2 - 1e-6), 0, 0))
+        b.rf(1e-6, flip_deg=math.degrees(alpha), phase=math.pi / 2)
+        b.delay(esp / 2 - 1e-6, grad=(g * esp / 2 / (esp / 2 - 1e-6), 0, 0)).readout(1, 2e-6)
+    sim = metal.simulate_metal(ph, b.build(), seed=1).signal[0].abs().numpy() / n
+    ref = epg_cpmg_diffusion(alpha, n_echo, esp, d, dk)
+    no_diff = epg_cpmg_diffusion(alpha, n_echo, esp, 0.0, dk)
+    assert np.abs(no_diff - ref).max() > 0.05  # diffusion matters here
+    assert np.abs(sim - ref).max() < 3e-3, (sim, ref)

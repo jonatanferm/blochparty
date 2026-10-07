@@ -335,3 +335,8 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   by spin (1e-5), and merged free runs equal segment stepping. Stejskal–Tanner, isotropic and an
   anisotropic tensor: unbiased (2M walkers × 20 seeds on the GPU: 0.54296 ± 0.00009 vs
   0.54297). Speed: 2M walkers through a PGSE in 0.07 s on the GPU, 30× the core.
+- **Multi-pathway diffusion**: a CPMG train with crushers and 150° refocusing (spin and
+  stimulated echoes, each with its own diffusion history) against extended phase graphs with
+  diffusion (Weigel et al. 2010, implemented independently in the test): 1M GPU walkers agree
+  with EPG to 1e-4 on all 8 echoes (e.g. 0.9029/0.9248/0.8496 vs 0.9028/0.9247/0.8495), while
+  diffusion moves them by up to 0.23. Passed on the first run.
