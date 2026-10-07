@@ -204,7 +204,7 @@ Corrections to the ranking above, given what the simulator already has:
 | Missing | Route | Status of the result |
 |---|---|---|
 | Gradient nonlinearity coefficients (vendor-confidential) | Fit spherical harmonics to fiducial displacements in a grid / distortion phantom scanned with the vendor correction off (two readout polarities separate it from B0); or the spatial b-value bias in an ice-water DWI phantom (ADC known at 0 °C). Without a scan: synthetic coefficient sets within published magnitudes | Calibration of one scanner, or explicitly "plausible", never "vendor X" |
-| ADC filter response | Spectrum of noise-only (noise-adjust) samples: |H(f)|^2 directly | Measurement |
+| ADC filter response | Spectrum of noise-only (noise-adjust) samples: the squared filter magnitude directly | Measurement |
 | Played vs written timing, gradient delays | Fit global delays and GIRF parameters to calibration scans with the differentiable field model; check on held-out scans (radial / spiral pairs above) | Calibration + held-out prediction |
 | Receive noise covariance, coil maps, g-factor | Noise-adjust scans give the covariance; ESPIRiT on any multi-coil raw data gives coil maps; pseudo-replica g-factor (Robson et al. 2008) on the same data | Measurement, for comparison with `loops.py` structure |
 | B1+ of real anatomy at 3 T and above | mariepy on BrainWeb; measured phantom B1 maps (7654462) to check the method | Simulation, checked on phantoms |
