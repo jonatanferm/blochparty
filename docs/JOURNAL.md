@@ -304,3 +304,9 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   −0.969 after a 10 µs π pulse), second-order convergence, and the rate model for
   off-resonant saturation (its regime) to 2e-3; gradcheck. The split needs RF steps ≲ T2b,
   so RF segments are sub-stepped to T2b/2 (100 µs steps were 0.06 off).
+- **Fused kernel**: generalized forward (724d4de) and adjoint (b05a4b0). Every input's gradient
+  matches autograd to ~1e-14 on the first run.
+- **Metal**: the generalized step in both coil kernels. Bugs: `half` is a type in MSL; and
+  the generalized arrays (and earlier the MT/field-model state) slowed the plain kernels 10–30 %
+  through register pressure. Each kernel is now compiled in three variants (plain / rate
+  MT + field model / generalized), and the plain kernel is back at 0.40 s.

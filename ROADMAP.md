@@ -270,8 +270,11 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 - [x] Generalized Bloch model of the bound pool (`generalized_bloch.py`, Assländer et al.):
       a pulse-level reference solver
 - [ ] Free pools in the fused and Metal kernels; a faster engine for imaging with pools
-- [ ] Generalized Bloch in the engines via the paper's linearized R2,s,l (the rate model
-      cannot invert the pool for pulses ≤ 100 µs and under-saturates on-resonance pulses)
+- [x] Generalized Bloch in the engines (`BoundPool(model="generalized")`): the Green's function as
+      complex exponential modes (super-Lorentzian with a 100 T2 memory taper: 30 modes, error
+      2.4e-5); under RF the pool rotates like a Bloch pool and each mode takes its share. In the
+      core, the fused kernel (forward and adjoint, ~1e-14 vs autograd) and on the Apple GPU (a
+      separate kernel variant, so the plain kernels keep their speed)
 - [ ] Incidental MT validated on data with a known fat-saturation pulse
 
 **Verified**: lineshape vs SciPy quadrature (1e-11); exchange step vs matrix exponential;

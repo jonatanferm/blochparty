@@ -242,6 +242,13 @@ says where it came from so it can be re-checked.
   node that way does nothing in float32, so `floor` can reach the last node and read past
   the table. Clamp the cell index to n − 2 instead (and let the last cell include its end).
 
+- **GPU kernels pay for state they never use**: per-thread arrays and structs for optional
+  physics (bound pool, field model, 60 floats of generalized-Bloch modes) raise register
+  pressure and lower occupancy even when a runtime flag skips them: the plain Metal kernel
+  went 0.40 → 0.53–0.65 s. Compile variants (a template parameter, instantiated per kernel
+  name) so the common path carries nothing extra. Also: `half` is a type in Metal
+  Shading Language; don't name a variable that.
+
 ## Process and tooling
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:

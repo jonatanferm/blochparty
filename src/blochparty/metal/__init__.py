@@ -215,6 +215,94 @@ inline void step_mt(constant float* q, int f, float bz, float f_rf, thread float
     }
 }
 
+// ---- generalized Bloch bound pool (generalized_bloch.modes): modes u_j of the pool's transverse
+// magnetization; RF segments sub-stepped (nsub per segment, from Python); the pool rotated by the RF
+// alone, each mode taking c_j of the change of S = sum u_j. As bloch._rf_segment_generalized.
+#define MAX_MODES 32
+
+struct Modes {
+    float ur[MAX_MODES], ui[MAX_MODES];   // state
+    float fr[MAX_MODES], fi[MAX_MODES];   // free-segment factors, cached on (dt, g, b0)
+    float k_dt = -1.0f, k_gx = 0.0f, k_gy = 0.0f, k_gz = 0.0f, k_b0 = 0.0f;
+};
+
+inline void mode_factor(constant float* modes, uint j, float t, float t2b, float dbz, thread float& a, thread float& b) {
+    const float amp = precise::exp(-modes[4 * j] * t / t2b);
+    const float ph = -TWO_PI * dbz * t - modes[4 * j + 1] * t / t2b;
+    a = amp * precise::cos(ph), b = amp * precise::sin(ph);
+}
+
+inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float& mx, thread float& my, thread float& mz,
+                     thread float& mb, thread Modes& md, thread const Spin& p, thread const Pool& b,
+                     constant float* modes, uint nj, thread Cache& k, thread ZCache& zc) {
+    const float dt = q[0];
+    const float dbz = bz + b.dw;
+    if (f & 1) {
+        const float h = dt / float(nsub), hstep = 0.5f * h;
+        const ZStep z = zstep(hstep, p, b, 0.0f);
+        const float e2 = expm1_(-hstep * p.r2);
+        float hr[MAX_MODES], hi[MAX_MODES];
+        for (uint j = 0; j < nj; ++j) mode_factor(modes, j, hstep, b.t2b, dbz, hr[j], hi[j]);
+        const float w = -TWO_PI * h;
+        const float wx = w * p.b1 * q[1], wy = w * p.b1 * q[2], wz = w * bz;
+        for (uint s = 0; s < nsub; ++s) {
+            for (uint hs = 0; hs < 2; ++hs) {
+                if (hs) {
+                    // the water about its effective field
+                    const float phi2 = wx * wx + wy * wy + wz * wz, phi = sqrt(phi2);
+                    float c, s1v, s2v;
+                    if (phi < 1e-3f) { c = 1.0f - 0.5f * phi2; s1v = 1.0f - phi2 / 6.0f; s2v = 0.5f - phi2 / 24.0f; }
+                    else { const float sh = precise::sin(0.5f * phi) / phi; c = precise::cos(phi); s1v = precise::sin(phi) / phi; s2v = 2.0f * sh * sh; }
+                    const float dot = wx * mx + wy * my + wz * mz;
+                    const float nx = c * mx + s1v * (wy * mz - wz * my) + s2v * wx * dot;
+                    const float ny = c * my + s1v * (wz * mx - wx * mz) + s2v * wy * dot;
+                    const float nz = c * mz + s1v * (wx * my - wy * mx) + s2v * wz * dot;
+                    mx = nx; my = ny; mz = nz;
+                    // the pool about the RF alone
+                    float sx = 0.0f, sy = 0.0f;
+                    for (uint j = 0; j < nj; ++j) sx += md.ur[j], sy += md.ui[j];
+                    const float ph2 = wx * wx + wy * wy, ph = sqrt(ph2);
+                    float pc, ps1, ps2;
+                    if (ph < 1e-3f) { pc = 1.0f - 0.5f * ph2; ps1 = 1.0f - ph2 / 6.0f; ps2 = 0.5f - ph2 / 24.0f; }
+                    else { const float sh = precise::sin(0.5f * ph) / ph; pc = precise::cos(ph); ps1 = precise::sin(ph) / ph; ps2 = 2.0f * sh * sh; }
+                    const float pdot = wx * sx + wy * sy;
+                    const float tx = pc * sx + ps1 * (wy * mb) + ps2 * wx * pdot;
+                    const float ty = pc * sy - ps1 * (wx * mb) + ps2 * wy * pdot;
+                    mb = pc * mb + ps1 * (wx * sy - wy * sx);
+                    const float dx = tx - sx, dy = ty - sy;
+                    for (uint j = 0; j < nj; ++j) {
+                        const float cr = modes[4 * j + 2], ci = modes[4 * j + 3];
+                        md.ur[j] += cr * dx - ci * dy, md.ui[j] += cr * dy + ci * dx;
+                    }
+                }
+                mx += mx * e2, my += my * e2;
+                zapply(z, mz, mb);
+                for (uint j = 0; j < nj; ++j) {
+                    const float x = md.ur[j], y = md.ui[j];
+                    md.ur[j] = hr[j] * x - hi[j] * y, md.ui[j] = hr[j] * y + hi[j] * x;
+                }
+            }
+        }
+    } else {
+        if (dt != k.dt || q[3] != k.gx || q[4] != k.gy || q[5] != k.gz || q[7] != k.b0) {
+            const float phi = -TWO_PI * dt * bz;
+            k.c = precise::cos(phi); k.s = precise::sin(phi);
+            k.e1 = expm1_(-dt * p.r1); k.e2 = expm1_(-dt * p.r2);
+            k.dt = dt; k.gx = q[3]; k.gy = q[4]; k.gz = q[5]; k.b0 = q[7];
+            for (uint j = 0; j < nj; ++j) mode_factor(modes, j, dt, b.t2b, dbz, md.fr[j], md.fi[j]);
+        }
+        if (dt != zc.dt) { zc.z = zstep(dt, p, b, 0.0f); zc.dt = dt; }
+        const float nx = k.c * mx - k.s * my, ny = k.s * mx + k.c * my;
+        mx = nx + nx * k.e2; my = ny + ny * k.e2;
+        zapply(zc.z, mz, mb);
+        for (uint j = 0; j < nj; ++j) {
+            const float x = md.ur[j], y = md.ui[j];
+            md.ur[j] = md.fr[j] * x - md.fi[j] * y, md.ui[j] = md.fr[j] * y + md.fi[j] * x;
+        }
+    }
+    if (f & 4) for (uint j = 0; j < nj; ++j) md.ur[j] = 0.0f, md.ui[j] = 0.0f;
+}
+
 // The per-spin state and segment step of both kernels: plain Bloch, or with the bound pool.
 struct State {
     float mx, my, mz, mb;
@@ -225,11 +313,18 @@ struct State {
     Conc conc;
 };
 
-inline void advance(thread State& st, constant float* segs, constant int* flags, constant float* frf, uint s, bool mt,
-                    constant float* line, constant float* log_f, uint mode) {
+// V: 0 plain Bloch (no field model, no bound pool), 1 rate-model bound pool and/or field model,
+// 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
+// carry none of the others' per-thread state.
+template <int V>
+inline void advance(thread State& st, thread Modes& md, constant float* segs, constant int* flags, constant float* frf,
+                    uint s, uint mt, constant float* line, constant float* log_f, uint mode, constant int* nsub,
+                    constant float* modes, uint nj) {
     constant float* q = segs + 8 * s;
-    const float bz = offset(st.p, st.conc, mode, q);
-    if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.p, st.b, line, log_f, st.cache, st.zc);
+    const float bz = offset(st.p, st.conc, V == 0 ? 0u : mode, q);
+    if (V == 0) step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
+    else if (V == 2) step_gen(q, flags[s], bz, uint(nsub[s]), st.mx, st.my, st.mz, st.mb, md, st.p, st.b, modes, nj, st.cache, st.zc);
+    else if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.p, st.b, line, log_f, st.cache, st.zc);
     else step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
 }
 
@@ -243,76 +338,6 @@ inline void flush(threadgroup float* partial, threadgroup int* block_rows, devic
         atomic_fetch_add_explicit(&sig[block_rows[b] * nv + v], t, memory_order_relaxed);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
-}
-
-kernel void bloch_chunk(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
-                        constant float* spins      [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
-                        constant float* sens       [[buffer(2)]],   // (2C, N) per coil: real, imag
-                        constant float* segs       [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
-                        constant int* flags        [[buffer(4)]],   // (S,) 1 rf, 2 adc, 4 spoil
-                        constant int* adc_row      [[buffer(5)]],   // (S,) signal row of an ADC segment
-                        device atomic_float* sig   [[buffer(6)]],   // (n_adc, C, 2)
-                        constant uint& n           [[buffer(7)]],
-                        constant uint& n_coils     [[buffer(8)]],
-                        constant uint& s0          [[buffer(9)]],
-                        constant uint& s1          [[buffer(10)]],
-                        device float* MB           [[buffer(11)]],  // (N,) bound-pool Mz, in/out (mt)
-                        constant float* pool       [[buffer(12)]],  // (5, N) f k r1b t2b dw (mt)
-                        constant float* frf        [[buffer(13)]],  // (S,) RF frequency [Hz] (mt)
-                        constant float* line       [[buffer(14)]],  // (6,) lineshape (mt)
-                        constant float* log_f      [[buffer(15)]],  // lineshape table (mt)
-                        constant uint& mt          [[buffer(16)]],  // 1: magnetization transfer
-                        constant float* conc       [[buffer(17)]],  // (7, N) concomitant-field coefficients
-                        constant uint& mode        [[buffer(18)]],  // 0 none, 1 leading order, 2 exact
-                        uint i    [[thread_position_in_grid]],
-                        uint lane [[thread_index_in_simdgroup]],
-                        uint sg   [[simdgroup_index_in_threadgroup]],
-                        uint nsg  [[simdgroups_per_threadgroup]],
-                        uint tid  [[thread_index_in_threadgroup]],
-                        uint ntg  [[threads_per_threadgroup]]) {
-    // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
-    // two barriers per block of samples instead of two per sample, and the final sums are spread
-    // over all threads of the group.
-    threadgroup float partial[TG_FLOATS];
-    threadgroup int block_rows[TG_FLOATS / (MAX_SG * 2)];
-    const bool active = i < n;
-    const uint j = active ? i : 0;
-    State st;
-    st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
-    st.p = load_spin(spins, n, j);
-    if (mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
-        st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
-        if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
-    }
-    if (mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
-        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
-    thread float &mx = st.mx, &my = st.my, &mz = st.mz;
-    const uint nv = 2 * n_coils;
-    const uint block = TG_FLOATS / (MAX_SG * nv);  // samples buffered per flush
-    uint nb = 0;
-
-    for (uint s = s0; s < s1; ++s) {
-        constant float* q = segs + 8 * s;
-        const int f = flags[s];
-        advance(st, segs, flags, frf, s, mt != 0, line, log_f, mode);
-        if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
-            const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
-            for (uint v = 0; v < nv; v += 2) {
-                const float sr = active ? sens[v * n + j] : 0.0f, si = active ? sens[(v + 1) * n + j] : 0.0f;
-                const float re = mx * sr - my * si, im = mx * si + my * sr;
-                const float tr = simd_sum(re * cp + im * sp), ti = simd_sum(im * cp - re * sp);
-                if (lane == 0) {
-                    partial[(sg * block + nb) * nv + v] = tr;
-                    partial[(sg * block + nb) * nv + v + 1] = ti;
-                }
-            }
-            if (tid == 0) block_rows[nb] = adc_row[s];
-            if (++nb == block) { flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg); nb = 0; }
-        }
-        if (f & 4) { mx = 0.0f; my = 0.0f; }
-    }
-    if (nb > 0) flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg);
-    if (active) { M[j] = mx; M[n + j] = my; M[2 * n + j] = mz; if (mt) MB[j] = st.mb; }
 }
 
 // Many coils: the coil sum of a block of 8 ADC samples is a complex matrix product
@@ -367,7 +392,90 @@ inline void flush_mma(threadgroup float* buf, threadgroup float* mine, threadgro
     threadgroup_barrier(mem_flags::mem_threadgroup);
 }
 
-kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
+"""
+
+_KERNELS = r"""
+kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
+                        constant float* spins      [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
+                        constant float* sens       [[buffer(2)]],   // (2C, N) per coil: real, imag
+                        constant float* segs       [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
+                        constant int* flags        [[buffer(4)]],   // (S,) 1 rf, 2 adc, 4 spoil
+                        constant int* adc_row      [[buffer(5)]],   // (S,) signal row of an ADC segment
+                        device atomic_float* sig   [[buffer(6)]],   // (n_adc, C, 2)
+                        constant uint& n           [[buffer(7)]],
+                        constant uint& n_coils     [[buffer(8)]],
+                        constant uint& s0          [[buffer(9)]],
+                        constant uint& s1          [[buffer(10)]],
+                        device float* MB           [[buffer(11)]],  // (N,) bound-pool Mz, in/out (mt)
+                        constant float* pool       [[buffer(12)]],  // (5, N) f k r1b t2b dw (mt)
+                        constant float* frf        [[buffer(13)]],  // (S,) RF frequency [Hz] (mt)
+                        constant float* line       [[buffer(14)]],  // (6,) lineshape (mt)
+                        constant float* log_f      [[buffer(15)]],  // lineshape table (mt)
+                        constant uint& mt          [[buffer(16)]],  // 1: magnetization transfer
+                        constant float* conc       [[buffer(17)]],  // (7, N) concomitant-field coefficients
+                        constant uint& mode        [[buffer(18)]],  // 0 none, 1 leading order, 2 exact
+                        device float* U            [[buffer(19)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                        constant float* modes      [[buffer(20)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                        constant int* nsub         [[buffer(21)]],  // (S,) RF sub-steps (mt 2)
+                        constant uint& nj          [[buffer(22)]],  // number of modes (mt 2)
+                        uint i    [[thread_position_in_grid]],
+                        uint lane [[thread_index_in_simdgroup]],
+                        uint sg   [[simdgroup_index_in_threadgroup]],
+                        uint nsg  [[simdgroups_per_threadgroup]],
+                        uint tid  [[thread_index_in_threadgroup]],
+                        uint ntg  [[threads_per_threadgroup]]) {
+    // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
+    // two barriers per block of samples instead of two per sample, and the final sums are spread
+    // over all threads of the group.
+    threadgroup float partial[TG_FLOATS];
+    threadgroup int block_rows[TG_FLOATS / (MAX_SG * 2)];
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
+        st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
+        if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    }
+    if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Modes md;
+    for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    thread float &mx = st.mx, &my = st.my, &mz = st.mz;
+    const uint nv = 2 * n_coils;
+    const uint block = TG_FLOATS / (MAX_SG * nv);  // samples buffered per flush
+    uint nb = 0;
+
+    for (uint s = s0; s < s1; ++s) {
+        constant float* q = segs + 8 * s;
+        const int f = flags[s];
+        advance<@V@>(st, md, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
+        if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
+            const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
+            for (uint v = 0; v < nv; v += 2) {
+                const float sr = active ? sens[v * n + j] : 0.0f, si = active ? sens[(v + 1) * n + j] : 0.0f;
+                const float re = mx * sr - my * si, im = mx * si + my * sr;
+                const float tr = simd_sum(re * cp + im * sp), ti = simd_sum(im * cp - re * sp);
+                if (lane == 0) {
+                    partial[(sg * block + nb) * nv + v] = tr;
+                    partial[(sg * block + nb) * nv + v + 1] = ti;
+                }
+            }
+            if (tid == 0) block_rows[nb] = adc_row[s];
+            if (++nb == block) { flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg); nb = 0; }
+        }
+        if (f & 4) { mx = 0.0f; my = 0.0f; }
+    }
+    if (nb > 0) flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg);
+    if (active) {
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
+        for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+    }
+}
+
+kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
                             constant float* spins      [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
                             device const float* sens   [[buffer(2)]],   // (2, 8T, N_pad): real, imag; zero-padded
                             constant float* segs       [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
@@ -388,6 +496,10 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
                             constant uint& mt          [[buffer(18)]],  // 1: magnetization transfer
                             constant float* conc       [[buffer(19)]],  // (7, N) concomitant-field coefficients
                             constant uint& mode        [[buffer(20)]],  // 0 none, 1 leading order, 2 exact
+                            device float* U            [[buffer(21)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                            constant float* modes      [[buffer(22)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                            constant int* nsub         [[buffer(23)]],  // (S,) RF sub-steps (mt 2)
+                            constant uint& nj          [[buffer(24)]],  // number of modes (mt 2)
                             uint i    [[thread_position_in_grid]],
                             uint lane [[thread_index_in_simdgroup]],
                             uint sg   [[simdgroup_index_in_threadgroup]],
@@ -403,12 +515,14 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
     State st;
     st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
     st.p = load_spin(spins, n, j);
-    if (mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
+    if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
         st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
         if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
     }
-    if (mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+    if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
         for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Modes md;
+    for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
     const uint j0 = i - lane;
     uint nb = 0;
@@ -416,7 +530,7 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance(st, segs, flags, frf, s, mt != 0, line, log_f, mode);
+        advance<@V@>(st, md, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -427,7 +541,11 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
         if (f & 4) { mx = 0.0f; my = 0.0f; }
     }
     if (nb > 0) flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
-    if (active) { M[j] = mx; M[n + j] = my; M[2 * n + j] = mz; if (mt) MB[j] = st.mb; }
+    if (active) {
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
+        for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+    }
 }
 """
 
@@ -439,7 +557,12 @@ MMA_MIN_COILS = 2
 def _lib():
     global _LIB
     if _LIB is None:
-        _LIB = torch.mps.compile_shader(_SOURCE)
+        # each kernel three times (advance<V>): plain, with the rate-model bound pool and/or the field
+        # model, and with the generalized Bloch modes; extra per-thread state costs the plain
+        # kernels ~10-30 % in register pressure otherwise
+        kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v)
+                          for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2")))
+        _LIB = torch.mps.compile_shader(_SOURCE + kernels)
     return _LIB
 
 
@@ -460,8 +583,6 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
 
     if getattr(phantom, "pools", None):
         raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
-    if phantom.bound is not None and phantom.bound.model == "generalized":
-        raise NotImplementedError("the generalized Bloch bound pool is not in this engine yet; use blochparty.simulate")
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
@@ -506,17 +627,32 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
             M = M[:3]
         mt_bufs = [mb.detach().to(dev, f32).contiguous(),
                    torch.stack([pool.f, pool.k, 1 / pool.t1, pool.t2, pool.dw]).detach().to(dev, f32).contiguous()]
-        frf = exchange.rf_frequency(seq.to(dtype=torch.float64, device="cpu")).detach()
-        lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
-        kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
-        line = torch.tensor([kind, float(pool.cutoff), float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
-                             float(len(lx))], dtype=f32)
-        mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.to(dev, f32).contiguous(), 1]
+        gen_bufs = None
+        if pool.model == "generalized":  # modes instead of the saturation lineshape
+            from ..generalized_bloch import modes as green_modes
+
+            pm, cm = green_modes(pool.lineshape)
+            table = torch.tensor([[q.real, q.imag, c.real, c.imag] for q, c in zip(pm, cm)], dtype=f32)
+            t2b_min = float(pool.t2.detach().min())
+            dts = seq.dt.detach().double().cpu()
+            nsub = torch.tensor([max(1, math.ceil(float(d) / (0.5 * t2b_min))) if r else 1
+                                 for d, r in zip(dts, seq.is_rf)], dtype=torch.int32)
+            gen_bufs = [torch.zeros(2 * len(pm), n, device=dev, dtype=f32), table.to(dev), nsub.to(dev), len(pm)]
+            dummy = torch.zeros(1, device=dev, dtype=f32)
+            mt_bufs += [dummy, dummy, dummy, 2]
+        else:
+            frf = exchange.rf_frequency(seq.to(dtype=torch.float64, device="cpu")).detach()
+            lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
+            kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
+            line = torch.tensor([kind, float(pool.cutoff), float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
+                                 float(len(lx))], dtype=f32)
+            mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.to(dev, f32).contiguous(), 1]
     else:
         if m_init is not None and m_init.shape[-1] == 4:
             raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
         dummy = torch.zeros(1, device=dev, dtype=f32)
         mt_bufs = [dummy, dummy, dummy, dummy, dummy, 0]
+        gen_bufs = None
     M = M.to(dev, f32).contiguous()
     if fields.mode:
         conc = torch.zeros(7, n, dtype=torch.float64)
@@ -525,14 +661,18 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     else:
         conc_buf = [torch.zeros(1, device=dev, dtype=f32), 0]
     sig = torch.zeros(max(n_adc, 1) * n_coils * 2, device=dev, dtype=f32)
+    if gen_bufs is None:
+        dz = torch.zeros(1, device=dev, dtype=f32)
+        gen_bufs = [dz, dz, torch.zeros(1, device=dev, dtype=torch.int32), 0]
+    suffix = "_gen" if gen_bufs[3] else ("_full" if (mt_bufs[5] or conc_buf[1]) else "")
     lib, S = _lib(), len(seq)
     for s0 in range(0, S, chunk):
         if mma:
-            lib.bloch_chunk_mma(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), n_tiles,
-                                threads, *mt_bufs, *conc_buf, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), n_tiles,
+                                threads, *mt_bufs, *conc_buf, *gen_bufs, threads=threads, group_size=group)
         else:
-            lib.bloch_chunk(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), *mt_bufs,
-                            *conc_buf, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), *mt_bufs,
+                            *conc_buf, *gen_bufs, threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
