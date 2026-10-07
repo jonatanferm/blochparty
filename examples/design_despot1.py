@@ -19,7 +19,7 @@ from blochparty import Phantom, Sequence, SequenceBuilder
 from blochparty.design import crb, minimize
 
 T1, T2, TR, TE = 1.0, 0.05, 15e-3, 2e-3
-RF_DUR, DWELL = 100e-6, 2e-6
+RF_DUR, DWELL = 100e-6, 2e-6  # one segment per pulse: the instantaneous rotation of the closed form
 # dummy pulses until (E1 cos a)^n < 1e-12 for any flip angle: the simulated signal is the steady state
 N_DUMMY = math.ceil(math.log(1e-12) / (-TR / T1))
 f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
@@ -28,8 +28,8 @@ f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
 def spgr_sequence(flip_deg, n_dummy=N_DUMMY):
     """Spoiled GRE driven to steady state, then one ADC sample at TE: ``n_dummy`` copies
     of one spoiled TR (built once and repeated, which is much faster than building them all)."""
-    tr = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg).delay(TR - RF_DUR).spoil().build()
-    echo = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg)
+    tr = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg, n_steps=1).delay(TR - RF_DUR).spoil().build()
+    echo = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg, n_steps=1)
     echo = echo.delay(TE - RF_DUR / 2 - DWELL / 2).readout(1, DWELL).build()
     def cat(name):
         a, b = getattr(tr, name), getattr(echo, name)

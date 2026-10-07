@@ -32,7 +32,8 @@ import numpy as np
 GREENS = ("lorentzian", "gaussian", "superlorentzian")
 
 
-MEMORY = 100.0  # super-Lorentzian memory [T2]: G is tapered by exp(-s / (MEMORY T2))
+MEMORY = 300.0  # super-Lorentzian memory [T2]: G is tapered by exp(-s / (MEMORY T2)); 300, not 100:
+# real BSA data with pulses to 70 T2 prefer it (validation/real/RESULTS.md, benchmark 4)
 
 
 def green(s: np.ndarray, t2: float, shape: str, memory: float | None = None) -> np.ndarray:
@@ -133,19 +134,50 @@ def rectangular(alpha: float, t_rf: float, h: float, delta: float = 0.0) -> np.n
 _MODES: dict = {}
 
 
+def _fit_modes(x, g, lams, floor):
+    """Weighted least squares of G on poles lam e^{+-i theta}: (poles, weights, max error)."""
+    poles = [lam * complex(math.cos(t), math.sin(t)) for lam in lams for t in (0.0, 0.6, 1.2)]
+    cols = []
+    for p in poles:
+        e = np.exp(-p * x)
+        cols.append(e.real)
+        if p.imag:
+            cols.append(e.imag)
+    a = np.array(cols).T
+    w = 1 / np.maximum(np.abs(g), floor)
+    w[0] = 1e4  # G(0) = 1: the hard-pulse rotation
+    coef = np.linalg.lstsq(a * w[:, None], g * w, rcond=None)[0]
+    ps, cs, i = [], [], 0
+    for p in poles:  # alpha Re(e^{-px}) + beta Im(e^{-px}) = Re((alpha - i beta) e^{-px})
+        if p.imag:
+            c = 0.5 * (coef[i] - 1j * coef[i + 1])
+            ps += [p, p.conjugate()]
+            cs += [c, c.conjugate()]
+            i += 2
+        else:
+            ps.append(p)
+            cs.append(complex(coef[i]))
+            i += 1
+    ps, cs = np.array(ps), np.array(cs)
+    cs = cs / cs.sum().real
+    err = np.abs((cs[None] * np.exp(-ps[None] * x[:, None])).sum(1).real - g).max()
+    return ps, cs, err
+
+
 def modes(shape: str, memory: float = MEMORY) -> tuple[np.ndarray, np.ndarray]:
     """G(s) ~ sum_j c_j exp(-p_j s / T2) with complex poles p_j (in units of 1/T2) and weights
     c_j in conjugate pairs (so the sum is real) and sum_j c_j = G(0) = 1.
 
     ``memory`` [T2] is the super-Lorentzian's taper (ignored for the other shapes); the slowest
-    pole sits at 1 / memory. Within the 30 modes, memory 300 still fits its G to 2e-4; 1000
-    only to 2e-3. Real data prefer the longer memories (``validation/real/RESULTS.md``,
+    pole sits near 1 / memory. Within the 30 modes, memory 300 fits its G to 4e-5; 1000
+    only to 6e-4. Real data prefer the longer memories (``validation/real/RESULTS.md``,
     benchmark 4: BSA inversion with pulses to 70 T2).
 
     The Lorentzian is one exact mode. Others: least squares with poles lambda e^{+-i theta},
     theta in {0, 0.6, 1.2}. Super-Lorentzian: the tapered G (``MEMORY``), six lambda
-    log-spaced over [1/100, 3], fitted over its whole support (to 800 T2), 30 modes, error
-    2.4e-5, weights < 1, lineshape within 0.5 % from 0 to 30 kHz. Fitting the untapered G over
+    log-spaced over [k/memory, 3] (k in 1-2 chosen per memory), fitted over its whole support
+    (to 8 memory T2), 30 modes; error 3.8e-5 at memory 300 (1.7e-5 at 100), weights < 1,
+    lineshape within 0.6 % from 0 to 30 kHz. Fitting the untapered G over
     a finite range instead needed weights of ~5000 that cancel and diverge beyond the range;
     regularising them destroys the cancellations the steep wings need. Gaussian: five lambda
     over [0.3, 6] on [0, 40 T2], 25 modes, error 2e-3. A flat-topped G needs the complex
@@ -156,38 +188,16 @@ def modes(shape: str, memory: float = MEMORY) -> tuple[np.ndarray, np.ndarray]:
         return _MODES[key]
     if shape == "lorentzian":
         out = (np.array([1.0 + 0j]), np.array([1.0 + 0j]))
-    else:
-        if shape == "superlorentzian":  # tapered at memory T2; fit its whole support
-            x = np.concatenate([np.linspace(0, 4, 400), np.logspace(math.log10(4), math.log10(8 * memory), 600)])
-            lams = np.logspace(-math.log10(memory), math.log10(3.0), 6)
-            g = green(x, 1.0, shape, memory)
-        else:  # Gaussian: gone within ~8 T2; fit to 40 T2 so the tail stays zero
-            x = np.concatenate([np.linspace(0, 10, 800), np.linspace(10, 40, 300)[1:]])
-            lams = np.logspace(math.log10(0.3), math.log10(6.0), 5)
-            g = green(x, 1.0, shape)
-        poles = [lam * complex(math.cos(t), math.sin(t)) for lam in lams for t in (0.0, 0.6, 1.2)]
-        cols = []
-        for p in poles:
-            e = np.exp(-p * x)
-            cols.append(e.real)
-            if p.imag:
-                cols.append(e.imag)
-        a = np.array(cols).T
-        w = 1 / np.maximum(np.abs(g), 1e-4 if shape == "superlorentzian" else 2e-3)
-        w[0] = 1e4  # G(0) = 1: the hard-pulse rotation
-        coef = np.linalg.lstsq(a * w[:, None], g * w, rcond=None)[0]
-        ps, cs, i = [], [], 0
-        for p in poles:  # alpha Re(e^{-px}) + beta Im(e^{-px}) = Re((alpha - i beta) e^{-px})
-            if p.imag:
-                c = 0.5 * (coef[i] - 1j * coef[i + 1])
-                ps += [p, p.conjugate()]
-                cs += [c, c.conjugate()]
-                i += 2
-            else:
-                ps.append(p)
-                cs.append(complex(coef[i]))
-                i += 1
-        cs = np.array(cs)
-        out = (np.array(ps), cs / cs.sum().real)
+    elif shape == "superlorentzian":  # tapered at memory T2; fit its whole support
+        x = np.concatenate([np.linspace(0, 4, 400), np.logspace(math.log10(4), math.log10(8 * memory), 600)])
+        g = green(x, 1.0, shape, memory)
+        # the slowest pole need not sit at 1 / memory: pick the layout with the smallest error
+        # (well-conditioned weights only); memory 100: 1.7e-5, 300: 3.8e-5
+        fits = [_fit_modes(x, g, np.logspace(math.log10(k / memory), math.log10(3.0), 6), floor)
+                for k in (1.0, 1.25, 1.5, 2.0) for floor in (1e-4, 1e-3)]
+        out = min((f for f in fits if np.abs(f[1]).max() < 3.0), key=lambda f: f[2])[:2]
+    else:  # Gaussian: gone within ~8 T2; fit to 40 T2 so the tail stays zero
+        x = np.concatenate([np.linspace(0, 10, 800), np.linspace(10, 40, 300)[1:]])
+        out = _fit_modes(x, green(x, 1.0, shape), np.logspace(math.log10(0.3), math.log10(6.0), 5), 2e-3)[:2]
     _MODES[key] = out
     return out

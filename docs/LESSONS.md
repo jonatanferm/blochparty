@@ -117,11 +117,17 @@ says where it came from so it can be re-checked.
   relaxation is Strang-split around the whole rotation, so a 180 deg in one step spends no time
   transverse: Mz after a 912 us pi pulse with T2 = 75 ms is −0.9987 instead of −0.9933
   (~T_RF / (2 T2) lost). Sampled pulses (Pulseq, sinc) take small steps and are fine; give
-  `SequenceBuilder.rf` ~10+ `n_steps` when T_RF is not short against T2. Found because MnCl2
+  `SequenceBuilder.rf` ~10+ `n_steps` when T_RF is not short against T2. Since 2026-10-07 the default
+  cuts hard pulses (builder, `block_pulse`, Pulseq block pulses) into <= 20 us segments: by
+  *duration*, not rotation — a count that depends on a differentiable flip angle jumps under
+  gradcheck's perturbation (a 30 deg pulse becomes 4 steps at 30.000001). Tests and examples
+  that compare against instantaneous-pulse references (EPG, Ernst, the signal equation) now
+  ask for `n_steps=1` explicitly. Found because MnCl2
   fitted 0.84 % instead of the authors' 0.70 %; with 50 steps it matches to every digit.
 - **The generalized-Bloch Green's-function taper is visible in real data**: memory 100 T2b
   (taper 0.50 at 70 T2b, the longest pulse) costs 4 % chi^2 and −3 % in m0s on BSA; 300 halves it.
-  Comparing an engine against its own reference solver hides this (they share the taper); only
+  The mode fit's slowest pole need not sit at 1 / memory: at memory 300, 1.5 / memory fits
+  4x better (3.8e-5); `modes` now picks the layout per memory. Comparing an engine against its own reference solver hides this (they share the taper); only
   the untapered kernel on real data shows it. The reference solver itself needs h <= T2b / 16 and
   >= 64 steps: with 15 steps for a 22.8 us pi pulse its Heun free-pool rotation was 3e-3 off, and
   that error happened to *lower* the residual — a converged reference first, then conclusions.

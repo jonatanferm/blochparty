@@ -26,13 +26,13 @@ def busy_sequence(amp, gx, seed=0):
     rnd = lambda *s: torch.rand(*s, generator=g, dtype=torch.float64)
     b = SequenceBuilder()
     for i in range(4):
-        b.rf(100e-6, amplitude=amp, phase=1.3 * i)
+        b.rf(100e-6, amplitude=amp, phase=1.3 * i, n_steps=1)
         b.delay(0.4e-3, grad=(gx, (rnd(()) - 0.5) * 3000, 0.0))
         b.readout(8, 20e-6, grad=(-gx, 0.0, 400.0), phase=0.2 * i)
         b.delay(0.2e-3, grad=(rnd(3) - 0.5) * 2000)
         b.readout(5, 30e-6, grad=(rnd(3) - 0.5) * 2000)
         b.delay(1e-3).spoil()
-    b.rf(50e-6, amplitude=amp).readout(3, 10e-6).delay(2e-3, grad=(1e3, 0.0, 0.0)).spoil()
+    b.rf(50e-6, amplitude=amp, n_steps=1).readout(3, 10e-6).delay(2e-3, grad=(1e3, 0.0, 0.0)).spoil()
     return b.build()
 
 

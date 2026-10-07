@@ -65,7 +65,7 @@ class BoundPool:
     model: str = "rate"
     # generalized super-Lorentzian only: Green's-function memory [T2], the taper exp(-s / (memory T2))
     # that keeps it finite on resonance (a homogeneous broadening 1 / (2 pi memory T2))
-    memory: float = 100.0
+    memory: float = 300.0  # = generalized_bloch.MEMORY
 
     def __post_init__(self):
         if self.lineshape not in LINESHAPES:

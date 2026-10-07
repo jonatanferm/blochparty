@@ -322,14 +322,27 @@ def gradient_waveform(samples, raster: float | None = None, *, delay: float = 0.
     return g
 
 
+MAX_RF_STEP = 20e-6  # [s] hard pulses are cut into segments no longer than this
+
+
+def _rf_steps(duration) -> int:
+    """Segments for a hard pulse: relaxation is split around each segment's rotation, so one
+    segment for a long large-flip pulse misses the decay while M is transverse (~T_RF / 2T2 for a
+    180: 0.5 % at 912 us and T2 = 75 ms, ``validation/real/asslaender_ir.py``). The count depends
+    on the duration only, so outputs stay smooth in a differentiable flip angle."""
+    return max(1, math.ceil(float(torch.as_tensor(duration).detach()) / MAX_RF_STEP - 1e-6))
+
+
 def block_pulse(flip_deg, duration: float, *, phase=0.0, system: System | None = None,
-                dtype=torch.float64) -> RFPulse:
-    """Hard (rectangular) pulse after the system's RF dead time; flip and phase [rad] may be tensors."""
+                dtype=torch.float64, n_steps: int | None = None) -> RFPulse:
+    """Hard (rectangular) pulse after the system's RF dead time; flip and phase [rad] may be
+    tensors. ``n_steps`` segments (default: <= ``MAX_RF_STEP`` long each)."""
     sysm = system or System()
+    n = _rf_steps(duration) if n_steps is None else n_steps
     amp = torch.as_tensor(flip_deg, dtype=dtype) / 360.0 / duration
     ph = torch.as_tensor(phase, dtype=dtype)
-    signal = torch.stack([amp * torch.cos(ph), amp * torch.sin(ph)])[None]
-    return RFPulse(signal, float(duration), sysm.rf_dead_time, 0.5 * duration)
+    signal = torch.stack([amp * torch.cos(ph), amp * torch.sin(ph)])[None].expand(n, 2)
+    return RFPulse(signal, float(duration) / n, sysm.rf_dead_time, 0.5 * duration)
 
 
 def sinc_pulse(flip_deg, duration: float, *, slice_thickness: float, time_bw_product: float = 4.0,
@@ -438,13 +451,16 @@ class SequenceBuilder:
         self._spoil += [False] * n
         self.time += float(dt.detach().sum())
 
-    def rf(self, duration, *, flip_deg=None, amplitude=None, phase=0.0, grad=None, n_steps=1):
+    def rf(self, duration, *, flip_deg=None, amplitude=None, phase=0.0, grad=None, n_steps=None):
         """Rectangular (hard) pulse; give either ``flip_deg`` or ``amplitude`` [Hz], in ``n_steps``
-        segments. Relaxation is split around each segment's whole rotation, so one segment for a
-        large flip misses the T2 decay while M is transverse (~T_RF / (2 T2) for a 180: 0.5 % at
-        912 us and T2 = 75 ms, ``validation/real/asslaender_ir.py``); use ~10+ steps when that matters."""
+        segments (default: <= ``MAX_RF_STEP`` long each). Relaxation is split around
+        each segment's whole rotation, so one segment for a large flip misses the T2 decay while M
+        is transverse (~T_RF / (2 T2) for a 180: 0.5 % at 912 us and T2 = 75 ms,
+        ``validation/real/asslaender_ir.py``)."""
         dur = self._t(duration)
         amp = self._t(flip_deg) / 360.0 / dur if flip_deg is not None else self._t(amplitude)
+        if n_steps is None:
+            n_steps = _rf_steps(dur)
         ph = self._t(phase)
         rf = torch.stack([amp * torch.cos(ph), amp * torch.sin(ph)]).expand(n_steps, 2)
         dt = (dur / n_steps).expand(n_steps)

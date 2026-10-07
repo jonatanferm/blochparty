@@ -49,6 +49,7 @@ def gre_cartesian(
     rf_spoil_increment: float = 117.0,
     time_bw_product: float = 4.0,
     apodization: float = 0.5,
+    rf_steps: int | None = None,
 ) -> Sequence:
     """Cartesian spoiled gradient echo, 2D ``(ny, nx)`` or 3D ``(nz, ny, nx)``.
 
@@ -57,8 +58,9 @@ def gre_cartesian(
     samples k = (i - n/2) / fov; the echo (k = 0) is at index n/2 on every axis.
     ``flip_deg`` and ``tr`` may be tensors that require grad.
 
-    By default: a non-selective hard pulse of ``rf_duration`` (20 us), ideal (instantaneous)
-    gradients and ideal spoiling at the end of every TR. The realistic options:
+    By default: a non-selective hard pulse of ``rf_duration`` (20 us; longer ones in segments of
+    <= 20 us, ``rf_steps`` overrides), ideal (instantaneous) gradients and ideal spoiling at the
+    end of every TR. The realistic options:
 
     * ``spoiling``: "ideal" (zero Mxy at the end of each TR), "gradient" (a spoiler lobe on x
       bringing the net x moment per TR to ``spoiler_cycles`` cycles across a voxel, with
@@ -79,7 +81,7 @@ def gre_cartesian(
     if spoiling != "ideal" or slice_thickness is not None or ramps:
         return _gre_blocks(shape, fov, flip_deg, tr, te, dwell, rf_duration, rf_phase, n_dummy, dtype,
                            spoiling, slice_thickness, slice_offset, ramps, system or System(), spoiler_cycles,
-                           rf_spoil_increment, time_bw_product, apodization)
+                           rf_spoil_increment, time_bw_product, apodization, rf_steps)
     rf_duration = 20e-6 if rf_duration is None else rf_duration
     *pe_shape, nx = shape
     dk = 1.0 / fov
@@ -94,12 +96,12 @@ def gre_cartesian(
 
     b = SequenceBuilder(dtype=dtype)
     for _ in range(n_dummy):
-        b.rf(rf_duration, flip_deg=flip_deg, phase=rf_phase)
+        b.rf(rf_duration, flip_deg=flip_deg, phase=rf_phase, n_steps=rf_steps)
         b.delay(tr - rf_duration).spoil()
     for idx in itertools.product(*(range(m) for m in pe_shape)):
         k_pe = [(i - m // 2) * dk for i, m in zip(idx, pe_shape)]  # (ky,) or (kz, ky)
         ky, kz = k_pe[-1], (k_pe[0] if len(k_pe) == 2 else 0.0)
-        b.rf(rf_duration, flip_deg=flip_deg, phase=rf_phase)
+        b.rf(rf_duration, flip_deg=flip_deg, phase=rf_phase, n_steps=rf_steps)
         b.delay(t_pre, grad=(-(nx / 2 + 0.5) * dk / t_pre, ky / t_pre, kz / t_pre))
         b.readout(nx, dwell, grad=(dk / dwell, 0.0, 0.0))
         b.delay(t_fill).spoil()
@@ -153,10 +155,12 @@ class _Excitation(NamedTuple):
 
 
 def _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                sysm: System, dtype) -> _Excitation:
-    """Hard pulse, or windowed sinc with slice select when ``slice_thickness`` is given."""
+                sysm: System, dtype, rf_steps: int | None = None) -> _Excitation:
+    """Hard pulse (in ``rf_steps`` segments, default <= ``MAX_RF_STEP`` each), or windowed sinc
+    with slice select when ``slice_thickness`` is given."""
     if slice_thickness is None:
-        rf = block_pulse(flip_deg, 20e-6 if rf_duration is None else rf_duration, system=sysm, dtype=dtype)
+        rf = block_pulse(flip_deg, 20e-6 if rf_duration is None else rf_duration, system=sysm, dtype=dtype,
+                         n_steps=rf_steps)
         grads, reph = (), torch.zeros(3, dtype=dtype)
     else:
         rf, gz, reph = sinc_pulse(flip_deg, 2e-3 if rf_duration is None else rf_duration,
@@ -242,11 +246,12 @@ def _pad(b: SequenceBuilder, t: float) -> None:
 
 def _gre_blocks(shape, fov, flip_deg, tr, te, dwell, rf_duration, rf_phase, n_dummy, dtype, spoiling,
                 slice_thickness, slice_offset, ramps, sysm, spoiler_cycles, rf_spoil_increment,
-                time_bw_product, apodization) -> Sequence:
+                time_bw_product, apodization, rf_steps=None) -> Sequence:
     """``gre_cartesian`` with realistic options."""
     *pe_shape, nx = shape
     dk = 1.0 / fov
-    exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype)
+    exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype,
+                      rf_steps)
     ro = _readout(nx, dwell, fov, ramps, sysm, dtype, centred=False)
     lines = []
     for idx in itertools.product(*(range(m) for m in pe_shape)):
@@ -329,6 +334,7 @@ def tse_2d(
     system: System | None = None,
     time_bw_product: float = 4.0,
     apodization: float = 0.5,
+    rf_steps: int | None = None,
 ) -> Sequence:
     """2D turbo spin echo (CPMG): per shot a ``excite_flip_deg`` pulse along x, then ``etl``
     refocusing pulses along y every ``esp`` (None: the shortest possible), echoes at
@@ -366,7 +372,7 @@ def tse_2d(
         raise ValueError(f"ordering must be 'linear' or 'centric', not {ordering!r}")
     lines = [[order[e * n_shots + s] for e in range(etl)] for s in range(n_shots)]  # [shot][echo] -> ky index
 
-    args = (rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype)
+    args = (rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps)
     exc = _excitation(excite_flip_deg, *args)
     refs = [_excitation(f, *args) for f in flips]
     ref = refs[0]  # all refocusing blocks share the timing; only the flip differs
@@ -441,6 +447,7 @@ def bssfp_2d(
     system: System | None = None,
     time_bw_product: float = 2.0,
     apodization: float = 0.5,
+    rf_steps: int | None = None,
 ) -> Sequence:
     """2D balanced SSFP: every TR has zero net gradient moment on every axis, the echo
     (k = 0 sample) sits at TE = TR / 2, and pulse j has phase j * ``phase_cycle_deg`` (the
@@ -451,7 +458,7 @@ def bssfp_2d(
     sysm = system or System()
     dk = 1.0 / fov
     exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                      sysm, dtype)
+                      sysm, dtype, rf_steps)
     ro = _readout(n, dwell, fov, ramps, sysm, dtype, centred=True)
     reph_z = exc.rephase[2]  # the pulse is symmetric: equal slice-select moments before / after its centre
     t_p = _min_duration(max(ro.area_k0, n // 2 * dk, abs(float(reph_z))), sysm)
@@ -507,6 +514,7 @@ def epi_2d(
     system: System | None = None,
     time_bw_product: float = 4.0,
     apodization: float = 0.5,
+    rf_steps: int | None = None,
 ) -> Sequence:
     """Single-shot blipped 2D EPI: n readouts of alternating sign along x, ky stepped by
     a y blip between them. With ``ramps`` the readouts are trapezoids sampled on their
@@ -523,7 +531,7 @@ def epi_2d(
     sysm = system or System()
     dk = 1.0 / fov
     exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                      sysm, dtype)
+                      sysm, dtype, rf_steps)
     ro = _readout(n, dwell, fov, ramps, sysm, dtype, centred=False)
     r, flat = ro.grad.rise, ro.grad.flat
     if ramps:

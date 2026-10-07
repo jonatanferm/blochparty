@@ -217,7 +217,7 @@ def test_uniform_offset_phase(sim):
     assert (got - base * complex(math.cos(2 * math.pi * 37 * t), -math.sin(2 * math.pi * 37 * t))).abs().max() < 1e-12
     # during a slow RF pulse an offset acts like off-resonance
     ph, _ = spins(r)
-    seq = SequenceBuilder().rf(2e-3, flip_deg=90.0).build()
+    seq = SequenceBuilder().rf(2e-3, flip_deg=90.0, n_steps=1).build()
     with_off = SIMS[sim](ph, replace(seq, b0_offset=torch.full((1,), 120.0, dtype=torch.float64))).m
     as_db0 = SIMS[sim](replace(ph, db0=ph.db0 + 120.0), seq).m
     assert torch.allclose(with_off, as_db0, atol=1e-14)

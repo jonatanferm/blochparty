@@ -75,7 +75,7 @@ def trapezoid(slew, flat_mT_m, raster=10e-6, axis=0):
 
 
 def test_units_peak_b1_and_rf_energy():
-    seq = SequenceBuilder().rf(1e-3, flip_deg=90.0).delay(1e-3, grad=(G * 1e-3, 0.0, 0.0)).build()
+    seq = SequenceBuilder().rf(1e-3, flip_deg=90.0, n_steps=1).delay(1e-3, grad=(G * 1e-3, 0.0, 0.0)).build()
     b1 = 250.0 / G * 1e6  # 90 deg in 1 ms = 250 Hz
     assert abs(float(d.b1_uT(seq)[0]) - b1) < 1e-12 and abs(b1 - 5.8717) < 1e-4
     assert abs(float(d.grad_mT_m(seq)[1, 0]) - 1.0) < 1e-12
@@ -87,7 +87,7 @@ def test_windowed_rf_power():
     # pulses of 1 ms at t = 0 and t = 5 ms; a 2 ms window holds at most one pulse
     b = SequenceBuilder()
     for _ in range(2):
-        b.rf(1e-3, flip_deg=90.0).delay(4e-3)
+        b.rf(1e-3, flip_deg=90.0, n_steps=1).delay(4e-3)
     p = d.rf_power(b.build(), window=2e-3)
     b1sq = (250.0 / G * 1e6) ** 2
     assert abs(float(p.max()) - b1sq * 1e-3 / 2e-3) < 1e-9
@@ -155,7 +155,7 @@ def test_penalties_are_zero_inside_and_differentiable_outside():
     amp = f64(300.0).requires_grad_(True)  # 300 Hz / gamma_bar = 7.05 µT
 
     def pen(a):
-        s = SequenceBuilder().rf(1e-3, amplitude=a).delay(1e-3).build()
+        s = SequenceBuilder().rf(1e-3, amplitude=a, n_steps=1).delay(1e-3).build()
         return d.penalties(s, d.Hardware(max_b1=5.0), only=("peak B1",))["peak B1"]
 
     assert float(pen(amp.detach())) > 0

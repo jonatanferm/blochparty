@@ -48,11 +48,11 @@ def cpmg_sequence(flips):
     """90° excitation (phase 0), then refocusing pulses ``flips`` [deg] (phase 90°, CPMG)
     centred at ESP/2 + (j - 1) ESP after the excitation's centre, a crusher on each side of
     every one, and an ADC sample at every echo, j ESP."""
-    b = SequenceBuilder().rf(RF_DUR, flip_deg=90.0)
+    b = SequenceBuilder().rf(RF_DUR, flip_deg=90.0, n_steps=1)  # one segment: EPG's instantaneous pulses
     b.delay(ESP / 2 - RF_DUR, grad=crusher(ESP / 2 - RF_DUR))
     half = ESP / 2 - RF_DUR / 2 - DWELL / 2
     for j in range(N_ECHO):
-        b.rf(RF_DUR, flip_deg=flips[j], phase=math.pi / 2)
+        b.rf(RF_DUR, flip_deg=flips[j], phase=math.pi / 2, n_steps=1)
         b.delay(half, grad=crusher(half)).readout(1, DWELL)
         if j < N_ECHO - 1:
             b.delay(half, grad=crusher(half))

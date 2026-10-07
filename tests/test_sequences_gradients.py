@@ -324,7 +324,7 @@ def test_default_builders_bit_identical_to_main():
     cases = {
         "gre_2d_default": lambda: bp.gre_2d(),
         "gre_2d_opts": lambda: bp.gre_2d(16, 0.2, flip_deg=30.0, tr=8e-3, te=3e-3, dwell=5e-6, rf_duration=40e-6,
-                                         rf_phase=0.3, n_dummy=3),
+                                         rf_phase=0.3, n_dummy=3, rf_steps=1),  # 40 us: 2 segments by default since 2026-10
         "gre_3d": lambda: bp.gre_3d(8, n_dummy=2),
         "gre_cartesian_rect": lambda: bp.gre_cartesian((4, 6, 10), 0.25, dtype=torch.float32),
     }

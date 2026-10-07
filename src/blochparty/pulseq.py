@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .sequence import Sequence
+from .sequence import MAX_RF_STEP, Sequence
 
 _T_TOL = 1e-11  # [s] breakpoints closer than this are merged (Pulseq rasters are >= 1e-8 s)
 _KNOWN_EXTENSIONS = {"LABELSET", "LABELINC", "TRIGGERS", "DELAYS"}
@@ -104,9 +104,10 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
         (default: the RF raster time). Pulses on the default RF raster are always
         stepped sample by sample.
     max_rf_step: also cut constant RF pieces (block pulses without a frequency offset)
-        into pieces <= this [s]. By default such a pulse is one segment, whose relaxation
-        is split around a single rotation: fine for short pulses, wrong for long saturation
-        pulses (a 1 s on-resonance block pulse: errors of 0.6 in Mz).
+        into pieces <= this [s] (default ``sequence.MAX_RF_STEP``, 20 us). Relaxation is
+        split around each piece's rotation, so one piece misses the decay while M is
+        transverse (a 1 s on-resonance block pulse: errors of 0.6 in Mz; a 1 ms 180:
+        ~T_RF / 2T2).
     convention: "physical" (default) or "mrzero"; see the module docstring.
     meta: extra entries for ``Sequence.meta`` (e.g. ``kspace_shape``).
     """
@@ -157,8 +158,7 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
             else:  # piecewise linear between (t, signal) points
                 sloped = (np.diff(sig) != 0) | (f_rf != 0)
                 edges = np.sort(_subdivide(t_rf, sloped, rf_raster))
-                if max_rf_step:
-                    edges = _subdivide(edges, np.ones(len(edges) - 1, dtype=bool), max_rf_step)
+                edges = _subdivide(edges, np.ones(len(edges) - 1, dtype=bool), max_rf_step or MAX_RF_STEP)
             points += [rf.delay + edges, np.array([rf.delay + rf.center])]
             rf_lo, rf_hi = rf.delay + edges.min(), rf.delay + edges.max()
 

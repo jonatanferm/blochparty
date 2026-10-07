@@ -138,8 +138,8 @@ T2* from the FID), compared with their published fits. Measured 2026-10-07, core
 |---|---|---|---|---|---|
 | authors (generalized Bloch, their solver) | 0.0855 ± 0.0010 | 1.1978 | 12.96 ± 0.61 | 71.3 ± 2.0 | 0.4136 % |
 | exact-kernel reference (`simulate_pulse`, untapered) | 0.0851 ± 0.0011 | 1.1977 | 12.67 ± 0.66 | 71.6 ± 2.0 | 0.4127 % |
-| **blochparty engine, memory 300 T2b** | 0.0842 ± 0.0011 | 1.1977 | 12.64 ± 0.67 | 71.8 ± 2.0 | 0.4171 % |
-| blochparty engine, memory 100 T2b (default) | 0.0826 ± 0.0010 | 1.1976 | 12.58 ± 0.67 | 72.1 ± 2.0 | 0.4221 % |
+| **blochparty engine, memory 300 T2b (default)** | 0.0842 ± 0.0011 | 1.1977 | 12.64 ± 0.67 | 71.8 ± 2.0 | 0.4171 % |
+| blochparty engine, memory 100 T2b (old default) | 0.0826 ± 0.0010 | 1.1976 | 12.58 ± 0.67 | 72.1 ± 2.0 | 0.4221 % |
 | blochparty rate model | 0.0922 | 1.2093 | 1.90 | 229 | 1.307 % |
 | authors, Graham's spectral model | 0.0699 | 1.1790 | 2.86 | 73.8 | 1.834 % |
 
@@ -149,12 +149,12 @@ T2* from the FID), compared with their published fits. Measured 2026-10-07, core
 - **The Green's-function memory is visible in real data**: the engine reproduces its own tapered
   model exactly (post-pulse z within 4e-5 of the reference solver with the same taper), and the
   taper exp(-s / (100 T2b)) costs 4 % in chi^2 (194 dof) and biases m0s by −3 %. Memory 300 (still
-  30 modes, fitted to 2e-4) halves both; the untapered kernel fits best. `BoundPool.memory`
-  (default 100, unchanged) selects it.
+  30 modes, fitted to 4e-5) halves both; the untapered kernel fits best. `BoundPool.memory`
+  selects it; the default is 300 since 2026-10-07 (was 100).
 - **MnCl2** (one pool) with the pulse in 50 segments: R1 1.478733 ± 0.002525 /s and residual
   0.6984 % — the authors' numbers to every printed digit. With the pulse as one segment, 0.839 %:
-  the Strang split around a 180 deg rotation misses the T2* decay during the pulse
-  (`SequenceBuilder.rf` docstring). The remaining misfit is in the shortest pulses (1.1 % at
+  the Strang split around a 180 deg rotation misses the T2* decay during the pulse.
+  Hard pulses are now cut into <= 20 us segments by default (`sequence.MAX_RF_STEP`). The remaining misfit is in the shortest pulses (1.1 % at
   22.8 us vs 0.15–0.6 % for the rest), a pulse-length-dependent inversion efficiency of the
   hardware that a constant factor does not capture — the same in both samples.
 
