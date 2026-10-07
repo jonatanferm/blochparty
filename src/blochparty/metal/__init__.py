@@ -402,15 +402,37 @@ struct State {
 // 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
 // carry none of the others' per-thread state.
 struct Move {
-    bool diffuse = false, move = false;
+    bool diffuse = false, move = false, maps = false;
     float3 v = float3(0.0f), d = float3(0.0f);
+    float db0t = 0.0f, b1t = 1.0f;  // the tissue-attached parts (maps add / multiply)
 };
+
+// Trilinear sample of channel k of the scanner-frame maps (maps.sample): mg = origin (3), spacing (3),
+// dims nx ny nz (3); maps (K, nz, ny, nx); clamped to the grid's edges.
+inline float map_sample(constant float* maps, constant float* mg, uint k, float3 p) {
+    const int nx = int(mg[6]), ny = int(mg[7]), nz = int(mg[8]);
+    const float3 hi = float3(nx - 1, ny - 1, nz - 1);
+    const float3 f = min(max((p - float3(mg[0], mg[1], mg[2])) / float3(mg[3], mg[4], mg[5]), float3(0.0f)), hi);
+    const int3 i0 = int3(min(floor(f), max(hi - 1.0f, float3(0.0f))));
+    const float3 w = f - float3(i0);
+    const int3 i1 = min(i0 + 1, int3(hi));
+    constant float* g = maps + uint(k) * uint(nx * ny * nz);
+    float out = 0.0f;
+    for (int dz = 0; dz < 2; ++dz)
+        for (int dy = 0; dy < 2; ++dy)
+            for (int dx = 0; dx < 2; ++dx) {
+                const int x = dx ? i1.x : i0.x, y = dy ? i1.y : i0.y, z = dz ? i1.z : i0.z;
+                const float wt = (dx ? w.x : 1.0f - w.x) * (dy ? w.y : 1.0f - w.y) * (dz ? w.z : 1.0f - w.z);
+                out += wt * g[(z * ny + y) * nx + x];
+            }
+    return out;
+}
 
 template <int V, bool DIFF>
 inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread const Geom& gm, thread const Move& mv,
                     constant float* segs, constant int* flags, constant float* frf, uint s, uint mt,
                     constant float* line, constant float* log_f, uint mode, constant int* nsub, constant float* modes,
-                    uint nj, constant int* wsub, constant float* mseg) {
+                    uint nj, constant int* wsub, constant float* mseg, constant float* maps, constant float* mg) {
     constant float* q = segs + 8 * s;
     if (DIFF) {  // a moving spin: its effective position for this segment; position-keyed caches are stale
         float3 eff = !mv.diffuse ? float3(wk.x, wk.y, wk.z)
@@ -421,6 +443,10 @@ inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread 
             eff += mv.v * ms[0] + mv.d * ms[1];
             eff = float3(ms[2] * eff.x + ms[3] * eff.y + ms[4] * eff.z, ms[5] * eff.x + ms[6] * eff.y + ms[7] * eff.z,
                          ms[8] * eff.x + ms[9] * eff.y + ms[10] * eff.z) + float3(ms[11], ms[12], ms[13]);
+        }
+        if (mv.maps) {  // the scanner's B0 and B1+ where the spin is
+            st.p.db0 = mv.db0t + map_sample(maps, mg, 0u, eff);
+            st.p.b1 = mv.b1t * map_sample(maps, mg, 1u, eff);
         }
         st.p.px = eff.x, st.p.py = eff.y, st.p.pz = eff.z;
         st.cache.dt = -1.0f, md.k_dt = -1.0f;
@@ -521,14 +547,16 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                                 constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
                                 constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
                                 constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
-                                constant uint* prm         [[buffer(22)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
+                                constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
+                                constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
+                                constant uint* prm         [[buffer(24)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
                                 uint i    [[thread_position_in_grid]],
                                 uint lane [[thread_index_in_simdgroup]],
                                 uint sg   [[simdgroup_index_in_threadgroup]],
                                 uint nsg  [[simdgroups_per_threadgroup]],
                                 uint tid  [[thread_index_in_threadgroup]],
                                 uint ntg  [[threads_per_threadgroup]]) {
-    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13];
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13], mapped = prm[14];
 
     // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
     // two barriers per block of samples instead of two per sample, and the final sums are spread
@@ -554,7 +582,8 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     }
     Move mv;
     if (@DIFF@) {
-        mv.diffuse = diffuse != 0, mv.move = move != 0;
+        mv.diffuse = diffuse != 0, mv.move = move != 0, mv.maps = mapped != 0;
+        mv.db0t = st.p.db0, mv.b1t = st.p.b1;
         if (mv.move && active) {
             mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
             mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
@@ -576,11 +605,15 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg);
+        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
-                const float sr = active ? sens[v * n + j] : 0.0f, si = active ? sens[(v + 1) * n + j] : 0.0f;
+                float sr = active ? sens[v * n + j] : 0.0f, si = active ? sens[(v + 1) * n + j] : 0.0f;
+                if (@DIFF@ && mapped > 1u && active) {  // mapped coils, where the spin is now
+                    const float3 at = float3(st.p.px, st.p.py, st.p.pz);
+                    sr = map_sample(maps, mg, 2u + v, at), si = map_sample(maps, mg, 3u + v, at);
+                }
                 const float re = mx * sr - my * si, im = mx * si + my * sr;
                 const float tr = simd_sum(re * cp + im * sp), ti = simd_sum(im * cp - re * sp);
                 if (lane == 0) {
@@ -624,14 +657,16 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
                                     constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
                                     constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
-                                    constant uint* prm         [[buffer(22)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
+                                    constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
+                                    constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
+                                    constant uint* prm         [[buffer(24)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
                                     uint i    [[thread_position_in_grid]],
                                     uint lane [[thread_index_in_simdgroup]],
                                     uint sg   [[simdgroup_index_in_threadgroup]],
                                     uint nsg  [[simdgroups_per_threadgroup]],
                                     uint tid  [[thread_index_in_threadgroup]],
                                     uint ntg  [[threads_per_threadgroup]]) {
-    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13];
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13], mapped = prm[14];
 
     threadgroup float buf[MAX_SG * MMA_REGION];
     threadgroup int rows[8];
@@ -656,7 +691,8 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     }
     Move mv;
     if (@DIFF@) {
-        mv.diffuse = diffuse != 0, mv.move = move != 0;
+        mv.diffuse = diffuse != 0, mv.move = move != 0, mv.maps = mapped != 0;
+        mv.db0t = st.p.db0, mv.b1t = st.p.b1;
         if (mv.move && active) {
             mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
             mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
@@ -677,7 +713,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg);
+        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -725,7 +761,7 @@ def available() -> bool:
 @torch.no_grad()
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
                    chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
-                   seed: int = 0) -> SimResult:
+                   seed: int = 0, maps=None) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
@@ -737,8 +773,33 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
     fields = spin_fields(scanner, phantom.pos)  # encoding positions (nonlinearity), concomitant coefficients
+    moving = phantom.diffusion is not None or phantom.motion is not None
+    db0 = phantom.db0
+    mapped, map_bufs = 0, [torch.zeros(1, device=dev, dtype=f32), torch.zeros(9, device=dev, dtype=f32)]
+    if maps is not None:  # scanner-frame fields: sampled once for static spins, per segment for moving ones
+        from ..maps import sample
+
+        if maps.coils is not None and coils is not None:
+            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
+        grid = maps.channels(torch.float64)
+        origin = torch.as_tensor(maps.origin, dtype=torch.float64)
+        spacing = torch.as_tensor(maps.spacing, dtype=torch.float64)
+        if not moving:
+            v = sample(grid, origin, spacing, fields.pos.detach().double().cpu())
+            db0 = phantom.db0 + v[:, 0].to(phantom.db0.dtype)
+            b1 = b1.to(v.dtype) * v[:, 1]
+            if maps.coils is not None:
+                coils = torch.complex(v[:, 2::2], v[:, 3::2])
+        else:
+            mapped = 2 if maps.coils is not None else 1
+            if maps.coils is not None:  # placeholders: the kernel samples the maps at every ADC sample
+                coils = torch.zeros(n, maps.coils.shape[0], dtype=torch.complex64)
+                mma = False
+            nz, ny, nx = maps.shape()
+            mg = torch.cat([origin, spacing, torch.tensor([nx, ny, nz], dtype=torch.float64)])
+            map_bufs = [grid.reshape(-1).to(dev, f32).contiguous(), mg.to(dev, f32).contiguous()]
     spins = torch.stack([fields.pos[:, 0], fields.pos[:, 1], fields.pos[:, 2], phantom.pd, 1 / phantom.t1,
-                         1 / phantom.t2, phantom.db0, b1.to(phantom.pd.dtype)]).to(dev, f32).contiguous()
+                         1 / phantom.t2, db0, b1.to(phantom.pd.dtype)]).to(dev, f32).contiguous()
     if coils is None:
         coils = torch.ones(n, 1, dtype=torch.complex64)
     n_coils = coils.shape[1]
@@ -864,11 +925,13 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     conc_b, mode_flag = conc_buf
     U_b, modes_b, nsub_b, nj_v = gen_bufs
     P_b, chol_b, seed_lo, seed_hi, wsub_b, geom_b, kind_v = walk_bufs
-    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs)
+    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs,
+            *map_bufs)
 
     def prm(s0, n_tiles, n_pad):
         v = np.array([n, n_coils, s0, min(S, s0 + chunk), n_tiles, n_pad, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
-                      kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None)], dtype=np.uint32)
+                      kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped],
+                     dtype=np.uint32)
         return torch.from_numpy(v.view(np.int32)).to(dev)
 
     for s0 in range(0, S, chunk):

@@ -360,3 +360,10 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   column must be long enough to feed the slice for the whole run, and the profile must be read
   before the spoiler. Not yet: fields sampled at the moving position (coils, B1⁺, scanner B0),
   and motion with gradient nonlinearity or concomitant fields (raise).
+- **Fields where the spin is** (`maps.py`, `simulate(maps=FieldMaps(...))`; core and Metal): grids of
+  the scanner B0, B1⁺ and complex coil sensitivities, trilinear; static spins sample once (merged
+  free runs kept), moving spins every segment (coils at every ADC sample on the GPU, direct
+  reduction). Exactness of trilinear for linear fields gives sharp checks: static linear maps =
+  per-spin fields (1e-12); a spin moving through a linear B0 map = a static gradient (1e-12);
+  a translated object under mapped coils = the moved static object; GPU = core 1e-6 with flow,
+  rigid motion, diffusion and maps together. Plain kernels unchanged (0.38 s).

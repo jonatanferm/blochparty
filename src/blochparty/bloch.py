@@ -35,6 +35,7 @@ from torch.utils.checkpoint import checkpoint
 
 from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
+from .maps import FieldMaps, sample
 from .motion import positions
 from .restriction import n_sub, start_offsets, tau_max, walk_segment
 from .rng import normals
@@ -59,6 +60,7 @@ class _Spins(NamedTuple):
     modes: tuple | None = None  # generalized Bloch bound pool: (J,) complex poles [1/T2b] and weights
     walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky (N, 3, 3), seed, spin indices, restriction)
     move: tuple | None = None  # motion: (Motion, per-segment terms, r0 (N, 3))
+    maps: tuple | None = None  # moving spins in FieldMaps: (channels, origin, spacing, tissue db0, tissue b1, coils?)
 
 
 @dataclass
@@ -300,6 +302,17 @@ def _steps(seq: Sequence, merge: bool) -> list[tuple[int, int]]:
     return steps
 
 
+def _sample_maps(spins: _Spins, pos: Tensor) -> _Spins:
+    """The spins with db0, b1 and (if mapped) coil sensitivities from FieldMaps at ``pos``."""
+    grid, origin, spacing, db0_t, b1_t, has_coils = spins.maps
+    v = sample(grid, origin, spacing, pos)
+    b1 = v[:, 1] if b1_t is None else b1_t * v[:, 1]
+    out = spins._replace(db0=db0_t + v[:, 0], b1=b1)
+    if has_coils:
+        out = out._replace(sens_re=v[:, 2::2], sens_im=v[:, 3::2])
+    return out
+
+
 def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_rf, r=None):
     samples = []
     for a, b in steps:
@@ -309,9 +322,12 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
         if spins.move is not None:  # motion on top, in the tissue frame
             mot, seg, r0 = spins.move
             eff = positions(r0 if eff is None else eff, mot, seg, a, b)
+        step_spins = spins
+        if spins.maps is not None and eff is not None:  # one segment (no merging): the fields where it is
+            step_spins = _sample_maps(spins, eff[:, 0])
         if seq.is_rf[a]:
             off = seq.b0_offset[a] if use_off else None
-            sp = spins if eff is None else spins._replace(pos=eff[:, 0])
+            sp = step_spins if eff is None else step_spins._replace(pos=eff[:, 0])
             mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
                                          None if f_rf is None else f_rf[a])
             if seq.adc[a]:
@@ -320,7 +336,7 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None
             mx, my, mz, mb, sig = _free_run(mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off,
-                                            seq.adc_phase[a:b], adc_idx, spins, eff)
+                                            seq.adc_phase[a:b], adc_idx, step_spins, eff)
             if sig is not None:
                 samples.append(sig)
         if seq.spoil[b - 1]:
@@ -408,6 +424,7 @@ def simulate(
     merge_free_runs: bool = True,
     scanner: Scanner | None = None,
     seed: int = 0,
+    maps: FieldMaps | None = None,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``.
 
@@ -423,6 +440,8 @@ def simulate(
         the ideal scanner. ``seq.b0_offset`` (None: zeros) is always applied.
     seed: the random walk of diffusing spins (``Phantom.diffusion``): spin i's path is a
         function of (seed, i) only (``rng``), so engines agree spin by spin.
+    maps: scanner-frame B0, B1+ and coil-sensitivity maps (``maps.FieldMaps``) sampled where
+        each spin is (every segment for moving spins); mapped coils replace ``coils``.
 
     With ``Phantom.pools`` (free exchanging pools: CEST, myelin water) every segment is one
     exact matrix exponential of the Bloch-McConnell system instead (slower; checkpoint_every
@@ -465,6 +484,21 @@ def simulate(
         move = (phantom.motion, phantom.motion.per_segment(seq.dt), fields.pos)
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
                    fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move)
+    moving = walk is not None or move is not None
+    if maps is not None:
+        if maps.coils is not None and coils is not None:
+            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
+        grid = maps.channels(pd.dtype).to(pd.device)
+        origin = torch.as_tensor(maps.origin, dtype=pd.dtype, device=pd.device)
+        spacing = torch.as_tensor(maps.spacing, dtype=pd.dtype, device=pd.device)
+        spins = spins._replace(maps=(grid, origin, spacing, phantom.db0, phantom.b1, maps.coils is not None))
+        if maps.coils is not None:  # placeholders of the mapped coil count until sampled
+            n_c = maps.coils.shape[0]
+            spins = spins._replace(sens_re=pd.new_zeros(n, n_c), sens_im=pd.new_zeros(n, n_c))
+        if not moving:  # static: sample once, keep the merged free runs
+            spins = _sample_maps(spins, fields.pos)._replace(maps=None)
+        else:
+            merge_free_runs = False
     r = fields.pos if walk is not None else None
     if walk is not None and walk[3] is not None:  # walkers start uniformly inside their compartments
         r = fields.pos + start_offsets(walk[3][0], int(seed), walk[2], pd)
@@ -494,7 +528,7 @@ def simulate(
             chunks.append([])
         chunks[-1].append(step)
     use_ckpt = checkpoint_every is not None and torch.is_grad_enabled()
-    sigs = [pd.new_zeros(0, 2, sens_re.shape[1])]
+    sigs = [pd.new_zeros(0, 2, spins.sens_re.shape[1])]
     for part in chunks:
         if use_ckpt:
             mx, my, mz, mb, sig, r = checkpoint(_run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, r,
