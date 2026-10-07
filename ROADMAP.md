@@ -105,7 +105,9 @@ count) are impractical at current speed. 3D is the target workload for this phas
 - [x] Metal many-coil ADC reduction: the coil sum as complex matrix products on 8×8 simdgroup
       matrices; cost nearly flat in the coil count (48³ GRE: 1 coil 0.41 s, 8 coils 0.42 s
       (was 1.21 s; CPU 1.98 s), 64 coils 1.6 s), no coil limit
-- [ ] Metal: adjoint; scanner model
+- [x] Metal: scanner field model (gradient nonlinearity via encoding positions; concomitant fields,
+      leading order and exact) in the off-resonance, as the CPU kernel; matches the core to 1e-4
+- [ ] Metal: adjoint
 - [ ] CUDA port
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit

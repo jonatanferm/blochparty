@@ -19,8 +19,9 @@ Magnetization transfer (``Phantom.bound``): the bound pool's Mz is a fourth stat
 longitudinal relaxation the exact exchange step of ``exchange.py``, saturated during RF (about
 +15 % on a 3D GRE).
 
-Not (yet) supported here: the scanner field model (``fields.Scanner``) and gradients; use
-``blochparty.fused.simulate_fused`` for those.
+The scanner field model (``fields.Scanner``: gradient nonlinearity through the encoding
+positions, concomitant fields at leading order or exact) enters the off-resonance as in
+``fused/kernel.h``. Not (yet) supported here: gradients; use ``blochparty.fused.simulate_fused``.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from torch import Tensor
 
 from .. import exchange
 from ..bloch import SimResult
+from ..fields import spin_fields
 from ..phantom import Phantom
 from ..sequence import Sequence
 
@@ -58,6 +60,23 @@ inline void relax(thread float& mx, thread float& my, thread float& mz, float t,
 
 
 struct Spin { float px, py, pz, pd, r1, r2, db0, b1; };
+
+// Concomitant-field coefficients (fields.py, as kernel.h): mode 1 (leading order) c . (gx^2, gy^2,
+// gz^2, gx gy, gx gz, gy gz); mode 2 (exact |B|) t = (c0..2 . g, c3..5 . g), f0 = c6.
+struct Conc { float c[7]; };
+
+// Off-resonance [Hz] of a spin in segment q (gradient q[3..5], uniform offset q[7]).
+inline float offset(thread const Spin& p, thread const Conc& k, uint mode, constant float* q) {
+    const float lin = p.px * q[3] + p.py * q[4] + p.pz * q[5] + p.db0 + q[7];
+    if (mode == 0) return lin;
+    const float gx = q[3], gy = q[4], gz = q[5];
+    if (mode == 1)
+        return lin + (k.c[0] * (gx * gx) + k.c[1] * (gy * gy) + k.c[2] * (gz * gz) + k.c[3] * (gx * gy) +
+                      k.c[4] * (gx * gz) + k.c[5] * (gy * gz));
+    const float tx = k.c[0] * gx + k.c[1] * gy + k.c[2] * gz, ty = k.c[3] * gx + k.c[4] * gy + k.c[5] * gz;
+    const float t2 = tx * tx + ty * ty, u = k.c[6] + lin;
+    return lin + t2 / (sqrt(u * u + t2) + u);
+}
 
 // Factor cache for free-precession segments: runs of identical segments (every readout sample)
 // reuse each spin's rotation and relaxation factors. All threads see the same segment, so the
@@ -90,10 +109,9 @@ inline void rf_rotate(constant float* q, float bz, thread float& mx, thread floa
     }
 }
 
-inline void step(constant float* q, int f, thread float& mx, thread float& my, thread float& mz, thread const Spin& p,
-                 thread Cache& k) {
+inline void step(constant float* q, int f, float bz, thread float& mx, thread float& my, thread float& mz,
+                 thread const Spin& p, thread Cache& k) {
     const float dt = q[0];
-    const float bz = p.px * q[3] + p.py * q[4] + p.pz * q[5] + p.db0 + q[7];  // off-resonance [Hz]
     if (f & 1) {  // RF: relax dt/2, rotate about the effective field, relax dt/2
         relax(mx, my, mz, 0.5f * dt, p.pd, p.r1, p.r2);
         rf_rotate(q, bz, mx, my, mz, p);
@@ -170,11 +188,10 @@ inline void zapply(thread const ZStep& z, thread float& u, thread float& v) {
 // step() with a bound pool; zc caches the unsaturated exchange step of free segments (key dt).
 struct ZCache { float dt = -1.0f; ZStep z; };
 
-inline void step_mt(constant float* q, int f, float f_rf, thread float& mx, thread float& my, thread float& mz,
-                    thread float& mb, thread const Spin& p, thread const Pool& b, constant float* line,
-                    constant float* log_f, thread Cache& k, thread ZCache& zc) {
+inline void step_mt(constant float* q, int f, float bz, float f_rf, thread float& mx, thread float& my,
+                    thread float& mz, thread float& mb, thread const Spin& p, thread const Pool& b,
+                    constant float* line, constant float* log_f, thread Cache& k, thread ZCache& zc) {
     const float dt = q[0];
-    const float bz = p.px * q[3] + p.py * q[4] + p.pz * q[5] + p.db0 + q[7];
     if (f & 1) {
         const float w1sq = TWO_PI * TWO_PI * p.b1 * p.b1 * (q[1] * q[1] + q[2] * q[2]);
         const ZStep z = zstep(0.5f * dt, p, b, w1sq * lineshape(f_rf - bz - b.dw, b.t2b, line, log_f));
@@ -205,13 +222,15 @@ struct State {
     Pool b;
     Cache cache;
     ZCache zc;
+    Conc conc;
 };
 
 inline void advance(thread State& st, constant float* segs, constant int* flags, constant float* frf, uint s, bool mt,
-                    constant float* line, constant float* log_f) {
+                    constant float* line, constant float* log_f, uint mode) {
     constant float* q = segs + 8 * s;
-    if (mt) step_mt(q, flags[s], frf[s], st.mx, st.my, st.mz, st.mb, st.p, st.b, line, log_f, st.cache, st.zc);
-    else step(q, flags[s], st.mx, st.my, st.mz, st.p, st.cache);
+    const float bz = offset(st.p, st.conc, mode, q);
+    if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.p, st.b, line, log_f, st.cache, st.zc);
+    else step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
 }
 
 inline void flush(threadgroup float* partial, threadgroup int* block_rows, device atomic_float* sig, uint nb, uint nv,
@@ -243,6 +262,8 @@ kernel void bloch_chunk(device float* M            [[buffer(0)]],   // (3, N) ma
                         constant float* line       [[buffer(14)]],  // (6,) lineshape (mt)
                         constant float* log_f      [[buffer(15)]],  // lineshape table (mt)
                         constant uint& mt          [[buffer(16)]],  // 1: magnetization transfer
+                        constant float* conc       [[buffer(17)]],  // (7, N) concomitant-field coefficients
+                        constant uint& mode        [[buffer(18)]],  // 0 none, 1 leading order, 2 exact
                         uint i    [[thread_position_in_grid]],
                         uint lane [[thread_index_in_simdgroup]],
                         uint sg   [[simdgroup_index_in_threadgroup]],
@@ -263,6 +284,8 @@ kernel void bloch_chunk(device float* M            [[buffer(0)]],   // (3, N) ma
         st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
         if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
     }
+    if (mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
     const uint nv = 2 * n_coils;
     const uint block = TG_FLOATS / (MAX_SG * nv);  // samples buffered per flush
@@ -271,7 +294,7 @@ kernel void bloch_chunk(device float* M            [[buffer(0)]],   // (3, N) ma
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance(st, segs, flags, frf, s, mt != 0, line, log_f);
+        advance(st, segs, flags, frf, s, mt != 0, line, log_f, mode);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
@@ -363,6 +386,8 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
                             constant float* line       [[buffer(16)]],  // (6,) lineshape (mt)
                             constant float* log_f      [[buffer(17)]],  // lineshape table (mt)
                             constant uint& mt          [[buffer(18)]],  // 1: magnetization transfer
+                            constant float* conc       [[buffer(19)]],  // (7, N) concomitant-field coefficients
+                            constant uint& mode        [[buffer(20)]],  // 0 none, 1 leading order, 2 exact
                             uint i    [[thread_position_in_grid]],
                             uint lane [[thread_index_in_simdgroup]],
                             uint sg   [[simdgroup_index_in_threadgroup]],
@@ -382,6 +407,8 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
         st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
         if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
     }
+    if (mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
     const uint j0 = i - lane;
     uint nb = 0;
@@ -389,7 +416,7 @@ kernel void bloch_chunk_mma(device float* M            [[buffer(0)]],   // (3, N
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance(st, segs, flags, frf, s, mt != 0, line, log_f);
+        advance(st, segs, flags, frf, s, mt != 0, line, log_f, mode);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -430,15 +457,14 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
     matrices (default from ``MMA_MIN_COILS`` coils) or one simd_sum per coil and sample."""
-    if scanner is not None:
-        raise NotImplementedError("the scanner field model is not implemented on Metal; use simulate_fused")
 
     if getattr(phantom, "pools", None):
         raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
-    spins = torch.stack([phantom.pos[:, 0], phantom.pos[:, 1], phantom.pos[:, 2], phantom.pd, 1 / phantom.t1,
+    fields = spin_fields(scanner, phantom.pos)  # encoding positions (nonlinearity), concomitant coefficients
+    spins = torch.stack([fields.pos[:, 0], fields.pos[:, 1], fields.pos[:, 2], phantom.pd, 1 / phantom.t1,
                          1 / phantom.t2, phantom.db0, b1.to(phantom.pd.dtype)]).to(dev, f32).contiguous()
     if coils is None:
         coils = torch.ones(n, 1, dtype=torch.complex64)
@@ -490,15 +516,21 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
         dummy = torch.zeros(1, device=dev, dtype=f32)
         mt_bufs = [dummy, dummy, dummy, dummy, dummy, 0]
     M = M.to(dev, f32).contiguous()
+    if fields.mode:
+        conc = torch.zeros(7, n, dtype=torch.float64)
+        conc[: fields.conc.shape[1]] = fields.conc.detach().double().cpu().T
+        conc_buf = [conc.to(dev, f32).contiguous(), int(fields.mode)]
+    else:
+        conc_buf = [torch.zeros(1, device=dev, dtype=f32), 0]
     sig = torch.zeros(max(n_adc, 1) * n_coils * 2, device=dev, dtype=f32)
     lib, S = _lib(), len(seq)
     for s0 in range(0, S, chunk):
         if mma:
             lib.bloch_chunk_mma(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), n_tiles,
-                                threads, *mt_bufs, threads=threads, group_size=group)
+                                threads, *mt_bufs, *conc_buf, threads=threads, group_size=group)
         else:
             lib.bloch_chunk(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), *mt_bufs,
-                            threads=threads, group_size=group)
+                            *conc_buf, threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()

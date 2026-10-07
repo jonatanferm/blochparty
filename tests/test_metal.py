@@ -74,10 +74,24 @@ def test_hard_pulse_flip_angle_and_fid():
     assert (s.to(torch.complex128) - expected).abs().max() < 1e-5
 
 
-def test_scanner_model_not_supported():
-    ph, seq = random_case(0)
-    with pytest.raises(NotImplementedError):
-        metal.simulate_metal(ph, seq, scanner=object())
+@pytest.mark.parametrize("concomitant", [None, "leading", "exact"])
+def test_scanner_field_model(concomitant):
+    # gradient nonlinearity (encoding positions) and concomitant fields at 0.55 T, where they are large
+    from test_fields_nonlinearity import distortion
+
+    from blochparty.fields import Scanner
+
+    ph = bp.shepp_logan(24)
+    seq = bp.gre_2d(24, n_dummy=4)
+    if concomitant is None:
+        scanner = Scanner(nonlinearity=distortion())
+    else:
+        scanner = Scanner(field_strength=0.55, concomitant=concomitant, nonlinearity=distortion())
+    ref = bp.simulate(ph, seq, scanner=scanner)
+    plain = bp.simulate(ph, seq)
+    out = metal.simulate_metal(ph, seq, scanner=scanner)
+    assert rel(out.signal, ref.signal) < 1e-4 and rel(out.m, ref.m) < 1e-3
+    assert rel(plain.signal, ref.signal) > 1e-2  # the field model matters in this case
 
 
 @pytest.mark.parametrize("mma", [False, True])
