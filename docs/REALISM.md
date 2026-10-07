@@ -66,7 +66,7 @@ project's goals (training data, sequence development), at 0.55–7 T.
 | B0 drift (gradient/passive-shim heating) | median < 1 Hz / 5 min at 3 T, worse on some systems [18] | nobody | ◐ linear / exponential drift (`drift.py`); not yet driven by gradient duty | time-dependent global (and linear) offset driven by gradient duty | multi-site drift data [18] |
 | Physiological B0 fluctuation (respiration) | 2–7 Hz in the brain at 7 T, plus small gradients [19] | nobody | ◐ sinusoidal uniform + linear terms (`drift.respiration`) | time-varying low-order spherical-harmonic field from a breathing model | field-probe literature [19] |
 | **B1⁺ (transmit) inhomogeneity** | ±20–40 % at 3 T body, worse at 7 T (dielectric effects) | JEMRIS, MRiLab | ◐ analytic maps | import EM-simulated complex B1⁺ per channel (pTx = sum over channels with drive weights) | measured B1 maps; EM ground truth |
-| RF amplifier nonlinearity, droop, phase | slice-profile widening, flip-angle bias at low/high drive [20] | nobody | ✗ | AM/AM, AM/PM transfer curve + low-pass on the RF waveform | published amplifier curves; flip-angle sweeps |
+| RF amplifier nonlinearity, droop, phase | slice-profile widening, flip-angle bias at low/high drive [20] | nobody | ✓ `transmit.amplifier`: Rapp AM/AM, Saleh-type AM/PM, droop with delivered energy (parameters for calibration, R7) | AM/AM, AM/PM transfer curve + low-pass on the RF waveform | published amplifier curves; flip-angle sweeps |
 | RF coil ringdown, dead times; played vs. written timing | small, but decisive when T2 ≈ echo spacing: the prime suspect (with local B1⁺) for the 6.5–8.7 % misfit of the 5–15 ms T2 spheres in the NIST TSE benchmark, which sits in the first echoes (`validation/real/RESULTS.md`) | – | ◐ (dead times in `System`) | shift/stretch the first refocusing interval; a B1⁺ map at the phantom | needs a dataset with a B1⁺ map, or scanner timing logs |
 
 **R1 status (October 2026).** Concomitant fields (leading order and exact |B|), gradient
@@ -115,9 +115,9 @@ nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 
 | effect | magnitude / when it matters | who models it | us | how to model | how to verify |
 |---|---|---|---|---|---|
-| **EM-consistent receive maps and noise covariance** | body-noise dominated at ≥ 1.5 T: noise covariance follows from conductivity-weighted overlaps of coil E fields; g-factor realism | Penn State EM-Bloch [11]; others use analytic maps + i.i.d. noise | ◐ analytic maps, given covariance | import B1⁻ and E per coil (open EM solvers: MARIE [11], openEMS), Ψᵢⱼ ∝ ∫σ Eᵢ·Eⱼ* dV; quasi-static Biot–Savart at low field | measured SNR / g-factor maps of phantoms |
-| ADC: digital filtering, oversampling, dead time, quantisation, gain | passband ripple, edge roll-off, clipping | nobody | ✗ | receive-chain filter on the oversampled signal | vendor-like filter responses |
-| Spikes, RF interference (zipper), noise drift | artefacts for robustness training | nobody | ✗ | stochastic artefact models | – |
+| **EM-consistent receive maps and noise covariance** | body-noise dominated at ≥ 1.5 T: noise covariance follows from conductivity-weighted overlaps of coil E fields; g-factor realism | Penn State EM-Bloch [11]; others use analytic maps + i.i.d. noise | ◐ quasi-static loop arrays (`loops.py`): Biot–Savart B1± by reciprocity, noise covariance from ω²∫σ A_i·A_j (Roemer), as `FieldMaps`; full-wave EM maps enter through `FieldMaps` (no format importers yet) | import B1⁻ and E per coil (open EM solvers: MARIE [11], openEMS), Ψᵢⱼ ∝ ∫σ Eᵢ·Eⱼ* dV; quasi-static Biot–Savart at low field | measured SNR / g-factor maps of phantoms |
+| ADC: digital filtering, oversampling, dead time, quantisation, gain | passband ripple, edge roll-off, clipping | nobody | ✓ `receive.py`: oversampled readouts, centred decimation FIR with known response, quantisation and clipping, gain drift (dead time: ✗) | receive-chain filter on the oversampled signal | vendor-like filter responses |
+| Spikes, RF interference (zipper), noise drift | artefacts for robustness training | nobody | ✓ `receive.py`: spikes, narrowband interference, gain drift | stochastic artefact models | – |
 
 ## 4. Strategy: out of the shadow
 

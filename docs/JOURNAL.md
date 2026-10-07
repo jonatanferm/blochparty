@@ -380,3 +380,9 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   sharpness), Saleh-type AM/PM, droop with delivered energy; ideal by default. Checks: linear and
   saturation limits; a hard pulse's flip and phase after the amplifier predicted exactly
   (Mxy = i e^{iψ} sin α in blochparty's own RF phase); droop law.
+- **Loop coils** (`loops.py`): quasi-static Biot–Savart loop arrays: receive conj(B1−) by
+  reciprocity, B1⁺ of the driven array, the sample-loss resistance matrix ω²∫σ A_i·A_j dV as noise
+  covariance (Roemer), `field_maps` into `FieldMaps`. Checks: on-axis field (1e-4), far-field
+  dipole, off-axis vector potential vs elliptic integrals (1e-4), resistance symmetric, positive
+  definite, identical coils fully correlated, neighbours more than far ones; mapped coils equal
+  direct ones through a whole simulation (2e-3, trilinear on 1 mm).
