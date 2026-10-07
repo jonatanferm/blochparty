@@ -466,3 +466,13 @@ says where it came from so it can be re-checked.
   stages in their own process (`scholand_recon.py`) and pass arrays by file.
 - **Pipe-buffered Python prints arrive only at exit**: a long driver looks hung under `| grep`;
   check the cache files it writes instead (or use `python -u`).
+
+- **A dataset title or README does not establish that all source maps are public**:
+  the NeuroPoly phantom repository and OSF archive expose chi/T2/field derivatives,
+  but their inventories lack the original R1/M0 inputs. The Jochmann/Schweser Zenodo
+  archive also contains derived images and fields, not the full source package.
+  AHEAD template v3 does expose aligned chi/R1/R2*/relative-PD maps under CC BY 4.0.
+  Its `r2map` filename means R2*, and its RPS orientation requires a y flip for RAS.
+  Relative PD must not be presented as calibrated absolute M0; zero QSM does not
+  identify air. BigBrain-MR's TE=0 GRE magnitude also retains TR/flip-angle weighting
+  and is not M0. Actual inventories and checks: `validation/anatomy/ALTERNATIVE_SOURCES.md`.

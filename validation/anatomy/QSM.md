@@ -4,6 +4,11 @@ The loader and public challenge forward checks are implemented. Validation with
 the **full-head R1/R2*/M0 source package and original MATLAB simulator remains
 pending**: the public challenge release does not contain those files.
 
+An accessible alternative was subsequently verified: AHEAD v3 supplies aligned
+7 T brain susceptibility, R1, R2* and relative-PD maps under CC BY 4.0.
+See [alternative sources](ALTERNATIVE_SOURCES.md) for actual-file checks,
+reproducible downloads and the limits of substituting it for the full-head model.
+
 ## Two distinct releases
 
 The [Radboud collection](https://data.ru.nl/collections/di/dccn/DSC_3015069.02_542)

@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "title": "AHEAD quantitative MRI templates (MNI2009b)",
+  "doi": "10.21942/uva.19646364.v3",
+  "url": "https://uvaauas.figshare.com/articles/dataset/AHEAD_quantitative_MRI_templates_MNI2009b_/19646364",
+  "version": 3,
+  "checked": "2026-10-07",
+  "license": "CC-BY-4.0",
+  "field_T": 7,
+  "kind": "population-median-brain-template",
+  "notes": [
+    "Relative PD is not calibrated absolute M0.",
+    "The filename r2map denotes R2star, not intrinsic R2.",
+    "No full-head segmentation or skull/air susceptibility.",
+    "Map units and physical interpretation need explicit handling in any future loader."
+  ],
+  "files": {
+    "chi": {
+      "path": "ahead_qmri2_mni09b_med_qsmap_n105.nii.gz",
+      "url": "https://ndownloader.figshare.com/files/34892883",
+      "bytes": 75450215,
+      "publisher_md5": "483a662d4f1ad3538b06b82bb23a829b",
+      "sha256": "fd87cbbc0481365eff683f800cc732b1fcbd374d9c1fbc6b17047fa8dafa6e16",
+      "decompressed_sha256": "ad00fd3e45c1cf494de0eedf11b2ad0ee7924f5d6952ca03fa20d3547d873b00"
+    },
+    "R1": {
+      "path": "ahead_qmri2_mni09b_med_r1map_n105.nii.gz",
+      "url": "https://ndownloader.figshare.com/files/34892901",
+      "bytes": 58428649,
+      "publisher_md5": "536bf4b300465508057767a1175c9aa9",
+      "sha256": "3bb0ab60a2b82172b63d52e8bea26c0e9f29bfd04c0061fb351824a5b04d1eb7",
+      "decompressed_sha256": "d8552549bb19de0838e370543f09d53c98e92826a03e8f9ddbd8b45c9ca1ca61"
+    },
+    "R2star": {
+      "path": "ahead_qmri2_mni09b_med_r2map_n105.nii.gz",
+      "url": "https://ndownloader.figshare.com/files/34892907",
+      "bytes": 58667335,
+      "publisher_md5": "f618d109cdb3b8abd31b1ef9dda0e2ac",
+      "sha256": "2b6349eb56d87d0c401524e6aab05f4657402f5eefe74d3e91df7c7494b8c464",
+      "decompressed_sha256": "4ee3fb6200b0110b01eda88d11f331ac1151ee75b7ab787b95cbe3a3db39d547"
+    },
+    "relative_PD": {
+      "path": "ahead_qmri2_mni09b_med_pdmap_n105.nii.gz",
+      "url": "https://ndownloader.figshare.com/files/41498217",
+      "bytes": 57763051,
+      "publisher_md5": "a89564a53733a4e035ad1bf79bd04b0d",
+      "sha256": "3939b53ba360ab65e127eafd29bd8e736065e3e4dce91db82d7941c56a0bdcf8",
+      "decompressed_sha256": "e80fcfc48e60c1e0071ff2c3d9a46703d408c58a3c2734f38dbfc108a13f5c57"
+    }
+  }
+}

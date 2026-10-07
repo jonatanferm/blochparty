@@ -4,6 +4,7 @@ Status: M1–M2 complete; M3 loader and public-data checks implemented, full-sou
 validation pending; M4–M5 open (2026-10-07).
 M2 results and remaining clinical-validation limits: [RESULTS](../../validation/anatomy/RESULTS.md).
 M3 progress/access requirements: [QSM notes](../../validation/anatomy/QSM.md).
+Verified alternative for brain parameter maps: [AHEAD v3 and source comparison](../../validation/anatomy/ALTERNATIVE_SOURCES.md).
 Coordination rules at the end.
 Read first: `CLAUDE.md` (working rules), `docs/REALISM.md` (rows "Realistic anatomy and fuzzy
 tissue", "Continuous anatomy (inverse crime)", "B0 inhomogeneity from anatomy"),
