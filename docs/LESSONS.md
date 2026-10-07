@@ -327,6 +327,15 @@ says where it came from so it can be re-checked.
   (a spurious "anomalous" tube). Use per-coil least squares (no DCF) for coil-map images, or a
   positive kernel, and check reconstructions run to run.
 
+- **A digital twin that shares the reconstruction's coil maps (or anything else estimated from
+  the data) hides that stage's error** (benchmark 3): the twin recovered spheres 2–8 within ±11 %
+  T2, but re-estimating the real data's coil maps with another smoothing moved the fitted T2 of
+  spheres 5–8 by 10–30 points. Generate the twin with independently varied ingredients, and
+  still treat its floor as a lower bound when the real object is less clean than the twin.
+- **Diffusion with strong crushers: compute b-values, don't Monte-Carlo them** (benchmark 5):
+  32k random walkers through ~2000 cycles/m crushers still scattered 2.7 % between seeds, larger
+  than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
+
 ## Process and tooling
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:

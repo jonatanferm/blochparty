@@ -127,6 +127,26 @@ Measured 2026-10-07, Apple M4 GPU, 101 spins across the slice, rank-12 basis:
   it to 0.02); the gradient delay is anisotropic, ~0.6–0.8 oversampled samples; the receiver
   phase follows the RF phase.
 
+### Benchmark 3: tests of the remainder (2026-10-07)
+
+All with the gold-standard T1/T2 fixed unless noted (residual over TRs 20–999, spheres 2–8):
+
+- **Sphere 4 is B0**: −45 Hz brings it from 7.0 % to 4.0 % at the measured B1 (1.05); its
+  −33 % T2 in the free fit was off-resonance absorbed into T2. Other spheres gain ≤ 0.5 pt.
+- **Not one global sequence error**: an extra inversion-to-readout gap (0–200 ms), an
+  inversion efficiency (0.7–1.0) or a spoke-to-TR shift (0–80 TRs) each help some spheres and
+  hurt others (each sphere prefers a different value); per-sphere B0 + B1 drives B1 to the grid
+  edge (0.70, measured 1.04) without fitting spheres 6–8.
+- **Coil maps limit spheres 5–8**: changing only their smoothing (sigma 1.5 / 3 / 6 px) moves the
+  curves by 1–4 % and the fitted T2 of spheres 5–8 by 10–30 points; spheres 2–3 stay at T1 −5 to
+  −8 %, T2 within ±5 % in every variant. A digital twin generated with different coil maps from
+  those of the reconstruction is still recovered (T1 ±5 %, T2 ±11 %), so the twin (discs, no
+  insert, markers or real coil structure) is cleaner than the measurement: its floor is a lower
+  bound, not the floor.
+- Conclusion: spheres 2–3 (robust) show a real T1 underestimate of 5–8 %; 4 is B0; 5–8 are
+  reconstruction-limited. A model-based reconstruction (fitting T1/T2/M0 maps to k-space, as the
+  authors do) would remove the coil-map/subspace stage from the comparison.
+
 ## Benchmark 4: generalized Bloch on BSA / MnCl2 inversion recovery NMR (`asslaender_ir.py`)
 
 Asslaender et al. 2022 (data at their cited commit): 1 T benchtop NMR, rectangular pi pulses of
@@ -186,6 +206,25 @@ Measured 2026-10-07, Apple M4 GPU:
   errors (needs this scanner's GIRF), non-mono-exponential agarose T2.
 - An earlier analysis reported a "tube 3 anomaly" (Bloch 3.8 % vs mono 1.2 %): an artefact of
   coil maps from a non-converging density compensation (`LESSONS.md`).
+
+### Benchmark 5: tests of the remainder (2026-10-07)
+
+Ruled out as the < 1 %-per-echo remainder (beyond B0 ±40 Hz, B1, T1 and the refocusing scale):
+
+- **MT of the agarose** (Gaussian-lineshape literature values f = 0.0046, T2b 13 us, R 465 /s,
+  bracketed with Lorentzian and super-Lorentzian, scaled by agarose content; also 4x f): residuals
+  move by ≤ 0.1 pt.
+- **Diffusion through the crushers** (D = 2.1e-9 m^2/s): the primary pathway's b-value grows
+  linearly (0.92 s/mm^2 per echo), so its attenuation is exactly exponential and only shifts the
+  fitted T2 (~2 %); stimulated pathways change by ~0.05 %. (Random-walk Monte Carlo is useless
+  here: 32k walkers through strong crushers still differ by 2.7 % between seeds.)
+- **A readout (gradient) delay**: the data consistency of the reconstruction is best at 0 us
+  (scan −6 to +6 us).
+- **The sequence's own balance**: in-plane moments between refocusing pulses ≤ 0.03 cycles/m; the
+  z moments meet the CPMG condition exactly (4174.0016 = 2 x 2087.0008 cycles/m).
+
+Left: hardware the data cannot show (eddy-current phase errors, RF amplitude/phase fidelity —
+needs this scanner's GIRF or field-probe data) or non-mono-exponential T2 of the gel.
 
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
