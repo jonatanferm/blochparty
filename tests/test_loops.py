@@ -89,3 +89,27 @@ def test_field_maps_in_a_simulation():
     a = bp.simulate(ph, seq, maps=bp.FieldMaps(maps.origin, maps.spacing, coils=maps.coils)).signal
     b = bp.simulate(ph, seq, direct).signal
     assert float((a - b).abs().max() / b.abs().max()) < 2e-3
+
+
+def test_receive_phase_follows_faraday():
+    # Independent of the algebra: a dipole precessing in the lab frame (Mxy_lab = Mxy e^{-i w0 t},
+    # blochparty's sense), flux B . M through a loop, EMF = -dPhi/dt numerically, demodulated by
+    # brute force with e^{+i w0 t}. Divided by the simulated coil x Mxy it must be one constant
+    # (2 i w0) for every spin position: the receive weight's phase pattern is the physical one.
+    loop = Loop((0.03, 0.0, 0.05), (0.3, 0.2, 1.0), 0.04, n_seg=512)
+    pos = torch.tensor([[0.0, 0.0, 0.0], [0.02, -0.01, 0.01], [-0.015, 0.02, -0.005]], dtype=f64)
+    B, _ = fields([loop], pos)
+    w = receive_sensitivities(B)[:, 0]
+    f0 = 1e6
+    w0 = 2 * math.pi * f0
+    mxy = torch.exp(1j * torch.tensor([0.3, 1.7, -2.2], dtype=f64))  # arbitrary rotating-frame phases
+    tt = np.arange(-4000, 4000) / (200 * f0)  # 40 carrier periods
+    ratios = []
+    for p in range(3):
+        lab = complex(mxy[p]) * np.exp(-1j * w0 * tt)
+        flux = float(B[0, p, 0]) * lab.real + float(B[0, p, 1]) * lab.imag
+        emf = -np.gradient(flux, tt)
+        ratios.append(2 * np.mean(emf * np.exp(1j * w0 * tt)) / complex(w[p] * mxy[p]))
+    ratios = np.array(ratios)
+    assert np.abs(ratios / ratios[0] - 1).max() < 1e-5  # one constant for every position
+    assert np.abs(ratios / (2j * w0) - 1).max() < 1e-3  # 2 i w0 (the numerical derivative is 1.6e-4 off)

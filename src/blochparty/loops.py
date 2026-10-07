@@ -5,8 +5,10 @@ straight pieces. Biot-Savart gives its field B and vector potential A at any poi
 quasi-static limit: wavelength >> coil and object, i.e. low field; at 3 T and above use
 EM-simulated maps through ``maps.FieldMaps`` instead).
 
-* Receive sensitivity by reciprocity: conj(B1-) with B1- = (Bx - i By) / 2 [T/A] (blochparty's
-  magnetisation precesses as exp(-i 2 pi f t), the physical sense for protons).
+* Receive sensitivity by reciprocity: B1- = (Bx - i By) / 2 [T/A], the weight blochparty's signal
+  (coil x Mxy, Mxy precessing as exp(-i 2 pi f t), demodulated by exp(+i w0 t)) needs: Faraday's
+  law on a lab-frame precessing dipole gives 2 i w0 B1- Mxy (``tests/test_loops.py``). (Until
+  2026-10-07 this was conj(B1-), which mirrored every coil's phase pattern; magnitudes unchanged.)
 * Transmit: B1+ = (Bx + i By) / 2 of the driven combination; |B1+| relative to a reference
   point is the transmit scale (``Phantom.b1`` / ``FieldMaps.b1``).
 * Noise: the sample-loss resistance matrix R_ij = w^2 int sigma A_i . A_j dV [Ohm] (Roemer et
@@ -67,8 +69,8 @@ def fields(loops: list[Loop], pts: Tensor, chunk: int = 4096) -> tuple[Tensor, T
 
 
 def receive_sensitivities(B: Tensor) -> Tensor:
-    """(P, C) complex receive sensitivities conj(B1-) from fields (C, P, 3)."""
-    return torch.conj(0.5 * torch.complex(B[..., 0], -B[..., 1])).T
+    """(P, C) complex receive sensitivities B1- = (Bx - i By) / 2 from real fields (C, P, 3)."""
+    return (0.5 * torch.complex(B[..., 0], -B[..., 1])).T
 
 
 def b1_plus(B: Tensor, drive: Tensor | None = None) -> Tensor:
@@ -90,7 +92,7 @@ def resistance(A: Tensor, conductivity: Tensor, volume: Tensor, freq_hz: float, 
 def field_maps(loops: list[Loop], origin, spacing, shape, reference=(0.0, 0.0, 0.0), drive: Tensor | None = None,
                scale: float | None = None):
     """``maps.FieldMaps`` of a loop array on a grid (shape (nz, ny, nx); origin and spacing in x y
-    z): receive sensitivities conj(B1-) (scaled by ``scale``, default 1 / max |B1-| over the grid)
+    z): receive sensitivities B1- (scaled by ``scale``, default 1 / max |B1-| over the grid)
     and |B1+| of the driven array relative to ``reference``."""
     from .maps import FieldMaps
 

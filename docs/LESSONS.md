@@ -318,6 +318,15 @@ says where it came from so it can be re-checked.
   enough to exceed R2* - R2 on its own means the inputs disagree (clip, do not error). Fixing it
   exposed the next issue at once: the occipital WM/GM T2* proxies make cortex dark at long TE.
 
+- **Quasi-static coil checks cannot fix the rotation sense; Faraday's law can** (2026-10-07):
+  for real (quasi-static) fields |Bx + iBy| = |Bx - iBy|, so magnitude maps, RSS images and a
+  comparison against a full-wave solver at low field all pass with either sign, and a test along a
+  single axis is phase-trivial. `loops.receive_sensitivities` returned conj(B1-) and so mirrored
+  every coil's phase. A brute-force lab-frame Faraday calculation (precessing dipole, numerical
+  -dPhi/dt, demodulation by e^{+i w0 t}) divided by the simulated coil x Mxy must be one constant
+  across positions: 2 i w0 with (Bx - iBy)/2, a 137 % spread with the conjugate. With full-wave
+  phasors (exp(+j w t)) the same derivation gives transmit conj(minus)/2, receive conj(plus)/2.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
