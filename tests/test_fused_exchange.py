@@ -97,3 +97,15 @@ def test_gradcheck_pool_parameters():
             ph.bound.t1.clone().requires_grad_(), (ph.bound.t2 * 1e6).clone().requires_grad_(),
             seq.rf.clone().requires_grad_()]
     assert torch.autograd.gradcheck(fn, args, eps=1e-7, atol=1e-6, rtol=1e-4)
+
+
+@pytest.mark.parametrize("dtype, tol", [(torch.float64, 1e-12), (torch.float32, 2e-5)])
+@pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
+def test_generalized_forward_matches_core(shape, dtype, tol):
+    ph, seq = case(1, shape)
+    ph = replace(ph, bound=replace(ph.bound, model="generalized"))
+    coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
+    ref = simulate(ph, seq, coils)
+    out = fused.simulate_fused(ph.to(dtype=dtype), seq.to(dtype=dtype), coils)
+    assert rel(out.signal, ref.signal) < tol and rel(out.m, ref.m) < tol
+    assert float((out.m_bound.double() - ref.m_bound).abs().max() / ref.m.abs().max()) < tol

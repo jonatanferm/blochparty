@@ -61,14 +61,22 @@ struct Bound {
     std::optional<torch::Tensor> pool, log_f, rf_freq;
     int64_t kind = 0;
     double cutoff = 0, x0 = 0, h = 1, xmin = 0;
+    std::optional<torch::Tensor> modes;  // (J, 4) generalized Bloch modes, or None (rate model)
+    double t2b_min = 0;
 };
 
 void check_bound(const Inputs& in, const Bound& b) {
     if (!b.pool) {
-        TORCH_CHECK(!b.rf_freq, "rf_freq is only used with a bound pool");
+        TORCH_CHECK(!b.rf_freq && !b.modes, "rf_freq and modes are only used with a bound pool");
         return;
     }
     check(*b.pool, "bound", in.dtype, {in.n, 5});
+    if (b.modes) {
+        TORCH_CHECK(b.modes->dim() == 2 && b.modes->size(1) == 4 && b.modes->size(0) >= 1, "modes must be (J, 4)");
+        check(*b.modes, "modes", in.dtype, {b.modes->size(0), 4});
+        TORCH_CHECK(b.t2b_min > 0, "t2b_min must be positive");
+        return;  // no saturation lineshape or RF frequency in the generalized model
+    }
     TORCH_CHECK(b.rf_freq, "a bound pool needs rf_freq");
     check(*b.rf_freq, "rf_freq", in.dtype, {in.ns});
     TORCH_CHECK(b.kind == 1 || b.kind == 2, "lineshape must be 1 (Lorentzian) or 2 (super-Lorentzian)");
@@ -86,7 +94,8 @@ void set_bound(blochparty::fused::Spins<T>& sp, blochparty::fused::Segments<T>& 
     sp.line.kind = static_cast<int>(b.kind);
     sp.line.cutoff = T(b.cutoff), sp.line.x0 = T(b.x0), sp.line.h = T(b.h), sp.line.xmin = T(b.xmin);
     if (b.log_f) sp.line.log_f = b.log_f->data_ptr<T>(), sp.line.n = b.log_f->size(0);
-    seq.rf_freq = b.rf_freq->data_ptr<T>();
+    if (b.rf_freq) seq.rf_freq = b.rf_freq->data_ptr<T>();
+    if (b.modes) sp.modes = b.modes->data_ptr<T>(), sp.n_modes = static_cast<int>(b.modes->size(0)), sp.t2b_min = b.t2b_min;
 }
 
 template <typename T>
@@ -119,11 +128,12 @@ std::vector<torch::Tensor> simulate(torch::Tensor pos, torch::Tensor pd, torch::
                                     std::optional<torch::Tensor> conc, int64_t conc_mode,
                                     std::optional<torch::Tensor> bound, std::optional<torch::Tensor> log_f,
                                     std::optional<torch::Tensor> rf_freq, int64_t lineshape, double cutoff,
-                                    double x0, double h, double xmin) {
+                                    double x0, double h, double xmin, std::optional<torch::Tensor> modes,
+                                    double t2b_min) {
     const Inputs in = check_inputs(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags);
-    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin};
+    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin, modes, t2b_min};
     check_bound(in, bd);
-    const int64_t nm = bound ? 4 : 3;
+    const int64_t nm = bound ? 4 + (modes ? 2 * modes->size(0) : 0) : 3;
     check(m, "m", in.dtype, {in.n, nm});
     check_b1(in, b1);
     check_fields(in, b0_offset, conc, conc_mode);
@@ -158,13 +168,14 @@ std::vector<torch::Tensor> adjoint(torch::Tensor pos, torch::Tensor pd, torch::T
                                    std::optional<torch::Tensor> conc, int64_t conc_mode,
                                    std::optional<torch::Tensor> bound, std::optional<torch::Tensor> log_f,
                                    std::optional<torch::Tensor> rf_freq, int64_t lineshape, double cutoff,
-                                   double x0, double h, double xmin) {
+                                   double x0, double h, double xmin, std::optional<torch::Tensor> modes,
+                                   double t2b_min) {
     const Inputs in = check_inputs(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags);
     check_b1(in, b1);
     check_fields(in, b0_offset, conc, conc_mode);
-    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin};
+    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin, modes, t2b_min};
     check_bound(in, bd);
-    const int64_t nm = bound ? 4 : 3;
+    const int64_t nm = bound ? 4 + (modes ? 2 * modes->size(0) : 0) : 3;
     TORCH_CHECK(every >= 1, "checkpoint interval must be positive");
     const int64_t n_adc = blochparty::fused::count_adc(flags.data_ptr<uint8_t>(), in.ns);
     check(ckpt, "ckpt", in.dtype, {blochparty::fused::count_checkpoints(in.ns, every), in.n, nm});

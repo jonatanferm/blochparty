@@ -111,8 +111,15 @@ struct Spins {
     // With it the magnetization (m, checkpoints) is (n, 4): mx, my, mz, mzb.
     const T* bound = nullptr;
     Lineshape<T> line;
+    // Generalized Bloch bound pool (generalized_bloch.modes): n_modes x (Re p, Im p, Re c, Im c), p in
+    // 1/t2b; RF segments are sub-stepped to t2b_min / 2. Null: the rate model. Magnetization is then
+    // (n, 4 + 2 n_modes): mx, my, mz, mzb, (Re u_j, Im u_j) per mode.
+    const T* modes = nullptr;
+    int n_modes = 0;
+    double t2b_min = 0;
 
-    int n_m() const { return bound ? 4 : 3; }
+    int n_m() const { return bound ? 4 + 2 * n_modes : 3; }
+    int n_sub(double dt) const { return std::max(1, static_cast<int>(std::ceil(dt / (0.5 * t2b_min)))); }
 
     Spins(int64_t n, int64_t n_coils, const T* pos, const T* pd, const T* t1, const T* t2, const T* db0,
           const T* sens, const T* b1 = nullptr, const T* conc = nullptr, int conc_mode = 0)
@@ -272,6 +279,12 @@ struct Block {
     // bound pool (Spins::bound): Mzb and the pool parameters, k and f as kb = k, kf = k f
     alignas(64) T mb[B], bf[B], bk[B], br1[B], bt2[B], bdw[B];
     bool bound = false;
+    // generalized Bloch: modes (Re u, Im u) as (J, B); mode table; per-lane mode factors exp(-(p_j / t2b +
+    // i 2 pi (offset + dw)) t) for the last free key and the last RF half step (keys: t, grad, b0_offset)
+    int nj = 0;
+    double t2b_min = 0;
+    std::vector<T> ur, ui, mp, fr_free, fi_free, fr_rf, fi_rf;
+    T key_free[5] = {-1, 0, 0, 0, 0}, key_rf[5] = {-1, 0, 0, 0, 0};
     int nm = 3;  // magnetization components per spin in m and the checkpoints
     Lineshape<T> line;
     int mode = kConcNone;
@@ -297,6 +310,12 @@ struct Block {
         relax.clear(), prec.clear(), rot.clear(), zfree.clear(), zrf.clear();
         mode = sp.conc_mode;
         bound = sp.bound != nullptr, nm = sp.n_m(), line = sp.line;
+        nj = sp.modes ? sp.n_modes : 0, t2b_min = sp.t2b_min;
+        if (nj) {
+            mp.assign(sp.modes, sp.modes + 4 * nj);
+            for (auto* v : {&ur, &ui, &fr_free, &fi_free, &fr_rf, &fi_rf}) v->assign(nj * B, T(0));
+            key_free[0] = key_rf[0] = T(-1);
+        }
         const int n_cf = mode == kConcExact ? 7 : 6;
         for (int q = 0; q < kConcMax; ++q)
             for (int l = 0; l < B; ++l) {
@@ -339,6 +358,10 @@ struct Block {
             my[l] = in ? m[nm * i + 1] : T(0);
             mz[l] = in ? m[nm * i + 2] : T(0);
             if (bound) mb[l] = in ? m[nm * i + 3] : T(0);
+            for (int j = 0; j < nj; ++j) {
+                ur[j * B + l] = in ? m[nm * i + 4 + 2 * j] : T(0);
+                ui[j * B + l] = in ? m[nm * i + 5 + 2 * j] : T(0);
+            }
         }
     }
 
@@ -348,6 +371,120 @@ struct Block {
             m[nm * (start + l) + 1] = my[l];
             m[nm * (start + l) + 2] = mz[l];
             if (bound) m[nm * (start + l) + 3] = mb[l];
+            for (int j = 0; j < nj; ++j) {
+                m[nm * (start + l) + 4 + 2 * j] = ur[j * B + l];
+                m[nm * (start + l) + 5 + 2 * j] = ui[j * B + l];
+            }
+        }
+    }
+
+    // Per-lane mode factors exp(-(p_j / t2b + i 2 pi (offset + dw)) t) into (fr, fi), cached on key.
+    void mode_factors(T t, T gx, T gy, T gz, T f, T* key, std::vector<T>& fr, std::vector<T>& fi) {
+        if (key[0] == t && key[1] == gx && key[2] == gy && key[3] == gz && key[4] == f) return;
+        key[0] = t, key[1] = gx, key[2] = gy, key[3] = gz, key[4] = f;
+        const T two_pi = T(2.0 * kPi);
+        for (int i = 0; i < B; ++i) {
+            const T ph = -two_pi * (offset(i, gx, gy, gz, f) + bdw[i]) * t;
+            for (int j = 0; j < nj; ++j) {
+                const T a = std::exp(-T(mp[4 * j]) * t / bt2[i]), b = ph - T(mp[4 * j + 1]) * t / bt2[i];
+                fr[j * B + i] = a * std::cos(b), fi[j * B + i] = a * std::sin(b);
+            }
+        }
+    }
+
+    void modes_apply(const std::vector<T>& fr, const std::vector<T>& fi) {
+        for (int j = 0; j < nj; ++j)
+            for (int i = 0; i < B; ++i) {
+                const T a = fr[j * B + i], b = fi[j * B + i], x = ur[j * B + i], y = ui[j * B + i];
+                ur[j * B + i] = a * x - b * y, ui[j * B + i] = a * y + b * x;
+            }
+    }
+
+    // The unsaturated exchange step over t, cached (zfree), applied to (mz, mb).
+    void zfree_apply(T t) {
+        bool fill;
+        T (*e)[B] = zfree.find({t}, fill);
+        if (fill)
+            for (int i = 0; i < B; ++i) {
+                const ZStep<T> zs = zstep(i, t, T(0));
+                e[0][i] = zs.chm1, e[1][i] = zs.sh, e[2][i] = zs.z1, e[3][i] = zs.z2, e[4][i] = zs.h;
+            }
+        for (int i = 0; i < B; ++i) {
+            const T chm1 = e[0][i], sh = e[1][i], hh = e[4][i], kf = bk[i] * bf[i];
+            const T d1 = mz[i] - e[2][i], d2 = mb[i] - e[3][i];
+            const T n1 = chm1 * d1 + sh * (hh * d1 + bk[i] * d2), n2 = chm1 * d2 + sh * (kf * d1 - hh * d2);
+            mz[i] = mz[i] + n1, mb[i] = mb[i] + n2;
+        }
+    }
+
+    // Rodrigues rotation of (x, y, z) by w = (wx, wy, 0) (the pool's RF-only rotation).
+    static void rotate_xy(T wx, T wy, T& x, T& y, T& z) {
+        const T phi = std::sqrt(wx * wx + wy * wy + T(1e-30));
+        const T hp = T(0.5) * phi, sh = std::sin(hp) / hp;
+        const T c = std::cos(phi), s1 = std::sin(phi) / phi, s2 = T(0.5) * sh * sh;
+        const T dot = wx * x + wy * y;
+        const T nx = c * x + s1 * (wy * z) + s2 * wx * dot;
+        const T ny = c * y + s1 * (-wx * z) + s2 * wy * dot;
+        const T nz = c * z + s1 * (wx * y - wy * x);
+        x = nx, y = ny, z = nz;
+    }
+
+    // advance() with the generalized Bloch bound pool (bloch._rf_segment_generalized, _modes_evolve).
+    void advance_gen(const Segments<T>& seq, int64_t s) {
+        const T w_per_s = T(-2.0 * kPi);
+        const T dt = seq.dt[s];
+        const T gx = seq.grad[3 * s], gy = seq.grad[3 * s + 1], gz = seq.grad[3 * s + 2];
+        const T f = seq.offset(s);
+        if (seq.flags[s] & kRF) {
+            const int ns = std::max(1, static_cast<int>(std::ceil(double(dt) / (0.5 * t2b_min))));
+            const T h = dt / T(ns), half = T(0.5) * h, w = w_per_s * h;
+            const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1], wx0 = w * rx, wy0 = w * ry;
+            const T (*d)[B] = relaxation(half);
+            bool fill;
+            T (*r)[B] = rot.find({h, rx, ry, gx, gy, gz, f}, fill);
+            if (fill)
+                for (int i = 0; i < B; ++i) rotation(r, i, w, wx0 * b1[i], wy0 * b1[i], gx, gy, gz, f);
+            mode_factors(half, gx, gy, gz, f, key_rf, fr_rf, fi_rf);
+            for (int k = 0; k < ns; ++k) {
+                for (int hs = 0; hs < 2; ++hs) {
+                    if (hs) {  // the RF between the halves: water about its field, the pool about the RF
+                        for (int i = 0; i < B; ++i) {
+                            const T wx = wx0 * b1[i], wy = wy0 * b1[i];
+                            const T x = mx[i], y = my[i], z = mz[i];
+                            const T c = r[0][i], s1 = r[1][i], s2 = r[2][i], wz = r[3][i];
+                            const T dot = wx * x + wy * y + wz * z;
+                            mx[i] = c * x + s1 * (wy * z - wz * y) + s2 * wx * dot;
+                            my[i] = c * y + s1 * (wz * x - wx * z) + s2 * wy * dot;
+                            mz[i] = c * z + s1 * (wx * y - wy * x) + s2 * wz * dot;
+                            T sx = 0, sy = 0;
+                            for (int j = 0; j < nj; ++j) sx += ur[j * B + i], sy += ui[j * B + i];
+                            T nx = sx, ny = sy;
+                            rotate_xy(wx, wy, nx, ny, mb[i]);
+                            const T dx = nx - sx, dy = ny - sy;
+                            for (int j = 0; j < nj; ++j) {
+                                const T cr = T(mp[4 * j + 2]), ci = T(mp[4 * j + 3]);
+                                ur[j * B + i] += cr * dx - ci * dy, ui[j * B + i] += cr * dy + ci * dx;
+                            }
+                        }
+                    }
+                    for (int i = 0; i < B; ++i) mx[i] = mx[i] + mx[i] * d[1][i], my[i] = my[i] + my[i] * d[1][i];
+                    zfree_apply(half);
+                    modes_apply(fr_rf, fi_rf);
+                }
+            }
+        } else {
+            const T w = w_per_s * dt;
+            const T (*d)[B] = relaxation(dt);
+            T (*p)[B] = precession(dt, w, gx, gy, gz, f);
+            for (int i = 0; i < B; ++i) {
+                const T x = p[0][i] * mx[i] - p[1][i] * my[i];
+                const T y = p[1][i] * mx[i] + p[0][i] * my[i];
+                mx[i] = x + x * d[1][i];
+                my[i] = y + y * d[1][i];
+            }
+            zfree_apply(dt);
+            mode_factors(dt, gx, gy, gz, f, key_free, fr_free, fi_free);
+            modes_apply(fr_free, fi_free);
         }
     }
 
@@ -568,12 +705,15 @@ struct Block {
 
     void spoil() {
         for (int i = 0; i < B; ++i) mx[i] = T(0), my[i] = T(0);
+        std::fill(ur.begin(), ur.end(), T(0)), std::fill(ui.begin(), ui.end(), T(0));  // the pool's coherence too
     }
 
     // Segments [s0, s1), whose first ADC sample is number k; returns the next sample number.
     int64_t run(const Segments<T>& seq, int64_t n_coils, T* acc, int64_t s0, int64_t s1, int64_t k) {
         for (int64_t s = s0; s < s1; ++s) {
-            if (bound)
+            if (nj)
+                advance_gen(seq, s);
+            else if (bound)
                 advance_bound(seq, s);
             else
                 advance(seq, s);
