@@ -328,8 +328,9 @@ def _simulate_exchange(phantom: Phantom, seq: Sequence, coils, m_init, scanner) 
     for s in range(len(seq)):
         dt, rf, g = seq.dt[s], seq.rf[s], seq.grad[s]
         off = off_all[s] if off_all is not None else None
-        new_key = (float(dt), float(rf[0]), float(rf[1]), *map(float, g), 0.0 if off is None else float(off),
-                   float(f_rf[s]) if f_rf is not None and seq.is_rf[s] else 0.0)
+        new_key = (float(dt.detach()), float(rf[0].detach()), float(rf[1].detach()), *map(float, g.detach()),
+                   0.0 if off is None else float(off.detach()),
+                   float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0)
         if new_key != key or torch.is_grad_enabled():
             bz = spins.pos @ g + spins.db0
             if off is not None:
@@ -383,6 +384,8 @@ def simulate(
     and merge_free_runs do not apply).
     """
     if phantom.pools:
+        if phantom.bound is not None and phantom.bound.model == "generalized":
+            raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
         return _simulate_exchange(phantom, seq, coils, m_init, scanner)
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)

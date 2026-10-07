@@ -3,6 +3,7 @@
 
 #include <torch/extension.h>
 
+#include "bm.h"
 #include "kernel.h"
 
 namespace {
@@ -213,9 +214,111 @@ std::vector<torch::Tensor> adjoint(torch::Tensor pos, torch::Tensor pd, torch::T
     return out;
 }
 
+
+// ---- free exchanging pools (bm.h) ----------------------------------------------------------------
+// pools (N, P, 5); bound (N, 5) or None; m (N, d - 1); returns (signal, checkpoints (n_ckpt, N, d - 1)).
+template <typename T>
+blochparty::fused::bm::Pools<T> pools_of(const Inputs& in, torch::Tensor& pos, torch::Tensor& pd, torch::Tensor& t1,
+                                          torch::Tensor& t2, torch::Tensor& db0, torch::Tensor& sens,
+                                          std::optional<torch::Tensor>& b1, torch::Tensor& pools, Bound& bd,
+                                          std::optional<torch::Tensor>& conc, int64_t conc_mode) {
+    blochparty::fused::bm::Pools<T> sp{in.n, in.nc, static_cast<int>(pools.size(1)), pos.data_ptr<T>(), pd.data_ptr<T>(),
+                                       t1.data_ptr<T>(), t2.data_ptr<T>(), db0.data_ptr<T>(),
+                                       b1 ? b1->data_ptr<T>() : nullptr, sens.data_ptr<T>(), pools.data_ptr<T>(),
+                                       bd.pool ? bd.pool->data_ptr<T>() : nullptr, {},
+                                       conc ? conc->data_ptr<T>() : nullptr, static_cast<int>(conc ? conc_mode : 0)};
+    if (bd.pool) {
+        sp.line.kind = static_cast<int>(bd.kind);
+        sp.line.cutoff = T(bd.cutoff), sp.line.x0 = T(bd.x0), sp.line.h = T(bd.h), sp.line.xmin = T(bd.xmin);
+        if (bd.log_f) sp.line.log_f = bd.log_f->data_ptr<T>(), sp.line.n = bd.log_f->size(0);
+    }
+    return sp;
+}
+
+std::vector<torch::Tensor> bm_simulate(torch::Tensor pos, torch::Tensor pd, torch::Tensor t1, torch::Tensor t2,
+                                       torch::Tensor db0, torch::Tensor sens, torch::Tensor dt, torch::Tensor rf,
+                                       torch::Tensor grad, torch::Tensor adc_phase, torch::Tensor flags, torch::Tensor m,
+                                       int64_t n_threads, int64_t every, std::optional<torch::Tensor> b1,
+                                       std::optional<torch::Tensor> b0_offset, std::optional<torch::Tensor> conc,
+                                       int64_t conc_mode, torch::Tensor pools, std::optional<torch::Tensor> bound,
+                                       std::optional<torch::Tensor> log_f, std::optional<torch::Tensor> rf_freq,
+                                       int64_t lineshape, double cutoff, double x0, double h, double xmin) {
+    const Inputs in = check_inputs(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags);
+    check_b1(in, b1);
+    check_fields(in, b0_offset, conc, conc_mode);
+    TORCH_CHECK(pools.dim() == 3 && pools.size(0) == in.n && pools.size(2) == 5, "pools must be (N, P, 5)");
+    check(pools, "pools", in.dtype, {in.n, pools.size(1), 5});
+    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin};
+    check_bound(in, bd);
+    const int64_t ds = 3 * (pools.size(1) + 1) + (bound ? 1 : 0);
+    check(m, "m", in.dtype, {in.n, ds});
+    const auto* f = flags.data_ptr<uint8_t>();
+    auto signal = torch::empty({blochparty::fused::count_adc(f, in.ns), in.nc, 2}, pd.options());
+    const int64_t n_ckpt = every ? blochparty::fused::count_checkpoints(in.ns, every) : 0;
+    auto ckpt = torch::empty({n_ckpt, in.n, ds}, pd.options());
+    AT_DISPATCH_FLOATING_TYPES(in.dtype, "blochparty_bm_simulate", [&] {
+        using T = scalar_t;
+        auto sp = pools_of<T>(in, pos, pd, t1, t2, db0, sens, b1, pools, bd, conc, conc_mode);
+        auto seq = segments_of<T>(in, dt, rf, grad, adc_phase, flags, b0_offset);
+        if (rf_freq) seq.rf_freq = rf_freq->data_ptr<T>();
+        pybind11::gil_scoped_release no_gil;
+        blochparty::fused::bm::simulate<T>(sp, seq, m.data_ptr<T>(), signal.data_ptr<T>(), static_cast<int>(n_threads),
+                                           every ? ckpt.data_ptr<T>() : nullptr, every);
+    });
+    return {signal, ckpt};
+}
+
+// Gradients: (dt, rf, grad, adc_phase, pos, pd, t1, t2, db0, sens, m, b1, b0_offset, conc, pools, bound, rf_freq).
+std::vector<torch::Tensor> bm_adjoint(torch::Tensor pos, torch::Tensor pd, torch::Tensor t1, torch::Tensor t2,
+                                      torch::Tensor db0, torch::Tensor sens, torch::Tensor dt, torch::Tensor rf,
+                                      torch::Tensor grad, torch::Tensor adc_phase, torch::Tensor flags, torch::Tensor ckpt,
+                                      int64_t every, torch::Tensor signal, std::optional<torch::Tensor> g_signal,
+                                      std::optional<torch::Tensor> g_m, std::vector<bool> needs, int64_t n_threads,
+                                      std::optional<torch::Tensor> b1, std::optional<torch::Tensor> b0_offset,
+                                      std::optional<torch::Tensor> conc, int64_t conc_mode, torch::Tensor pools,
+                                      std::optional<torch::Tensor> bound, std::optional<torch::Tensor> log_f,
+                                      std::optional<torch::Tensor> rf_freq, int64_t lineshape, double cutoff, double x0,
+                                      double h, double xmin) {
+    const Inputs in = check_inputs(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags);
+    check_b1(in, b1);
+    check_fields(in, b0_offset, conc, conc_mode);
+    Bound bd{bound, log_f, rf_freq, lineshape, cutoff, x0, h, xmin};
+    check_bound(in, bd);
+    const int64_t np = pools.size(1), ds = 3 * (np + 1) + (bound ? 1 : 0);
+    TORCH_CHECK(every >= 1, "checkpoint interval must be positive");
+    check(ckpt, "ckpt", in.dtype, {blochparty::fused::count_checkpoints(in.ns, every), in.n, ds});
+    TORCH_CHECK(needs.size() == 17, "needs must have 17 entries");
+    const std::vector<std::vector<int64_t>> shapes = {{in.ns}, {in.ns, 2}, {in.ns, 3}, {in.ns}, {in.n, 3}, {in.n},
+                                                      {in.n}, {in.n}, {in.n}, {in.n, in.nc, 2}, {in.n, ds}, {in.n},
+                                                      {in.ns}, {in.n, conc_mode == 2 ? 7 : 6}, {in.n, np, 5}, {in.n, 5},
+                                                      {in.ns}};
+    std::vector<torch::Tensor> out(17);
+    for (size_t i = 0; i < out.size(); ++i)
+        if (needs[i]) out[i] = torch::empty(shapes[i], pd.options());
+    AT_DISPATCH_FLOATING_TYPES(in.dtype, "blochparty_bm_adjoint", [&] {
+        using T = scalar_t;
+        auto sp = pools_of<T>(in, pos, pd, t1, t2, db0, sens, b1, pools, bd, conc, conc_mode);
+        auto seq = segments_of<T>(in, dt, rf, grad, adc_phase, flags, b0_offset);
+        if (rf_freq) seq.rf_freq = rf_freq->data_ptr<T>();
+        auto ptr = [&](size_t i) { return out[i].defined() ? out[i].data_ptr<T>() : nullptr; };
+        blochparty::fused::bm::Grads<T> g;
+        g.dt = ptr(0), g.rf = ptr(1), g.grad = ptr(2), g.adc_phase = ptr(3), g.pos = ptr(4), g.pd = ptr(5);
+        g.t1 = ptr(6), g.t2 = ptr(7), g.db0 = ptr(8), g.sens = ptr(9), g.m = ptr(10), g.b1 = ptr(11);
+        g.b0_offset = ptr(12), g.conc = ptr(13), g.pools = ptr(14), g.bound = ptr(15), g.rf_freq = ptr(16);
+        const T* gs = g_signal ? g_signal->data_ptr<T>() : nullptr;
+        const T* gm = g_m ? g_m->data_ptr<T>() : nullptr;
+        pybind11::gil_scoped_release no_gil;
+        blochparty::fused::bm::adjoint<T>(sp, seq, ckpt.data_ptr<T>(), every, signal.data_ptr<T>(), gs, gm, g,
+                                          static_cast<int>(n_threads));
+    });
+    return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, mod) {
     mod.def("simulate", &simulate, "Fused forward Bloch simulation, optionally checkpointed (see kernel.h)");
     mod.def("adjoint", &adjoint, "Reverse sweep of the fused simulation (see kernel.h)");
+    mod.def("bm_simulate", &bm_simulate, "Exact Bloch-McConnell simulation with free pools (see bm.h)");
+    mod.def("bm_adjoint", &bm_adjoint, "Reverse sweep of bm_simulate (see bm.h)");
 }
