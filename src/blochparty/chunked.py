@@ -136,6 +136,8 @@ def simulate_chunked(
         kspace = simulate_chunked(phantom, seq, spin_chunk=512).signal
         kspace.abs().sum().backward()  # fills flip.grad and t1.grad
     """
+    if getattr(phantom, "diffusion", None) is not None:
+        raise NotImplementedError("diffusion (Phantom.diffusion) is in blochparty.simulate and the Metal kernel")
     if phantom.bound is not None or phantom.pools:
         raise NotImplementedError("exchange (Phantom.bound / pools) is not implemented here yet; use blochparty.simulate")
 

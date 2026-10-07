@@ -22,6 +22,8 @@ class Phantom:
     b1: Tensor | None = None  # (N,) relative transmit (B1+) scale of every RF pulse; None = 1
     bound: BoundPool | None = None  # magnetization transfer: a bound pool per spin (``exchange.py``)
     pools: tuple[ExchangePool, ...] | None = None  # free pools exchanging with the water (CEST, myelin water)
+    # diffusion: (N,) isotropic diffusivity or (N, 3, 3) tensor [m^2/s]; spins random-walk (bloch._walk)
+    diffusion: Tensor | None = None
 
     def __len__(self) -> int:
         return self.pd.shape[0]
@@ -31,7 +33,8 @@ class Phantom:
         return replace(self, pos=conv(self.pos), pd=conv(self.pd), t1=conv(self.t1),
                        t2=conv(self.t2), db0=conv(self.db0), b1=conv(self.b1),
                        bound=None if self.bound is None else self.bound.to(dtype=dtype, device=device),
-                       pools=None if self.pools is None else tuple(q.to(dtype=dtype, device=device) for q in self.pools))
+                       pools=None if self.pools is None else tuple(q.to(dtype=dtype, device=device) for q in self.pools),
+                       diffusion=conv(self.diffusion))
 
 
 def grid_positions(shape: int | tuple[int, ...], fov: float, dtype=torch.float64) -> Tensor:

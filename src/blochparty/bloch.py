@@ -28,12 +28,14 @@ import math
 from dataclasses import dataclass
 from typing import NamedTuple
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
+from .rng import normals
 from .phantom import Phantom
 from .sequence import Sequence
 
@@ -53,6 +55,7 @@ class _Spins(NamedTuple):
     mode: int = 0  # 0 none, 1 leading order, 2 exact
     bound: BoundPool | None = None  # magnetization transfer (``exchange.py``), expanded to (N,)
     modes: tuple | None = None  # generalized Bloch bound pool: (J,) complex poles [1/T2b] and weights
+    walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky factor (N, 3, 3), seed, spin indices)
 
 
 @dataclass
@@ -199,7 +202,26 @@ def _extra_phase(dt, g, off, spins: _Spins):
     return out
 
 
-def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
+def _walk(r, dt, s0: int, spins: _Spins):
+    """Brownian walk of every spin over segments s0, s0 + 1, ... (durations ``dt``): exact for a
+    constant gradient per segment. With displacement D = sqrt(2 dt) L n1 and the bridge integral
+    int r dt = dt (r0 + r1) / 2 + sqrt(2 dt^3 / 12) L n2 (n1, n2 standard normals from
+    ``rng.normals`` for (seed, spin, segment)), a segment's phase is that of a fixed effective
+    position r0 + D/2 + sqrt(2 dt / 12) L n2. Returns the effective positions (N, n, 3) and the
+    end positions."""
+    fac, seed, idx = spins.walk
+    apply = (lambda z: fac[:, None] * z) if fac.dim() == 1 else (lambda z: (fac @ z[..., None])[..., 0])
+    eff = []
+    for j in range(dt.shape[0]):
+        z = torch.as_tensor(normals(seed, idx, s0 + j), dtype=r.dtype, device=r.device)
+        d = dt[j]
+        step = torch.sqrt(2 * d) * apply(z[:, :3])
+        eff.append(r + 0.5 * step + torch.sqrt(2 * d / 12) * apply(z[:, 3:6]))
+        r = r + step
+    return torch.stack(eff, 1), r
+
+
+def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins, walk=None):
     """A stretch of RF-free segments in closed form.
 
     With t and k the cumulative time and gradient moment from the run's start,
@@ -211,6 +233,8 @@ def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
     t = torch.cumsum(dt, 0)
     k = torch.cumsum(g * dt[:, None], 0)
     extra = _extra_phase(dt, g, off, spins)
+    # moving spins: their own cumulative gradient phase, cycles (N, n), in place of pos . k
+    wcyc = None if walk is None else torch.cumsum((walk * g[None]).sum(-1) * dt[None], 1)
     if extra is not None and extra.dim() == 1:
         extra = extra.expand(mx.shape[0], -1)
     sig = None
@@ -223,7 +247,8 @@ def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
         parts = []
         for j in range(0, len(adc_idx), block):
             tj, kj = ta[j : j + block], ka[j : j + block]
-            cyc = spins.pos @ kj.T + spins.db0[:, None] * tj  # (N, n)
+            gk = spins.pos @ kj.T if wcyc is None else wcyc[:, idx[j : j + block]]
+            cyc = gk + spins.db0[:, None] * tj  # (N, n)
             if extra is not None:
                 cyc = cyc + extra[:, idx[j : j + block]]
             phase = TWO_PI * cyc
@@ -233,7 +258,7 @@ def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
         s_re, s_im = torch.cat(parts, dim=-1)  # (C, n_adc) each
         c, s = torch.cos(pa), torch.sin(pa)
         sig = torch.stack([s_re * c + s_im * s, s_im * c - s_re * s]).permute(2, 0, 1)  # (n_adc, 2, C)
-    cyc = spins.pos @ k[-1] + spins.db0 * t[-1]
+    cyc = (spins.pos @ k[-1] if wcyc is None else wcyc[:, -1]) + spins.db0 * t[-1]
     if extra is not None:
         cyc = cyc + extra[:, -1]
     mx, my = _precess(mx, my, -TWO_PI * cyc)
@@ -265,12 +290,16 @@ def _steps(seq: Sequence, merge: bool) -> list[tuple[int, int]]:
     return steps
 
 
-def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_rf):
+def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_rf, r=None):
     samples = []
     for a, b in steps:
+        eff = None
+        if spins.walk is not None:  # diffusion: where each spin is during these segments
+            eff, r = _walk(r, seq.dt[a:b], a, spins)
         if seq.is_rf[a]:
             off = seq.b0_offset[a] if use_off else None
-            mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, spins,
+            sp = spins if eff is None else spins._replace(pos=eff[:, 0])
+            mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
                                          None if f_rf is None else f_rf[a])
             if seq.adc[a]:
                 samples.append(_sample(mx, my, seq.adc_phase[a], spins)[None])
@@ -278,7 +307,7 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None
             mx, my, mz, mb, sig = _free_run(mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off,
-                                            seq.adc_phase[a:b], adc_idx, spins)
+                                            seq.adc_phase[a:b], adc_idx, spins, eff)
             if sig is not None:
                 samples.append(sig)
         if seq.spoil[b - 1]:
@@ -287,7 +316,7 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
                 mb = (mb[0], torch.zeros_like(mb[1]))
     n_coils = spins.sens_re.shape[1]
     sig = torch.cat(samples) if samples else mx.new_zeros(0, 2, n_coils)
-    return mx, my, mz, mb, sig
+    return mx, my, mz, mb, sig, r
 
 
 def _simulate_exchange(phantom: Phantom, seq: Sequence, coils, m_init, scanner) -> SimResult:
@@ -365,6 +394,7 @@ def simulate(
     checkpoint_every: int | None = None,
     merge_free_runs: bool = True,
     scanner: Scanner | None = None,
+    seed: int = 0,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``.
 
@@ -378,12 +408,16 @@ def simulate(
         False steps segment by segment; the results agree to rounding error.
     scanner: hardware field model (``fields.Scanner``: concomitant fields); None is
         the ideal scanner. ``seq.b0_offset`` (None: zeros) is always applied.
+    seed: the random walk of diffusing spins (``Phantom.diffusion``): spin i's path is a
+        function of (seed, i) only (``rng``), so engines agree spin by spin.
 
     With ``Phantom.pools`` (free exchanging pools: CEST, myelin water) every segment is one
     exact matrix exponential of the Bloch-McConnell system instead (slower; checkpoint_every
     and merge_free_runs do not apply).
     """
     if phantom.pools:
+        if phantom.diffusion is not None:
+            raise NotImplementedError("free pools with diffusion are not implemented")
         if phantom.bound is not None and phantom.bound.model == "generalized":
             raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
         return _simulate_exchange(phantom, seq, coils, m_init, scanner)
@@ -397,8 +431,16 @@ def simulate(
     fields = spin_fields(scanner, phantom.pos)
     bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
     gen = bound is not None and bound.model == "generalized"
+    walk = None
+    if phantom.diffusion is not None:  # spins walk from their (encoding) positions
+        if fields.mode == 2:
+            raise NotImplementedError("diffusion with exact concomitant fields is not implemented")
+        D = phantom.diffusion.to(pd.dtype)
+        fac = torch.sqrt(D) if D.dim() == 1 else torch.linalg.cholesky(D)
+        walk = (fac, int(seed), np.arange(n, dtype=np.uint64))
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None)
+                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk)
+    r = fields.pos if walk is not None else None
     f_rf = rf_frequency(seq) if bound is not None and not gen else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset
@@ -428,9 +470,10 @@ def simulate(
     sigs = [pd.new_zeros(0, 2, sens_re.shape[1])]
     for part in chunks:
         if use_ckpt:
-            mx, my, mz, mb, sig = checkpoint(_run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, use_reentrant=False)
+            mx, my, mz, mb, sig, r = checkpoint(_run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, r,
+                                                use_reentrant=False)
         else:
-            mx, my, mz, mb, sig = _run(mx, my, mz, mb, part, seq, spins, use_off, f_rf)
+            mx, my, mz, mb, sig, r = _run(mx, my, mz, mb, part, seq, spins, use_off, f_rf, r)
         sigs.append(sig)
     sig = torch.cat(sigs)  # (n_adc, 2, C)
     assert sig.shape[0] == seq.n_adc and n == mx.shape[0]
