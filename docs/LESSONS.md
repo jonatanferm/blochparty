@@ -102,6 +102,17 @@ says where it came from so it can be re-checked.
   therefore underestimated by every rate-model simulator, ours included until the
   linearized model is in the engines.
 
+- **Reflecting walls: test the equilibrium, not only the signal** (restricted diffusion,
+  2026-10-07). A radial mirror of the step's end point (r → r(2R − |r|)/|r|) is the obvious
+  reflection for spheres and cylinders, and the signal looked nearly right (1 % high at large
+  q). But it isn't measure-preserving: the walkers' equilibrium was 11 % depleted within
+  one step of the wall (KS distance 2.5× the 5 % level). Specular reflection at the crossing
+  point (mirror the rest of the step about the tangent plane) restores a uniform equilibrium,
+  and the long-time signals then match to 3e-4. A Kolmogorov–Smirnov test on (r/R)^3 is a
+  cheap, sharp check of any reflection rule.
+- **Metal kernels take at most 31 buffers** (indices 0–30). Pack the scalars into one
+  `constant uint*` array per dispatch rather than one `constant uint&` each.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.

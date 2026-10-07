@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -340,6 +341,53 @@ inline float3 walk_segment(thread Walk& w, uint s, float dt) {
     return eff;
 }
 
+// Restricted walks (restriction.py): sub-steps reflecting off the compartment walls. kind 1 planes
+// (width size, normal ax), 2 cylinder (radius size, axis ax), 3 sphere (radius size).
+// End offset of a step from offset a (inside) to b, reflected off the walls (restriction.reflect):
+// a mirror at +-L/2 for planes; specular at the crossing point for cylinders and spheres.
+inline float3 fold(float3 a, float3 b, uint kind, float size, float3 ax) {
+    if (kind == 1) {
+        const float s0 = dot(b, ax), hw = 0.5f * size;
+        float t = s0;
+        for (int k = 0; k < 8; ++k) t = t > hw ? 2.0f * hw - t : (t < -hw ? -2.0f * hw - t : t);
+        return b + (t - s0) * ax;
+    }
+    float3 along = float3(0.0f);
+    if (kind == 2) along = dot(b, ax) * ax, a -= dot(a, ax) * ax, b -= along;
+    const float R2 = size * size;
+    for (int k = 0; k < 8 && dot(b, b) > R2; ++k) {
+        const float3 v = b - a;
+        const float vv = max(dot(v, v), 1e-30f), av = dot(a, v);
+        const float t = clamp((-av + sqrt(max(av * av + vv * (R2 - dot(a, a)), 0.0f))) / vv, 0.0f, 1.0f);
+        const float3 h = a + t * v, nrm = h / max(length(h), 1e-30f);
+        float3 rest = (1.0f - t) * v;
+        rest -= 2.0f * dot(rest, nrm) * nrm;
+        a = h, b = h + rest;
+    }
+    return along + b;
+}
+
+inline float3 walk_restricted(thread Walk& w, uint s, float dt, uint nsub, uint kind, float size, float3 ax, float3 c) {
+    const float h = dt / float(nsub), sd = w.l[0];
+    float3 r = float3(w.x, w.y, w.z), acc = float3(0.0f);
+    for (uint k = 1; k <= nsub; ++k) {
+        const uint4 a = philox(uint4(w.spin, s, k, 0u), w.seed), b = philox(uint4(w.spin, s, k, 1u), w.seed);
+        const float2 z01 = box_muller(a.x, a.y), z23 = box_muller(a.z, a.w), z45 = box_muller(b.x, b.y);
+        const float3 n1 = float3(z01.x, z01.y, z23.x), n2 = float3(z23.y, z45.x, z45.y);
+        const float3 rb = c + fold(r - c, r + sqrt(2.0f * h) * sd * n1 - c, kind, size, ax);
+        acc += 0.5f * (r + rb) + sqrt(2.0f * h / 12.0f) * sd * n2;
+        r = rb;
+    }
+    w.x = r.x, w.y = r.y, w.z = r.z;
+    return acc / float(nsub);
+}
+
+struct Geom {
+    uint kind = 0;
+    float size = 0.0f;
+    float3 ax = float3(0.0f), c = float3(0.0f);
+};
+
 // The per-spin state and segment step of both kernels: plain Bloch, or with the bound pool.
 struct State {
     float mx, my, mz, mb;
@@ -354,12 +402,14 @@ struct State {
 // 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
 // carry none of the others' per-thread state.
 template <int V, bool DIFF>
-inline void advance(thread State& st, thread Modes& md, thread Walk& wk, constant float* segs, constant int* flags,
-                    constant float* frf, uint s, uint mt, constant float* line, constant float* log_f, uint mode,
-                    constant int* nsub, constant float* modes, uint nj) {
+inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread const Geom& gm, constant float* segs,
+                    constant int* flags, constant float* frf, uint s, uint mt, constant float* line,
+                    constant float* log_f, uint mode, constant int* nsub, constant float* modes, uint nj,
+                    constant int* wsub) {
     constant float* q = segs + 8 * s;
     if (DIFF) {  // a moving spin: its effective position for this segment; position-keyed caches are stale
-        const float3 eff = walk_segment(wk, s, q[0]);
+        const float3 eff = gm.kind ? walk_restricted(wk, s, q[0], uint(wsub[s]), gm.kind, gm.size, gm.ax, gm.c)
+                                   : walk_segment(wk, s, q[0]);
         st.p.px = eff.x, st.p.py = eff.y, st.p.pz = eff.z;
         st.cache.dt = -1.0f, md.k_dt = -1.0f;
     }
@@ -437,39 +487,35 @@ inline void flush_mma(threadgroup float* buf, threadgroup float* mine, threadgro
 """
 
 _KERNELS = r"""
-kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
-                        constant float* spins      [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
-                        constant float* sens       [[buffer(2)]],   // (2C, N) per coil: real, imag
-                        constant float* segs       [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
-                        constant int* flags        [[buffer(4)]],   // (S,) 1 rf, 2 adc, 4 spoil
-                        constant int* adc_row      [[buffer(5)]],   // (S,) signal row of an ADC segment
-                        device atomic_float* sig   [[buffer(6)]],   // (n_adc, C, 2)
-                        constant uint& n           [[buffer(7)]],
-                        constant uint& n_coils     [[buffer(8)]],
-                        constant uint& s0          [[buffer(9)]],
-                        constant uint& s1          [[buffer(10)]],
-                        device float* MB           [[buffer(11)]],  // (N,) bound-pool Mz, in/out (mt)
-                        constant float* pool       [[buffer(12)]],  // (5, N) f k r1b t2b dw (mt)
-                        constant float* frf        [[buffer(13)]],  // (S,) RF frequency [Hz] (mt)
-                        constant float* line       [[buffer(14)]],  // (6,) lineshape (mt)
-                        constant float* log_f      [[buffer(15)]],  // lineshape table (mt)
-                        constant uint& mt          [[buffer(16)]],  // 1: magnetization transfer
-                        constant float* conc       [[buffer(17)]],  // (7, N) concomitant-field coefficients
-                        constant uint& mode        [[buffer(18)]],  // 0 none, 1 leading order, 2 exact
-                        device float* U            [[buffer(19)]],  // (2J, N) generalized pool modes, in/out (mt 2)
-                        constant float* modes      [[buffer(20)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
-                        constant int* nsub         [[buffer(21)]],  // (S,) RF sub-steps (mt 2)
-                        constant uint& nj          [[buffer(22)]],  // number of modes (mt 2)
-                        device float* P            [[buffer(23)]],  // (3, N) walker positions, in/out (diffusion)
-                        constant float* chol       [[buffer(24)]],  // (6, N) Cholesky factors of D (diffusion)
-                        constant uint& seed_lo     [[buffer(25)]],
-                        constant uint& seed_hi     [[buffer(26)]],
-                        uint i    [[thread_position_in_grid]],
-                        uint lane [[thread_index_in_simdgroup]],
-                        uint sg   [[simdgroup_index_in_threadgroup]],
-                        uint nsg  [[simdgroups_per_threadgroup]],
-                        uint tid  [[thread_index_in_threadgroup]],
-                        uint ntg  [[threads_per_threadgroup]]) {
+kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3, N) magnetization, in/out
+                                constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
+                                constant float* sens       [[buffer(2)]],  // (2C, N) per coil: real, imag
+                                constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
+                                constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil
+                                constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
+                                device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
+                                device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
+                                constant float* pool       [[buffer(8)]],  // (5, N) f k r1b t2b dw (mt)
+                                constant float* frf        [[buffer(9)]],  // (S,) RF frequency [Hz] (mt 1)
+                                constant float* line       [[buffer(10)]],  // (6,) lineshape (mt 1)
+                                constant float* log_f      [[buffer(11)]],  // lineshape table (mt 1)
+                                constant float* conc       [[buffer(12)]],  // (7, N) concomitant-field coefficients
+                                device float* U            [[buffer(13)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                                constant float* modes      [[buffer(14)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                                constant int* nsub         [[buffer(15)]],  // (S,) RF sub-steps (mt 2)
+                                device float* P            [[buffer(16)]],  // (3, N) walker positions, in/out (diffusion)
+                                constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
+                                constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
+                                constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
+                                constant uint* prm         [[buffer(20)]],  // (12,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind
+                                uint i    [[thread_position_in_grid]],
+                                uint lane [[thread_index_in_simdgroup]],
+                                uint sg   [[simdgroup_index_in_threadgroup]],
+                                uint nsg  [[simdgroups_per_threadgroup]],
+                                uint tid  [[thread_index_in_threadgroup]],
+                                uint ntg  [[threads_per_threadgroup]]) {
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11];
+
     // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
     // two barriers per block of samples instead of two per sample, and the final sums are spread
     // over all threads of the group.
@@ -492,6 +538,12 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
         for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
         wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
     }
+    Geom gm;
+    if (@DIFF@ && kind) {
+        gm.kind = kind, gm.size = geom[j];
+        gm.ax = float3(geom[n + j], geom[2 * n + j], geom[3 * n + j]);
+        gm.c = float3(geom[4 * n + j], geom[5 * n + j], geom[6 * n + j]);
+    }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
@@ -502,7 +554,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
+        advance<@V@, @DIFF@>(st, md, wk, gm, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
@@ -528,41 +580,35 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
     }
 }
 
-kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   // (3, N) magnetization, in/out
-                            constant float* spins      [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
-                            device const float* sens   [[buffer(2)]],   // (2, 8T, N_pad): real, imag; zero-padded
-                            constant float* segs       [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
-                            constant int* flags        [[buffer(4)]],   // (S,) 1 rf, 2 adc, 4 spoil
-                            constant int* adc_row      [[buffer(5)]],   // (S,) signal row of an ADC segment
-                            device atomic_float* sig   [[buffer(6)]],   // (n_adc, C, 2)
-                            constant uint& n           [[buffer(7)]],
-                            constant uint& n_coils     [[buffer(8)]],
-                            constant uint& s0          [[buffer(9)]],
-                            constant uint& s1          [[buffer(10)]],
-                            constant uint& n_tiles     [[buffer(11)]],  // coil tiles of 8
-                            constant uint& n_pad       [[buffer(12)]],  // spins padded to the grid size
-                            device float* MB           [[buffer(13)]],  // (N,) bound-pool Mz, in/out (mt)
-                            constant float* pool       [[buffer(14)]],  // (5, N) f k r1b t2b dw (mt)
-                            constant float* frf        [[buffer(15)]],  // (S,) RF frequency [Hz] (mt)
-                            constant float* line       [[buffer(16)]],  // (6,) lineshape (mt)
-                            constant float* log_f      [[buffer(17)]],  // lineshape table (mt)
-                            constant uint& mt          [[buffer(18)]],  // 1: magnetization transfer
-                            constant float* conc       [[buffer(19)]],  // (7, N) concomitant-field coefficients
-                            constant uint& mode        [[buffer(20)]],  // 0 none, 1 leading order, 2 exact
-                            device float* U            [[buffer(21)]],  // (2J, N) generalized pool modes, in/out (mt 2)
-                            constant float* modes      [[buffer(22)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
-                            constant int* nsub         [[buffer(23)]],  // (S,) RF sub-steps (mt 2)
-                            constant uint& nj          [[buffer(24)]],  // number of modes (mt 2)
-                            device float* P            [[buffer(25)]],  // (3, N) walker positions, in/out (diffusion)
-                            constant float* chol       [[buffer(26)]],  // (6, N) Cholesky factors of D (diffusion)
-                            constant uint& seed_lo     [[buffer(27)]],
-                            constant uint& seed_hi     [[buffer(28)]],
-                            uint i    [[thread_position_in_grid]],
-                            uint lane [[thread_index_in_simdgroup]],
-                            uint sg   [[simdgroup_index_in_threadgroup]],
-                            uint nsg  [[simdgroups_per_threadgroup]],
-                            uint tid  [[thread_index_in_threadgroup]],
-                            uint ntg  [[threads_per_threadgroup]]) {
+kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  // (3, N) magnetization, in/out
+                                    constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
+                                    device const float* sens   [[buffer(2)]],  // (2, 8T, N_pad): real, imag; zero-padded
+                                    constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
+                                    constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil
+                                    constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
+                                    device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
+                                    device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
+                                    constant float* pool       [[buffer(8)]],  // (5, N) f k r1b t2b dw (mt)
+                                    constant float* frf        [[buffer(9)]],  // (S,) RF frequency [Hz] (mt 1)
+                                    constant float* line       [[buffer(10)]],  // (6,) lineshape (mt 1)
+                                    constant float* log_f      [[buffer(11)]],  // lineshape table (mt 1)
+                                    constant float* conc       [[buffer(12)]],  // (7, N) concomitant-field coefficients
+                                    device float* U            [[buffer(13)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                                    constant float* modes      [[buffer(14)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                                    constant int* nsub         [[buffer(15)]],  // (S,) RF sub-steps (mt 2)
+                                    device float* P            [[buffer(16)]],  // (3, N) walker positions, in/out (diffusion)
+                                    constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
+                                    constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
+                                    constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
+                                    constant uint* prm         [[buffer(20)]],  // (12,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind
+                                    uint i    [[thread_position_in_grid]],
+                                    uint lane [[thread_index_in_simdgroup]],
+                                    uint sg   [[simdgroup_index_in_threadgroup]],
+                                    uint nsg  [[simdgroups_per_threadgroup]],
+                                    uint tid  [[thread_index_in_threadgroup]],
+                                    uint ntg  [[threads_per_threadgroup]]) {
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11];
+
     threadgroup float buf[MAX_SG * MMA_REGION];
     threadgroup int rows[8];
     threadgroup float psi[8];
@@ -584,6 +630,12 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
         for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
         wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
     }
+    Geom gm;
+    if (@DIFF@ && kind) {
+        gm.kind = kind, gm.size = geom[j];
+        gm.ax = float3(geom[n + j], geom[2 * n + j], geom[3 * n + j]);
+        gm.c = float3(geom[4 * n + j], geom[5 * n + j], geom[6 * n + j]);
+    }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
@@ -593,7 +645,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
+        advance<@V@, @DIFF@>(st, md, wk, gm, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -734,23 +786,50 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
         D = phantom.diffusion.detach().double().cpu()
         L = torch.diag_embed(torch.sqrt(D).unsqueeze(-1).expand(n, 3)) if D.dim() == 1 else torch.linalg.cholesky(D)
         chol = torch.stack([L[:, 0, 0], L[:, 1, 0], L[:, 1, 1], L[:, 2, 0], L[:, 2, 1], L[:, 2, 2]])
-        walk_bufs = [fields.pos.detach().T.to(dev, f32).contiguous(), chol.to(dev, f32).contiguous(),
-                     int(seed) & 0xFFFFFFFF, (int(seed) >> 32) & 0xFFFFFFFF]
+        start = fields.pos.detach().double().cpu()
+        dzi = torch.zeros(1, device=dev, dtype=torch.int32)
+        geom_bufs = [dzi, torch.zeros(1, device=dev, dtype=f32), 0]
+        if phantom.restriction is not None:  # walkers start inside their compartments, as the core
+            from ..restriction import KINDS, n_sub, start_offsets, tau_max
+
+            if D.dim() != 1:
+                raise ValueError("restricted diffusion needs an isotropic diffusivity (N,)")
+            res = phantom.restriction.expand(n, start)
+            centre = start
+            start = centre + start_offsets(res, int(seed), np.arange(n, dtype=np.uint64), centre)
+            tmax = tau_max(res, D)
+            wsub = torch.tensor([n_sub(float(d), tmax) for d in seq.dt.detach().double().cpu()], dtype=torch.int32)
+            ax = res.axis if res.axis is not None else torch.zeros(n, 3, dtype=torch.float64)
+            geom = torch.cat([res.size[None], ax.T, centre.T]).to(dev, f32).contiguous()
+            geom_bufs = [wsub.to(dev), geom, KINDS.index(res.kind) + 1]
+        walk_bufs = [start.T.to(dev, f32).contiguous(), chol.to(dev, f32).contiguous(),
+                     int(seed) & 0xFFFFFFFF, (int(seed) >> 32) & 0xFFFFFFFF, *geom_bufs]
     else:
         dz = torch.zeros(1, device=dev, dtype=f32)
-        walk_bufs = [dz, dz, 0, 0]
+        walk_bufs = [dz, dz, 0, 0, torch.zeros(1, device=dev, dtype=torch.int32), dz, 0]
     suffix = "_gen" if gen_bufs[3] else ("_full" if (mt_bufs[5] or conc_buf[1]) else "")
     if phantom.diffusion is not None:
         suffix += "_diff"
     lib, S = _lib(), len(seq)
+    # buffers 7-19 (MB pool frf line log_f | conc | U modes nsub | P chol | wsub geom) and the scalars
+    MB, pool_b, frf_b, line_b, logf_b, mt_flag = mt_bufs
+    conc_b, mode_flag = conc_buf
+    U_b, modes_b, nsub_b, nj_v = gen_bufs
+    P_b, chol_b, seed_lo, seed_hi, wsub_b, geom_b, kind_v = walk_bufs
+    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b)
+
+    def prm(s0, n_tiles, n_pad):
+        v = np.array([n, n_coils, s0, min(S, s0 + chunk), n_tiles, n_pad, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
+                      kind_v], dtype=np.uint32)
+        return torch.from_numpy(v.view(np.int32)).to(dev)
+
     for s0 in range(0, S, chunk):
         if mma:
-            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), n_tiles,
-                                threads, *mt_bufs, *conc_buf, *gen_bufs, *walk_bufs, threads=threads,
-                                group_size=group)
+            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, n_tiles, threads),
+                                                     threads=threads, group_size=group)
         else:
-            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), *mt_bufs,
-                            *conc_buf, *gen_bufs, *walk_bufs, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, 0, 0),
+                                                 threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()

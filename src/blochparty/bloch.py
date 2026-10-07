@@ -35,6 +35,7 @@ from torch.utils.checkpoint import checkpoint
 
 from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
+from .restriction import n_sub, start_offsets, tau_max, walk_segment
 from .rng import normals
 from .phantom import Phantom
 from .sequence import Sequence
@@ -55,7 +56,7 @@ class _Spins(NamedTuple):
     mode: int = 0  # 0 none, 1 leading order, 2 exact
     bound: BoundPool | None = None  # magnetization transfer (``exchange.py``), expanded to (N,)
     modes: tuple | None = None  # generalized Bloch bound pool: (J,) complex poles [1/T2b] and weights
-    walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky factor (N, 3, 3), seed, spin indices)
+    walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky (N, 3, 3), seed, spin indices, restriction)
 
 
 @dataclass
@@ -209,7 +210,14 @@ def _walk(r, dt, s0: int, spins: _Spins):
     ``rng.normals`` for (seed, spin, segment)), a segment's phase is that of a fixed effective
     position r0 + D/2 + sqrt(2 dt / 12) L n2. Returns the effective positions (N, n, 3) and the
     end positions."""
-    fac, seed, idx = spins.walk
+    fac, seed, idx, restr = spins.walk
+    if restr is not None:  # impermeable compartments: sub-stepped, reflecting walks
+        res, centre, tmax = restr
+        eff = []
+        for j in range(dt.shape[0]):
+            e, r = walk_segment(r, centre, fac, res, dt[j], s0 + j, n_sub(float(dt[j].detach()), tmax), seed, idx)
+            eff.append(e)
+        return torch.stack(eff, 1), r
     apply = (lambda z: fac[:, None] * z) if fac.dim() == 1 else (lambda z: (fac @ z[..., None])[..., 0])
     eff = []
     for j in range(dt.shape[0]):
@@ -437,10 +445,19 @@ def simulate(
             raise NotImplementedError("diffusion with exact concomitant fields is not implemented")
         D = phantom.diffusion.to(pd.dtype)
         fac = torch.sqrt(D) if D.dim() == 1 else torch.linalg.cholesky(D)
-        walk = (fac, int(seed), np.arange(n, dtype=np.uint64))
+        idx = np.arange(n, dtype=np.uint64)
+        restr = None
+        if phantom.restriction is not None:
+            if D.dim() != 1:
+                raise ValueError("restricted diffusion needs an isotropic diffusivity (N,)")
+            res = phantom.restriction.expand(n, pd)
+            restr = (res, fields.pos, tau_max(res, D))
+        walk = (fac, int(seed), idx, restr)
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
                    fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk)
     r = fields.pos if walk is not None else None
+    if walk is not None and walk[3] is not None:  # walkers start uniformly inside their compartments
+        r = fields.pos + start_offsets(walk[3][0], int(seed), walk[2], pd)
     f_rf = rf_frequency(seq) if bound is not None and not gen else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset

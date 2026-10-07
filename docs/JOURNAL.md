@@ -340,3 +340,11 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   diffusion (Weigel et al. 2010, implemented independently in the test): 1M GPU walkers agree
   with EPG to 1e-4 on all 8 echoes (e.g. 0.9029/0.9248/0.8496 vs 0.9028/0.9247/0.8495), while
   diffusion moves them by up to 0.23. Passed on the first run.
+- **Restricted diffusion** (`restriction.py`, `Phantom.restriction`: planes, cylinders,
+  spheres per spin; core and Metal). Walls need sub-steps (rms ≤ size / 10, counts from Python
+  so the GPU matches) and reflections. First reflection rule, the radial mirror: signals ~1 %
+  high and an equilibrium 11 % depleted at the wall (a KS test caught it). Specular reflection
+  fixed it: KS within the 5 % level; sphere long-time limit to 3e-4, cylinder 0.3 % (finite
+  pulse), planes vs Tanner–Stejskal's series at Δ = 10/25/200 ms within 3e-3, free along the
+  cylinder. GPU = core to 1e-5 (same walk, reflections included). Metal's 31-buffer limit was
+  hit; the scalars are now one parameter array (plain kernels unchanged at 0.39 s).
