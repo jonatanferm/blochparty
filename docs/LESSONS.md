@@ -90,6 +90,18 @@ says where it came from so it can be re-checked.
   model never has (det = r1(r1b + k + W) + kf(r1b + W) > 0), so build tests from physical
   parameters.
 
+- **Piecewise-constant RF in a memory integral: integrate cell by cell** (generalized Bloch,
+  2026-10-07). Sampling each cell's RF at its left grid point in the history integral made a
+  second-order scheme first order (a half-step phase lag of an off-resonant pulse). The
+  trapezoid over each cell with that cell's constant RF, G and z at both ends, restored it
+  (error ratios 4.2/4.1/4.05 vs the Bloch ODE).
+- **The rate model's on-resonance cut matters for imaging pulses, not only near CEST
+  offsets.** The generalized Bloch model shows the 1 kHz-cut rate model under-saturating the
+  bound pool even for 1–3 ms on-resonance π pulses (0.63 vs 0.46 at 1 ms), and it cannot
+  invert it for pulses ≤ 100 µs. Incidental MT from excitation and refocusing pulses is
+  therefore underestimated by every rate-model simulator, ours included until the
+  linearized model is in the engines.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.

@@ -271,3 +271,17 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   core; **BMCTool's own 5-pool CEST model: 8.3e-7 in Z over 50 offsets**, same MTR_asym.
   Cost 0.3 ms per segment with 4 pools, which is fine for Z-spectra but slow for imaging.
   Fused/Metal/chunked refuse pools for now (next: a kernel version).
+- **Generalized Bloch model** (`generalized_bloch.py`, `validation/RESULTS_GENERALIZED_BLOCH.md`):
+  the bound pool rotated by RF via the Green's function of its lineshape (Assländer et al.).
+  A second-order integro-differential solver (first order at first, until the RF was
+  integrated cell by cell). It reproduces the paper's three limits independently: Bloch for a
+  Lorentzian (SciPy, ratios 4.2/4.1/4.05), Henkelman's steady state for all three lineshapes
+  (≤ 2e-4, which also checks exchange.py's G = πg without BMCTool), and z_s → cos α for hard
+  pulses; the free-pool coupling matches the two-pool ODE (1e-6). Finding: our rate model
+  can't invert the pool for pulses ≤ 100 µs (−0.97 vs 0 at 10 µs, α = π), and even for 1–3 ms
+  on-resonance pulses it saturates too little because of the 1 kHz cut. Next: the paper's
+  linearized R2,s,l in the imaging engines.
+- **State at the end of the night**: tests 334 pass, defaults bit-identical. Open:
+  exchange pools in the fused and Metal kernels; generalized Bloch in the engines
+  (linearized); incidental MT needs a dataset with its fat-sat pulse; the short-T2 NIST
+  question (B1⁺ / timing).
