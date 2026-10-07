@@ -32,7 +32,7 @@ import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
-from .exchange import BoundPool, _bm_matrix, rf_frequency, saturation_rate, z_exchange
+from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
 from .phantom import Phantom
 from .sequence import Sequence
@@ -52,6 +52,7 @@ class _Spins(NamedTuple):
     conc: Tensor | None = None  # concomitant-field coefficients (see fields.SpinFields)
     mode: int = 0  # 0 none, 1 leading order, 2 exact
     bound: BoundPool | None = None  # magnetization transfer (``exchange.py``), expanded to (N,)
+    modes: tuple | None = None  # generalized Bloch bound pool: (J,) complex poles [1/T2b] and weights
 
 
 @dataclass
@@ -73,6 +74,14 @@ def _relax_bound(mx, my, mz, mb, dt, spins: _Spins, w=None):
     e2 = torch.exp(-dt * spins.r2)
     mz, mb = z_exchange(mz, mb, dt, spins.pd, spins.r1, spins.bound, w)
     return mx * e2, my * e2, mz, mb
+
+
+def _modes_evolve(u, t, cyc_b, spins: _Spins):
+    """Generalized bound pool without RF: mode u_j decays as exp(-p_j t / T2b) and precesses by
+    the pool's offset, cyc_b cycles (as Mxy, exp(-i 2 pi cyc))."""
+    p, _ = spins.modes
+    phase = torch.polar(torch.ones_like(cyc_b), -2 * math.pi * cyc_b)
+    return u * torch.exp(-p[None, :] * (t / spins.bound.t2)[:, None]) * phase[:, None]
 
 
 def _precess(mx, my, phi):
@@ -113,6 +122,12 @@ def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None):
         bz = bz + off
     if spins.mode:
         bz = bz + _concomitant(bz, g, spins)
+    if spins.modes is not None:  # generalized Bloch: the RF rotates the bound pool through its modes
+        # the split is accurate for steps << T2b (~1e-3 in Z at 1.7 T2b, 0.06 at 8 T2b): sub-step
+        n_sub = max(1, math.ceil(float(dt.detach()) / (0.5 * float(spins.bound.t2.detach().min()))))
+        for _ in range(n_sub):
+            mx, my, mz, mb = _rf_segment_generalized(mx, my, mz, mb, dt / n_sub, rf, bz, spins)
+        return mx, my, mz, mb
     if spins.bound is not None:  # bound pool saturated at the RF's offset from its resonance
         sat = saturation_rate(spins.bound, rf, spins.b1, f_rf - bz - spins.bound.dw)
         mx, my, mz, mb = _relax_bound(mx, my, mz, mb, 0.5 * dt, spins, sat)
@@ -126,6 +141,35 @@ def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None):
     if spins.bound is not None:
         return _relax_bound(mx, my, mz, mb, 0.5 * dt, spins, sat)
     return (*_relax(mx, my, mz, 0.5 * dt, spins), mb)
+
+
+def _rf_segment_generalized(mx, my, mz, mb, dt, rf, bz, spins: _Spins):
+    """Strang: half [relaxation, exchange, mode decay and precession], then the RF: the water's
+    rotation about its effective field, and the bound pool's (Mzb, S = sum_j u_j) rotated by the
+    RF alone like a Bloch pool (sum_j c_j = G(0) = 1), each mode taking c_j of the change in S
+    (exact: du_j / dt = c_j dS / dt under constant RF); then the other half."""
+    _, c = spins.modes
+    half = 0.5 * dt
+    t_half = half * torch.ones_like(mz)
+    cyc_half = (bz + spins.bound.dw) * half
+
+    def relax_half(mx, my, mz, z, u):
+        e2 = torch.exp(-half * spins.r2)
+        mz, z = z_exchange(mz, z, half, spins.pd, spins.r1, spins.bound)
+        return mx * e2, my * e2, mz, z, _modes_evolve(u, t_half, cyc_half, spins)
+
+    z, u = mb
+    mx, my, mz, z, u = relax_half(mx, my, mz, z, u)
+    w = -TWO_PI * dt
+    wx, wy = w * rf[0] * torch.ones_like(mz), w * rf[1] * torch.ones_like(mz)
+    if spins.b1 is not None:
+        wx, wy = wx * spins.b1, wy * spins.b1
+    mx, my, mz = _rotate(mx, my, mz, wx, wy, w * bz)
+    s0 = u.sum(-1)
+    sx, sy, z = _rotate(s0.real, s0.imag, z, wx, wy, torch.zeros_like(z))
+    u = u + c[None, :] * (torch.complex(sx, sy) - s0)[:, None]
+    mx, my, mz, z, u = relax_half(mx, my, mz, z, u)
+    return mx, my, mz, (z, u)
 
 
 def _sample(mx, my, psi, spins: _Spins):
@@ -193,7 +237,13 @@ def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins):
     if extra is not None:
         cyc = cyc + extra[:, -1]
     mx, my = _precess(mx, my, -TWO_PI * cyc)
-    if spins.bound is not None:
+    if spins.modes is not None:
+        z, u = mb
+        e2 = torch.exp(-t[-1] * spins.r2)
+        mz, z = z_exchange(mz, z, t[-1], spins.pd, spins.r1, spins.bound)
+        mx, my = mx * e2, my * e2
+        mb = (z, _modes_evolve(u, t[-1] * torch.ones_like(z), cyc + spins.bound.dw * t[-1], spins))
+    elif spins.bound is not None:
         mx, my, mz, mb = _relax_bound(mx, my, mz, mb, t[-1], spins)
     else:
         mx, my, mz = _relax(mx, my, mz, t[-1], spins)
@@ -233,6 +283,8 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
                 samples.append(sig)
         if seq.spoil[b - 1]:
             mx, my = torch.zeros_like(mx), torch.zeros_like(my)
+            if spins.modes is not None:  # the bound pool's coherence is spoiled too
+                mb = (mb[0], torch.zeros_like(mb[1]))
     n_coils = spins.sens_re.shape[1]
     sig = torch.cat(samples) if samples else mx.new_zeros(0, 2, n_coils)
     return mx, my, mz, mb, sig
@@ -341,9 +393,10 @@ def simulate(
         sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
     fields = spin_fields(scanner, phantom.pos)
     bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
+    gen = bound is not None and bound.model == "generalized"
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound)
-    f_rf = rf_frequency(seq) if bound is not None else None
+                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None)
+    f_rf = rf_frequency(seq) if bound is not None and not gen else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset
     use_off = off is not None and (off.requires_grad or bool(off.any()))
@@ -357,6 +410,8 @@ def simulate(
         mx, my, mz = m_init.unbind(-1)
     if bound is not None and mb is None:
         mb = bound.f * pd
+    if gen:  # modes of the bound pool's transverse magnetization, at rest
+        mb = (mb, torch.zeros(n, len(spins.modes[0]), dtype=spins.modes[0].dtype, device=pd.device))
     elif bound is None and mb is not None:
         raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
 
@@ -376,4 +431,5 @@ def simulate(
         sigs.append(sig)
     sig = torch.cat(sigs)  # (n_adc, 2, C)
     assert sig.shape[0] == seq.n_adc and n == mx.shape[0]
-    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1), mb)
+    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1),
+                     mb[0] if gen else mb)

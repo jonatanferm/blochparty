@@ -460,6 +460,8 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
 
     if getattr(phantom, "pools", None):
         raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
+    if phantom.bound is not None and phantom.bound.model == "generalized":
+        raise NotImplementedError("the generalized Bloch bound pool is not in this engine yet; use blochparty.simulate")
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)

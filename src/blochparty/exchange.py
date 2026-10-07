@@ -59,11 +59,16 @@ class BoundPool:
     t2: Tensor  # [s], sets the lineshape width (~10 us in tissue)
     dw: Tensor | float = 0.0  # resonance shift from water [Hz]
     lineshape: str = "superlorentzian"
-    cutoff: float = SL_CUTOFF  # [Hz] the super-Lorentzian is held constant closer to resonance
+    cutoff: float = SL_CUTOFF  # [Hz] the super-Lorentzian is held constant closer to resonance (rate model)
+    # "rate": saturation at W = w1^2 G (Graham); "generalized": the generalized Bloch model, RF
+    # rotates the pool through modes of its lineshape's Green's function (generalized_bloch.modes)
+    model: str = "rate"
 
     def __post_init__(self):
         if self.lineshape not in LINESHAPES:
             raise ValueError(f"lineshape must be one of {LINESHAPES}, got {self.lineshape!r}")
+        if self.model not in ("rate", "generalized"):
+            raise ValueError(f"model must be 'rate' or 'generalized', got {self.model!r}")
 
     def expand(self, n: int, like: Tensor) -> BoundPool:
         conv = lambda v: torch.as_tensor(v, dtype=like.dtype, device=like.device).expand(n)
@@ -282,3 +287,12 @@ def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat):
         A[:, zb, one] += bound.f * spins.pd / bound.t1
     return A
 
+
+
+def pool_modes(pool: BoundPool, like: Tensor) -> tuple[Tensor, Tensor]:
+    """(J,) complex poles [1/T2b] and weights of the bound pool's Green's function modes."""
+    from .generalized_bloch import modes
+
+    p, c = modes(pool.lineshape)
+    cdt = torch.complex128 if like.dtype == torch.float64 else torch.complex64
+    return torch.as_tensor(p, dtype=cdt, device=like.device), torch.as_tensor(c, dtype=cdt, device=like.device)

@@ -159,6 +159,8 @@ def simulate_fused(
     """
     if getattr(phantom, "pools", None):
         raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
+    if phantom.bound is not None and phantom.bound.model == "generalized":
+        raise NotImplementedError("the generalized Bloch bound pool is not in this engine yet; use blochparty.simulate")
     pd = phantom.pd
     dtype = pd.dtype
     if dtype not in (torch.float32, torch.float64):

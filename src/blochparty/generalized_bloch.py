@@ -32,9 +32,19 @@ import numpy as np
 GREENS = ("lorentzian", "gaussian", "superlorentzian")
 
 
-def green(s: np.ndarray, t2: float, shape: str) -> np.ndarray:
-    """G(s) for lags s >= 0 [s]; G(0) = 1."""
+MEMORY = 100.0  # super-Lorentzian memory [T2]: G is tapered by exp(-s / (MEMORY T2))
+
+
+def green(s: np.ndarray, t2: float, shape: str, memory: float | None = None) -> np.ndarray:
+    """G(s) for lags s >= 0 [s]; G(0) = 1. ``memory`` [in units of t2] tapers it by
+    exp(-s / (memory t2)): a homogeneous broadening of 1 / (2 pi memory t2) that makes the
+    super-Lorentzian finite on resonance (its G has a 1/s tail)."""
     x = np.asarray(s, dtype=float) / t2
+    taper = 1.0 if memory is None else np.exp(-x / memory)
+    return taper * _green(x, shape)
+
+
+def _green(x: np.ndarray, shape: str) -> np.ndarray:
     if shape == "lorentzian":
         return np.exp(-x)
     if shape == "gaussian":
@@ -116,3 +126,62 @@ def rectangular(alpha: float, t_rf: float, h: float, delta: float = 0.0) -> np.n
     n = max(1, round(t_rf / h))
     t = (np.arange(n) + 0.5) * h
     return (alpha / (n * h)) * np.exp(1j * delta * t)
+
+
+# ---------------------------------------------------------------- modes for the imaging engines
+
+_MODES: dict = {}
+
+
+def modes(shape: str) -> tuple[np.ndarray, np.ndarray]:
+    """G(s) ~ sum_j c_j exp(-p_j s / T2) with complex poles p_j (in units of 1/T2) and weights
+    c_j in conjugate pairs (so the sum is real) and sum_j c_j = G(0) = 1.
+
+    The Lorentzian is one exact mode. Others: least squares with poles lambda e^{+-i theta},
+    theta in {0, 0.6, 1.2}. Super-Lorentzian: the tapered G (``MEMORY``), six lambda
+    log-spaced over [1/100, 3], fitted over its whole support (to 800 T2), 30 modes, error
+    2.4e-5, weights < 1, lineshape within 0.5 % from 0 to 30 kHz. Fitting the untapered G over
+    a finite range instead needed weights of ~5000 that cancel and diverge beyond the range;
+    regularising them destroys the cancellations the steep wings need. Gaussian: five lambda
+    over [0.3, 6] on [0, 40 T2], 25 modes, error 2e-3. A flat-topped G needs the complex
+    poles: positive real exponentials alone leave Lorentzian wings (12-18x the
+    super-Lorentzian at 30 kHz)."""
+    if shape in _MODES:
+        return _MODES[shape]
+    if shape == "lorentzian":
+        out = (np.array([1.0 + 0j]), np.array([1.0 + 0j]))
+    else:
+        if shape == "superlorentzian":  # tapered at MEMORY T2; fit its whole support
+            x = np.concatenate([np.linspace(0, 4, 400), np.logspace(math.log10(4), math.log10(8 * MEMORY), 600)])
+            lams = np.logspace(-2, math.log10(3.0), 6)
+            g = green(x, 1.0, shape, MEMORY)
+        else:  # Gaussian: gone within ~8 T2; fit to 40 T2 so the tail stays zero
+            x = np.concatenate([np.linspace(0, 10, 800), np.linspace(10, 40, 300)[1:]])
+            lams = np.logspace(math.log10(0.3), math.log10(6.0), 5)
+            g = green(x, 1.0, shape)
+        poles = [lam * complex(math.cos(t), math.sin(t)) for lam in lams for t in (0.0, 0.6, 1.2)]
+        cols = []
+        for p in poles:
+            e = np.exp(-p * x)
+            cols.append(e.real)
+            if p.imag:
+                cols.append(e.imag)
+        a = np.array(cols).T
+        w = 1 / np.maximum(np.abs(g), 1e-4 if shape == "superlorentzian" else 2e-3)
+        w[0] = 1e4  # G(0) = 1: the hard-pulse rotation
+        coef = np.linalg.lstsq(a * w[:, None], g * w, rcond=None)[0]
+        ps, cs, i = [], [], 0
+        for p in poles:  # alpha Re(e^{-px}) + beta Im(e^{-px}) = Re((alpha - i beta) e^{-px})
+            if p.imag:
+                c = 0.5 * (coef[i] - 1j * coef[i + 1])
+                ps += [p, p.conjugate()]
+                cs += [c, c.conjugate()]
+                i += 2
+            else:
+                ps.append(p)
+                cs.append(complex(coef[i]))
+                i += 1
+        cs = np.array(cs)
+        out = (np.array(ps), cs / cs.sum().real)
+    _MODES[shape] = out
+    return out

@@ -72,3 +72,71 @@ def test_free_pool_coupling_matches_two_pool_ode():
                     max_step=trf / 4000).y[:, -1]
     assert np.abs(out["free"][-1] - ref[:3]).max() < 1e-6
     assert abs(out["zs"][-1] - ref[5]) < 1e-6
+
+
+# ---------------------------------------------------------------- the engine (modes of G)
+
+import blochparty as bp
+
+
+def single_pool(shape, **kw):
+    one = lambda v: torch.full((1,), v, dtype=torch.float64)
+    pool = dict(f=1.0, k=0.0, t1=1.0, t2=12e-6, lineshape=shape, model="generalized") | kw
+    return bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=one(1.0), t1=one(1.0), t2=one(0.05),
+                      db0=one(0.0), bound=bp.BoundPool(**pool))
+
+
+@pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
+@pytest.mark.parametrize("alpha, t_rf", [(math.pi, 10e-6), (math.pi, 100e-6), (math.pi / 2, 300e-6)])
+def test_engine_matches_reference_solver(shape, alpha, t_rf, monkeypatch):
+    # the engine's Green's function is the tapered fit (generalized_bloch.MEMORY); give the
+    # reference the same taper
+    mem = gb.MEMORY if shape == "superlorentzian" else None
+    orig = gb.green
+    seq = bp.SequenceBuilder().rf(t_rf, flip_deg=math.degrees(alpha), n_steps=400).build()
+    zb = float(bp.simulate(single_pool(shape), seq).m_bound[0])
+    monkeypatch.setattr(gb, "green", lambda s, t2, sh, memory=mem: orig(s, t2, sh, memory))
+    h = t_rf / 1600
+    ref = gb.simulate_pulse(gb.rectangular(alpha, t_rf, h), h, t2s=12e-6, shape=shape, r1s=1.0)["zs"][-1]
+    assert zb == pytest.approx(ref, abs=5e-5)
+
+
+def test_engine_converges_second_order():
+    ph = single_pool("superlorentzian", f=0.15, k=30.0)
+    ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, torch.full((1,), 120.0, dtype=torch.float64), bound=ph.bound)
+    seq = bp.SequenceBuilder().rf(200e-6, flip_deg=150.0, n_steps=10).delay(1e-3).rf(50e-6, flip_deg=90.0, n_steps=5).build()
+    run = lambda k: bp.simulate(ph, seq.subdivide_rf(k))
+    ref = run(256)
+    err = [float(torch.cat([run(k).m.flatten(), run(k).m_bound]).sub(torch.cat([ref.m.flatten(), ref.m_bound])).abs().max())
+           for k in (4, 8, 16)]
+    assert 3.5 < err[0] / err[1] < 5 and 3.5 < err[1] / err[2] < 5, err
+
+
+@pytest.mark.parametrize("offset", [2e3, 5e3, 1e4])
+def test_off_resonant_saturation_agrees_with_rate_model(offset):
+    # long off-resonant saturation is the rate model's regime: both give the same Z (the tapered
+    # lineshape differs from the cut one by < 1 % there)
+    def z(model):
+        one = lambda v: torch.full((1,), v, dtype=torch.float64)
+        ph = bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=one(1.0), t1=one(1.0), t2=one(0.05),
+                        db0=one(-offset), bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model))
+        seq = bp.SequenceBuilder().rf(0.5, amplitude=64.0, n_steps=5000).build()  # 100 us: sub-stepped
+        return float(bp.simulate(ph, seq).m[0, 2])
+
+    assert z("generalized") == pytest.approx(z("rate"), abs=2e-3)
+
+
+def test_engine_gradients():
+    ph = single_pool("superlorentzian", f=0.15, k=30.0)
+    seq = bp.SequenceBuilder().rf(100e-6, flip_deg=120.0, n_steps=8).delay(2e-3).rf(60e-6, flip_deg=70.0, n_steps=4).build()
+
+    def fn(f, k, t2b_us, rf):
+        from dataclasses import replace
+
+        p = replace(ph, bound=replace(ph.bound, f=f, k=k, t2=t2b_us * 1e-6))
+        r = bp.simulate(p, replace(seq, rf=rf))
+        return r.m, r.m_bound
+
+    args = [torch.tensor([0.15], dtype=torch.float64, requires_grad=True), torch.tensor([30.0], dtype=torch.float64, requires_grad=True),
+            torch.tensor([12.0], dtype=torch.float64, requires_grad=True), seq.rf.clone().requires_grad_()]
+    assert torch.autograd.gradcheck(fn, args, eps=1e-6, atol=1e-7, rtol=1e-4)
