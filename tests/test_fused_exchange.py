@@ -109,3 +109,16 @@ def test_generalized_forward_matches_core(shape, dtype, tol):
     out = fused.simulate_fused(ph.to(dtype=dtype), seq.to(dtype=dtype), coils)
     assert rel(out.signal, ref.signal) < tol and rel(out.m, ref.m) < tol
     assert float((out.m_bound.double() - ref.m_bound).abs().max() / ref.m.abs().max()) < tol
+
+
+@pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
+def test_generalized_adjoint_matches_autograd(shape):
+    ph, seq = case(1, shape)
+    ph = replace(ph, bound=replace(ph.bound, model="generalized"))
+    coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
+    m0 = torch.randn(len(ph), 4, dtype=torch.float64, generator=torch.Generator().manual_seed(1))
+    ref = gradients(simulate, ph, seq, coils, m0)
+    for every in (None, 7):
+        out = gradients(fused.simulate_fused, ph, seq, coils, m0, checkpoint_every=every)
+        errs = {k: rel(out[k], ref[k]) for k in ref}
+        assert max(errs.values()) < 1e-10, errs

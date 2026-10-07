@@ -103,15 +103,15 @@ class _FusedSimulate(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc,
-                bound, rf_freq, flags, log_f):
+                bound, rf_freq, flags, log_f, modes):
         ctx.set_materialize_grads(False)
         ctx.opts = opts
         m = m0.detach().clone()
         sig, ckpt = _ext().simulate(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, m,
                                     opts.n_threads, opts.block, opts.every, b1, b0_offset, conc, opts.conc_mode,
-                                    bound, log_f, rf_freq, *opts.line, None, 0.0)
+                                    bound, log_f, rf_freq, *opts.line, modes, opts.t2b_min)
         ctx.save_for_backward(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1, b0_offset,
-                              conc, bound, rf_freq, log_f)
+                              conc, bound, rf_freq, log_f, modes)
         return sig, m
 
     @staticmethod
@@ -119,22 +119,22 @@ class _FusedSimulate(torch.autograd.Function):
     def backward(ctx, g_sig, g_m):
         opts = ctx.opts
         (pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, sig, b1, b0_offset, conc, bound, rf_freq,
-         log_f) = ctx.saved_tensors
+         log_f, modes) = ctx.saved_tensors
         # pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq
         need = list(ctx.needs_input_grad[1:17])
         if g_sig is None:  # sensitivities and receiver phase only reach the signal
             need[5] = need[9] = False
         if (g_sig is None and g_m is None) or not any(need):
-            return (None,) * 19
+            return (None,) * 20
         prep = lambda g: None if g is None else g.to(pd.dtype).contiguous()
         # kernel order: dt, rf, grad, adc_phase, pos, pd, t1, t2, db0, sens, m, b1, b0_offset, conc, bound, rf_freq
         needs = [*need[6:10], *need[:6], *need[10:]]
         out = _ext().adjoint(pos, pd, t1, t2, db0, sens, dt, rf, grad, adc_phase, flags, ckpt, opts.every, sig,
                              prep(g_sig), prep(g_m), needs, opts.n_threads, opts.block, b1, b0_offset, conc,
-                             opts.conc_mode, bound, log_f, rf_freq, *opts.line, None, 0.0)
+                             opts.conc_mode, bound, log_f, rf_freq, *opts.line, modes, opts.t2b_min)
         g_dt, g_rf, g_grad, g_psi, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_m0, g_b1, g_off, g_conc, g_bd, g_frf = out
         return (None, g_pos, g_pd, g_t1, g_t2, g_db0, g_sens, g_dt, g_rf, g_grad, g_psi, g_m0, g_b1, g_off, g_conc,
-                g_bd, g_frf, None, None)
+                g_bd, g_frf, None, None, None)
 
 
 def simulate_fused(
@@ -202,17 +202,10 @@ def simulate_fused(
               None if seq.b0_offset is None else real(seq.b0_offset),
               None if fields.conc is None else real(fields.conc))
     line, log_f, bound_in = (0, 0.0, 0.0, 1.0, 0.0), None, (None, None)
-    if gen:
-        if torch.is_grad_enabled() and any(t is not None and t.requires_grad for t in inputs):
-            raise NotImplementedError("gradients of the generalized Bloch bound pool are not in the fused kernel yet")
-        m = m0.detach().clone()
-        bound = torch.stack([real(pool.f), real(pool.k), real(pool.t1), real(pool.t2), real(pool.dw)], -1)
-        *spin_seq, _, b1, b0_offset, conc = (None if t is None else t.detach() for t in inputs)
-        sig, _ = _ext().simulate(*spin_seq, flags, m, n_threads, block or default_block(n, n_threads, dtype), 0, b1,
-                                 b0_offset, conc, fields.mode, bound.detach(), None, None, 0, 0.0, 0.0, 1.0, 0.0,
-                                 modes, float(pool.t2.detach().min()))
-        return SimResult(torch.view_as_complex(sig).T, m[:, :3], m[:, 3])
-    if pool is not None:
+    t2b_min = float(pool.t2.detach().min()) if gen else 0.0
+    if gen:  # no saturation lineshape or RF frequency: the modes carry the pool's response
+        bound_in = (torch.stack([real(pool.f), real(pool.k), real(pool.t1), real(pool.t2), real(pool.dw)], -1), None)
+    elif pool is not None:
         kind = 1 if pool.lineshape == "lorentzian" else 2
         lx, log_f = exchange._sl_table(dtype, torch.device("cpu"))
         line = (kind, float(pool.cutoff), float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN)
@@ -222,14 +215,14 @@ def simulate_fused(
     block = block or default_block(n, n_threads, dtype)
     if torch.is_grad_enabled() and any(t is not None and t.requires_grad for t in (*inputs, *bound_in)):
         every = checkpoint_every or default_checkpoint_every(len(seq))
-        sig, m = _FusedSimulate.apply(_Opts(n_threads, block, every, fields.mode, line), *inputs, *bound_in, flags,
-                                      log_f)
+        sig, m = _FusedSimulate.apply(_Opts(n_threads, block, every, fields.mode, line, t2b_min), *inputs, *bound_in,
+                                      flags, log_f, modes)
     else:
         *spin_seq, m, b1, b0_offset, conc = (None if t is None else t.detach() for t in inputs)
         bound, rf_freq = (None if t is None else t.detach() for t in bound_in)
         m = m.clone()
         sig, _ = _ext().simulate(*spin_seq, flags, m, n_threads, block, 0, b1, b0_offset, conc, fields.mode,
-                                 bound, log_f, rf_freq, *line, None, 0.0)
+                                 bound, log_f, rf_freq, *line, modes, t2b_min)
     assert sig.shape[0] == seq.n_adc
     if pool is not None:
         return SimResult(torch.view_as_complex(sig).T, m[:, :3], m[:, 3])

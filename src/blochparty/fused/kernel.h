@@ -838,10 +838,37 @@ inline void rotation_derivatives(T phi, T c, T s1, T s2, T& f1, T& f2) {
     }
 }
 
+// Reverse of the Rodrigues rotation n = R(w) m: given a = dL/dn, returns b = R^T a = dL/dm and
+// g = dL/dw (c, s1, s2 and f1, f2 as rotation_derivatives).
+template <typename T>
+inline void rodrigues_reverse(T c, T s1, T s2, T f1, T f2, T wx, T wy, T wz, T mx, T my, T mz, T ax, T ay, T az,
+                              T& bx, T& by, T& bz, T& gwx, T& gwy, T& gwz) {
+    const T wa = wx * ax + wy * ay + wz * az, dot = wx * mx + wy * my + wz * mz;
+    bx = c * ax - s1 * (wy * az - wz * ay) + s2 * wx * wa;
+    by = c * ay - s1 * (wz * ax - wx * az) + s2 * wy * wa;
+    bz = c * az - s1 * (wx * ay - wy * ax) + s2 * wz * wa;
+    const T am = ax * mx + ay * my + az * mz;
+    const T awm = ax * (wy * mz - wz * my) + ay * (wz * mx - wx * mz) + az * (wx * my - wy * mx);
+    const T k = -s1 * am + f1 * awm + f2 * wa * dot;
+    gwx = k * wx + s1 * (my * az - mz * ay) + s2 * (wa * mx + dot * ax);
+    gwy = k * wy + s1 * (mz * ax - mx * az) + s2 * (wa * my + dot * ay);
+    gwz = k * wz + s1 * (mx * ay - my * ax) + s2 * (wa * mz + dot * az);
+}
+
+// Rotation factors c, s1, s2, f1, f2 of the rotation vector w.
+template <typename T>
+inline void rodrigues_factors(T wx, T wy, T wz, T& c, T& s1, T& s2, T& f1, T& f2) {
+    const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
+    const T hp = T(0.5) * phi, sh = std::sin(hp) / hp;
+    c = std::cos(phi), s1 = std::sin(phi) / phi, s2 = T(0.5) * sh * sh;
+    rotation_derivatives(phi, c, s1, s2, f1, f2);
+}
+
 template <typename T, int B>
 struct Adjoint {
     Block<T, B> fw;  // spins, magnetization and forward factor caches, for the replay
     alignas(64) T lx[B], ly[B], lz[B], lb[B];  // lambda (lb: the bound pool's Mzb)
+    std::vector<T> lur, lui;                  // lambda of the generalized pool's modes, (J, B)
     // Per-spin gradients, summed in T over at most kFlush segments and then into `total`.
     alignas(64) T gpx[B], gpy[B], gpz[B], gdb0[B], gpd[B], gr1[B], gr2[B], gb1[B];
     alignas(64) T gcf[kConcMax][B];  // concomitant-field coefficients
@@ -856,19 +883,28 @@ struct Adjoint {
     // RF rotation: c, s1, s2, wz (as Block::rot) plus f1, f2. Key: dt, rf, grad, b0_offset.
     Cache<T, B, 7, 6, 4> rot;
 
+    int64_t every_;
+
     Adjoint(int64_t n_coils, int64_t every)
-        : fw(n_coils), total((kNSpin + 2 * n_coils) * B), buf(4 * B * every), obuf(2 * B * kFlush), hbuf(kFlush) {}
+        : fw(n_coils), total((kNSpin + 2 * n_coils) * B), buf(4 * B * every), obuf(2 * B * kFlush), hbuf(kFlush),
+          every_(every) {}
 
     void load(const Spins<T>& sp, const T* g_m, int64_t start) {
         rot.clear();
-        const int nm = sp.n_m();
+        const int nm = sp.n_m(), nj = sp.modes ? sp.n_modes : 0;
+        if (buf.size() < static_cast<size_t>(nm * B * every_)) buf.resize(nm * B * every_);
+        lur.assign(nj * B, T(0)), lui.assign(nj * B, T(0));
         for (int l = 0; l < B; ++l) {
             const int64_t i = start + l;
             const bool in = g_m && i < sp.n;
             lx[l] = in ? g_m[nm * i] : T(0);
             ly[l] = in ? g_m[nm * i + 1] : T(0);
             lz[l] = in ? g_m[nm * i + 2] : T(0);
-            lb[l] = in && nm == 4 ? g_m[nm * i + 3] : T(0);
+            lb[l] = in && nm >= 4 ? g_m[nm * i + 3] : T(0);
+            for (int j = 0; j < nj; ++j) {
+                lur[j * B + l] = in ? g_m[nm * i + 4 + 2 * j] : T(0);
+                lui[j * B + l] = in ? g_m[nm * i + 5 + 2 * j] : T(0);
+            }
             gpx[l] = gpy[l] = gpz[l] = gdb0[l] = gpd[l] = gr1[l] = gr2[l] = gb1[l] = T(0);
             gbf[l] = gbk[l] = gbr1[l] = gbt2[l] = gbdw[l] = T(0);
             for (int q = 0; q < kConcMax; ++q) gcf[q][l] = T(0);
@@ -949,7 +985,8 @@ struct Adjoint {
             }
             const int nm = fw.nm;
             if (g.m) g.m[nm * i] = lx[l], g.m[nm * i + 1] = ly[l], g.m[nm * i + 2] = lz[l];
-            if (g.m && nm == 4) g.m[nm * i + 3] = lb[l];
+            if (g.m && nm >= 4) g.m[nm * i + 3] = lb[l];
+            for (int j = 0; g.m && j < fw.nj; ++j) g.m[nm * i + 4 + 2 * j] = lur[j * B + l], g.m[nm * i + 5 + 2 * j] = lui[j * B + l];
         }
     }
 
@@ -960,7 +997,14 @@ struct Adjoint {
             std::copy(fw.mx, fw.mx + B, b);
             std::copy(fw.my, fw.my + B, b + B);
             std::copy(fw.mz, fw.mz + B, b + 2 * B);
-            if (fw.bound) {
+            if (fw.nj) {
+                std::copy(fw.mb, fw.mb + B, b + 3 * B);
+                for (int j = 0; j < fw.nj; ++j) {
+                    std::copy(&fw.ur[j * B], &fw.ur[j * B] + B, b + (4 + 2 * j) * B);
+                    std::copy(&fw.ui[j * B], &fw.ui[j * B] + B, b + (5 + 2 * j) * B);
+                }
+                fw.advance_gen(seq, s);
+            } else if (fw.bound) {
                 std::copy(fw.mb, fw.mb + B, b + 3 * B);
                 fw.advance_bound(seq, s);
             } else {
@@ -1083,6 +1127,13 @@ struct Adjoint {
     // h: dL/d(raw coil sums) of this segment's ADC sample, or null.
     void reverse(const Segments<T>& seq, int64_t s, int64_t j, const T* h, int64_t n_coils, bool sens,
                  double* gseg) {
+        if (fw.nj) {
+            switch (fw.mode) {
+                case kConcLeading: return reverse_gen<kConcLeading>(seq, s, j, h, n_coils, sens, gseg);
+                case kConcExact: return reverse_gen<kConcExact>(seq, s, j, h, n_coils, sens, gseg);
+                default: return reverse_gen<kConcNone>(seq, s, j, h, n_coils, sens, gseg);
+            }
+        }
         if (fw.bound) {
             switch (fw.mode) {
                 case kConcLeading: return reverse_bound<kConcLeading>(seq, s, j, h, n_coils, sens, gseg);
@@ -1410,6 +1461,260 @@ struct Adjoint {
         if (gseg) {
             gseg[kGgx] += double(sgx), gseg[kGgy] += double(sgy), gseg[kGgz] += double(sgz);
             gseg[kGoff] += double(soff);
+        }
+    }
+
+    // ---- generalized Bloch bound pool (Block::advance_gen) ------------------------------------
+    // State per lane: (x, y, z) water, b = Mzb, modes u_j = (ur, ui). One "half" step over t:
+    // water transverse relaxation, the unsaturated exchange step on (z, b), mode factors F_j.
+    struct GenState {
+        std::vector<T> v;  // (4 + 2J, B)
+    };
+
+    void gen_copy_in(T* dst, int nj) const {  // fw state -> (4 + 2J, B)
+        std::copy(fw.mx, fw.mx + B, dst), std::copy(fw.my, fw.my + B, dst + B), std::copy(fw.mz, fw.mz + B, dst + 2 * B);
+        std::copy(fw.mb, fw.mb + B, dst + 3 * B);
+        for (int j = 0; j < nj; ++j) {
+            std::copy(&fw.ur[j * B], &fw.ur[j * B] + B, dst + (4 + 2 * j) * B);
+            std::copy(&fw.ui[j * B], &fw.ui[j * B] + B, dst + (5 + 2 * j) * B);
+        }
+    }
+
+    void gen_copy_out(const T* src, int nj) {  // (4 + 2J, B) -> fw state
+        std::copy(src, src + B, fw.mx), std::copy(src + B, src + 2 * B, fw.my), std::copy(src + 2 * B, src + 3 * B, fw.mz);
+        std::copy(src + 3 * B, src + 4 * B, fw.mb);
+        for (int j = 0; j < nj; ++j) {
+            std::copy(src + (4 + 2 * j) * B, src + (5 + 2 * j) * B, &fw.ur[j * B]);
+            std::copy(src + (5 + 2 * j) * B, src + (6 + 2 * j) * B, &fw.ui[j * B]);
+        }
+    }
+
+    // Reverse of one relaxation step over t from the state `in`: water transverse relaxation
+    // (d2 = expm1(-t r2)), the unsaturated exchange step on (z, b), the mode factors (fr, fi) of
+    // (t, grad, offset); db[i] = lane i's pool offset (offset + dw) [Hz]. Accumulates the per-spin
+    // gradients; adds lane i's dL/dt to yt[i] and dL/d(pool offset) to ydb[i].
+    void gen_relax_reverse(const T* in, T t, const T* d2, const std::vector<T>& fr, const std::vector<T>& fi,
+                           const T* db, T* yt, T* ydb) {
+        const int nj = fw.nj;
+        const T two_pi = T(2.0 * kPi);
+        for (int i = 0; i < B; ++i) {
+            const T x = in[i], y = in[B + i], z = in[2 * B + i], b = in[3 * B + i];
+            const T e2 = T(1) + d2[i];
+            const T gd2 = lx[i] * x + ly[i] * y;
+            lx[i] = lx[i] + lx[i] * d2[i], ly[i] = ly[i] + ly[i] * d2[i];
+            gr2[i] -= gd2 * t * e2;
+            T yti = -gd2 * fw.r2[i] * e2;
+            T zt, y11, y12, y21, y22, yc1, yc2;
+            fw.zstep(i, t, T(0)).reverse(t, z, b, lz[i], lb[i], zt, y11, y12, y21, y22, yc1, yc2);
+            exchange_grads(i, y11, y12, y21, y22, yc1, yc2);
+            yti += zt;
+            T gt2 = 0, gdb = 0;
+            const T t2 = fw.bt2[i];
+            for (int j = 0; j < nj; ++j) {
+                const T ar = fr[j * B + i], ai = fi[j * B + i];
+                const T ur = in[(4 + 2 * j) * B + i], ui = in[(5 + 2 * j) * B + i];
+                const T orr = ar * ur - ai * ui, oi = ar * ui + ai * ur;
+                const T lr = lur[j * B + i], li = lui[j * B + i];
+                const T qr = lr * orr + li * oi, qi = lr * oi - li * orr;  // conj(lambda) out
+                const T pr = T(fw.mp[4 * j]), pim = T(fw.mp[4 * j + 1]);
+                gt2 += (pr * qr - pim * qi) * t / (t2 * t2);
+                gdb += two_pi * t * qi;
+                yti += -(pr / t2) * qr + (pim / t2 + two_pi * db[i]) * qi;
+                lur[j * B + i] = ar * lr + ai * li, lui[j * B + i] = ar * li - ai * lr;  // conj(F) lambda
+            }
+            gbt2[i] += gt2;
+            gbdw[i] += gdb;
+            yt[i] += yti;
+            ydb[i] += gdb;
+        }
+    }
+
+    // reverse_bound() for the generalized Bloch bound pool (Block::advance_gen).
+    template <int M>
+    void reverse_gen(const Segments<T>& seq, int64_t s, int64_t jslot, const T* h, int64_t n_coils, bool sens,
+                     double* gseg) {
+        const int nj = fw.nj, nm = fw.nm;
+        const T w_per_s = T(-2.0 * kPi);
+        const T* in0 = &buf[nm * B * jslot];
+        const T dt = seq.dt[s];
+        const T gx = seq.grad[3 * s], gy = seq.grad[3 * s + 1], gz = seq.grad[3 * s + 2];
+        const T f = seq.offset(s);
+        const T q6[6] = {gx * gx, gy * gy, gz * gz, gx * gy, gx * gz, gy * gz};
+        const uint8_t fl = seq.flags[s];
+        if (fl & kSpoil) {
+            for (int i = 0; i < B; ++i) lx[i] = T(0), ly[i] = T(0);
+            std::fill(lur.begin(), lur.end(), T(0)), std::fill(lui.begin(), lui.end(), T(0));
+        }
+        alignas(64) T db[B], ydb[B], yt[B];
+        for (int i = 0; i < B; ++i) db[i] = fw.offset(i, gx, gy, gz, f) + fw.bdw[i], ydb[i] = T(0), yt[i] = T(0);
+        T sgx = 0, sgy = 0, sgz = 0, soff = 0;
+        double sdt = 0, swx = 0, swy = 0;
+        if (fl & kRF) {
+            const int ns = std::max(1, static_cast<int>(std::ceil(double(dt) / (0.5 * fw.t2b_min))));
+            const T hstep = dt / T(ns), half = T(0.5) * hstep, w = w_per_s * hstep;
+            const T rx = seq.rf[2 * s], ry = seq.rf[2 * s + 1], wx0 = w * rx, wy0 = w * ry;
+            const T (*d)[B] = fw.relaxation(half);
+            alignas(64) T d2[B];
+            std::copy(d[1], d[1] + B, d2);
+            bool fill;
+            T (*r)[B] = rot.find({hstep, rx, ry, gx, gy, gz, f}, fill);
+            if (fill)
+                for (int i = 0; i < B; ++i) {
+                    const T wx = wx0 * b1(i), wy = wy0 * b1(i);
+                    fw.rotation(r, i, w, wx, wy, gx, gy, gz, f);
+                    const T wz = r[3][i];
+                    const T phi = std::sqrt(wx * wx + wy * wy + wz * wz + T(1e-30));
+                    rotation_derivatives(phi, r[0][i], r[1][i], r[2][i], r[4][i], r[5][i]);
+                }
+            fw.mode_factors(half, gx, gy, gz, f, fw.key_rf, fw.fr_rf, fw.fi_rf);
+            // forward through the sub-steps: states before each half A, rotation, half B
+            const int nv = (4 + 2 * nj) * B;
+            std::vector<T> st(static_cast<size_t>(3 * ns + 1) * nv);
+            std::copy(in0, in0 + nv, st.begin());
+            gen_copy_out(in0, nj);
+            for (int k = 0; k < ns; ++k) {
+                for (int part = 0; part < 3; ++part) {
+                    if (part == 1) {
+                        gen_rotate(wx0, wy0, r);
+                    } else {
+                        for (int i = 0; i < B; ++i) fw.mx[i] += fw.mx[i] * d2[i], fw.my[i] += fw.my[i] * d2[i];
+                        fw.zfree_apply(half);
+                        fw.modes_apply(fw.fr_rf, fw.fi_rf);
+                    }
+                    gen_copy_in(&st[static_cast<size_t>(3 * k + part + 1) * nv], nj);
+                }
+            }
+            const T* fin = &st[static_cast<size_t>(3 * ns) * nv];
+            if (h) {
+                if (sens) {
+                    T* o = collect(h);
+                    for (int i = 0; i < B; ++i) o[i] = fin[i], o[B + i] = fin[B + i];
+                }
+                sample(h, n_coils);
+            }
+            for (int k = ns - 1; k >= 0; --k) {
+                const T* s_a = &st[static_cast<size_t>(3 * k) * nv];  // before half A
+                const T* s_r = s_a + nv;                               // before the rotation
+                const T* s_b = s_r + nv;                               // before half B
+                gen_relax_reverse(s_b, half, d2, fw.fr_rf, fw.fi_rf, db, yt, ydb);
+                for (int i = 0; i < B; ++i) {
+                    const T wx = wx0 * b1(i), wy = wy0 * b1(i);
+                    // the pool: S' = R_xy (S, b), u_j' = u_j + c_j (S' - S)
+                    T lsr = 0, lsi = 0;  // Lambda = sum_j conj(c_j) lambda_j
+                    for (int j = 0; j < nj; ++j) {
+                        const T cr = T(fw.mp[4 * j + 2]), ci = T(fw.mp[4 * j + 3]);
+                        const T lr = lur[j * B + i], li = lui[j * B + i];
+                        lsr += cr * lr + ci * li, lsi += cr * li - ci * lr;
+                    }
+                    T sx = 0, sy = 0;
+                    for (int j = 0; j < nj; ++j) sx += s_r[(4 + 2 * j) * B + i], sy += s_r[(5 + 2 * j) * B + i];
+                    T c, s1, s2, f1, f2;
+                    rodrigues_factors(wx, wy, T(0), c, s1, s2, f1, f2);
+                    T bsx, bsy, bb, pgx, pgy, pgz;
+                    rodrigues_reverse(c, s1, s2, f1, f2, wx, wy, T(0), sx, sy, s_r[3 * B + i], lsr, lsi, lb[i], bsx, bsy, bb,
+                                      pgx, pgy, pgz);
+                    lb[i] = bb;
+                    const T dsr = bsx - lsr, dsi = bsy - lsi;  // lambda_S total: through the rotation, minus -c_j S
+                    for (int j = 0; j < nj; ++j) lur[j * B + i] += dsr, lui[j * B + i] += dsi;
+                    // the water: n = R(w) m
+                    T bx, by, bz, gwx, gwy, gwz;
+                    rodrigues_reverse(r[0][i], r[1][i], r[2][i], r[4][i], r[5][i], wx, wy, r[3][i], s_r[i], s_r[B + i],
+                                      s_r[2 * B + i], lx[i], ly[i], lz[i], bx, by, bz, gwx, gwy, gwz);
+                    lx[i] = bx, ly[i] = by, lz[i] = bz;
+                    gwx += pgx, gwy += pgy;
+                    // wz = w * offset: into the offset gradient; w = w_per_s * dt / ns
+                    ydb[i] += T(0);
+                    yt[i] += T(0);
+                    const T goff = gwz * w;
+                    T tgx, tgy, tgz, toff;
+                    const T bz0 = offset_grads<M>(i, goff, gx, gy, gz, f, q6, tgx, tgy, tgz, toff);
+                    sgx += tgx, sgy += tgy, sgz += tgz, soff += toff;
+                    sdt += double(w_per_s) / ns * double(gwz) * double(bz0);
+                    swx += double(gwx) * double(b1(i)), swy += double(gwy) * double(b1(i));
+                    gb1[i] += gwx * wx0 + gwy * wy0;
+                }
+                gen_relax_reverse(s_a, half, d2, fw.fr_rf, fw.fi_rf, db, yt, ydb);
+            }
+            for (int i = 0; i < B; ++i) sdt += double(yt[i]) * 0.5 / ns;  // half = dt / (2 ns)
+            if (gseg) {
+                gseg[kGdt] += sdt + double(w_per_s) / ns * (double(rx) * swx + double(ry) * swy);
+                gseg[kGrx] += double(w) * swx;
+                gseg[kGry] += double(w) * swy;
+            }
+        } else {
+            const T w = w_per_s * dt;
+            const T (*d)[B] = fw.relaxation(dt);
+            alignas(64) T d2[B];
+            std::copy(d[1], d[1] + B, d2);
+            T (*pr)[B] = fw.precession(dt, w, gx, gy, gz, f);
+            alignas(64) T pc[B], ps[B];
+            std::copy(pr[0], pr[0] + B, pc), std::copy(pr[1], pr[1] + B, ps);
+            fw.mode_factors(dt, gx, gy, gz, f, fw.key_free, fw.fr_free, fw.fi_free);
+            if (h) {
+                if (sens) {
+                    T* o = collect(h);
+                    for (int i = 0; i < B; ++i) {
+                        const T ux = pc[i] * in0[i] - ps[i] * in0[B + i], uy = ps[i] * in0[i] + pc[i] * in0[B + i];
+                        o[i] = ux + ux * d2[i], o[B + i] = uy + uy * d2[i];
+                    }
+                }
+                sample(h, n_coils);
+            }
+            // relaxation part from the precessed water (the modes and z are not precessed by Rz)
+            const int nv = (4 + 2 * nj) * B;
+            std::vector<T> mid(in0, in0 + nv);
+            for (int i = 0; i < B; ++i) {
+                mid[i] = pc[i] * in0[i] - ps[i] * in0[B + i];
+                mid[B + i] = ps[i] * in0[i] + pc[i] * in0[B + i];
+            }
+            gen_relax_reverse(mid.data(), dt, d2, fw.fr_free, fw.fi_free, db, yt, ydb);
+            for (int i = 0; i < B; ++i) {
+                // water precession: (ux, uy) = Rz(phi) (x0, y0), phi = w * offset
+                const T ux = mid[i], uy = mid[B + i];
+                const T gphi = ly[i] * ux - lx[i] * uy;
+                const T ax = pc[i] * lx[i] + ps[i] * ly[i], ay = pc[i] * ly[i] - ps[i] * lx[i];
+                lx[i] = ax, ly[i] = ay;
+                T tgx, tgy, tgz, toff;
+                const T bz0 = offset_grads<M>(i, gphi * w, gx, gy, gz, f, q6, tgx, tgy, tgz, toff);
+                sgx += tgx, sgy += tgy, sgz += tgz, soff += toff;
+                sdt += double(w_per_s) * double(gphi) * double(bz0) + double(yt[i]);
+            }
+            if (gseg) gseg[kGdt] += sdt;
+        }
+        // the pool offset (offset + dw) of the modes: into the offset chain (dw already in gbdw)
+        for (int i = 0; i < B; ++i) {
+            T tgx, tgy, tgz, toff;
+            offset_grads<M>(i, ydb[i], gx, gy, gz, f, q6, tgx, tgy, tgz, toff);
+            sgx += tgx, sgy += tgy, sgz += tgz, soff += toff;
+        }
+        if (gseg) {
+            gseg[kGgx] += double(sgx), gseg[kGgy] += double(sgy), gseg[kGgz] += double(sgz);
+            gseg[kGoff] += double(soff);
+        }
+    }
+
+    T b1(int i) const { return fw.b1[i]; }
+
+    // Block::advance_gen's RF between the halves, on the fw state.
+    void gen_rotate(T wx0, T wy0, const T (*r)[B]) {
+        const int nj = fw.nj;
+        for (int i = 0; i < B; ++i) {
+            const T wx = wx0 * fw.b1[i], wy = wy0 * fw.b1[i];
+            const T x = fw.mx[i], y = fw.my[i], z = fw.mz[i];
+            const T c = r[0][i], s1 = r[1][i], s2 = r[2][i], wz = r[3][i];
+            const T dot = wx * x + wy * y + wz * z;
+            fw.mx[i] = c * x + s1 * (wy * z - wz * y) + s2 * wx * dot;
+            fw.my[i] = c * y + s1 * (wz * x - wx * z) + s2 * wy * dot;
+            fw.mz[i] = c * z + s1 * (wx * y - wy * x) + s2 * wz * dot;
+            T sx = 0, sy = 0;
+            for (int j = 0; j < nj; ++j) sx += fw.ur[j * B + i], sy += fw.ui[j * B + i];
+            T nx = sx, ny = sy;
+            Block<T, B>::rotate_xy(wx, wy, nx, ny, fw.mb[i]);
+            const T dx = nx - sx, dy = ny - sy;
+            for (int j = 0; j < nj; ++j) {
+                const T cr = T(fw.mp[4 * j + 2]), ci = T(fw.mp[4 * j + 3]);
+                fw.ur[j * B + i] += cr * dx - ci * dy, fw.ui[j * B + i] += cr * dy + ci * dx;
+            }
         }
     }
 #if defined(__clang__)
