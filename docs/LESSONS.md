@@ -284,3 +284,16 @@ says where it came from so it can be re-checked.
   `<text>`. Wait on a PID (`while kill -0 <pid>`) instead.
 - **`cmd | grep` buffers background output** until the command ends; use `python -u` without a
   filter, or filter afterwards.
+
+- **Dataset “raw” does not necessarily mean scanner k-space** (validation-source search,
+  2026-10-07). Pulseq-CEST's MAGMA release supplies reconstructed DICOMs; CEST–MRF also
+  calls image/signal inputs raw. Verify arrays or archive entries before promising a complete
+  acquisition benchmark. PulseqDiffusion's phantom MATLAB file really contains complex64
+  k-space, but its current generator defaults differ from the stored acquisition dimensions
+  and no scanned `.seq` is included. By contrast, the iohexol CEST release includes both
+  Siemens `.dat` and `.seq`. Sources and verification: `validation/real/SOURCES.md`.
+- **Pin dataset versions and inspect large ZIP directories before downloading**: Zenodo
+  concept DOIs can resolve to newer, substantially larger archives. The iohexol CEST concept
+  record resolves to 17244380 (31.6 GB), while an indexed older version is 12.3 GB. HTTP range
+  reads verified the actual phantom raw files, sequences and calibration scans from its
+  ~63 kB ZIP directory without downloading the archive. `SOURCES.md` records the version.

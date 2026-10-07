@@ -12,6 +12,9 @@ uv run python validation/real/nist_irse.py    # benchmark 1, prints the table
 
 ## Data
 
+Additional diffusion, CEST, MT and hardware-validation sources, with verified raw-data
+formats and remaining metadata gaps: [SOURCES.md](SOURCES.md).
+
 Tong G, Gaspar AS, Qian E, Ravi KS, Vaughan JT, Nunes RG, Geethanath S. *Open-source magnetic
 resonance imaging acquisition: data and documentation for two validated pulse sequences.* Data
 in Brief 2022;42:108105. Mendeley Data doi:10.17632/8458pz722c.5, **CC BY 4.0**. Used here: the
