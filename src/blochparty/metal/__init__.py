@@ -303,6 +303,43 @@ inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float
     if (f & 4) for (uint j = 0; j < nj; ++j) md.ur[j] = 0.0f, md.ui[j] = 0.0f;
 }
 
+// ---- diffusion: exact Brownian segments drawn from Philox4x32-10 (rng.py), as bloch._walk
+inline uint4 philox(uint4 c, uint2 k) {
+    for (int r = 0; r < 10; ++r) {
+        const uint hi0 = mulhi(0xD2511F53u, c.x), lo0 = 0xD2511F53u * c.x;
+        const uint hi1 = mulhi(0xCD9E8D57u, c.z), lo1 = 0xCD9E8D57u * c.z;
+        c = uint4(hi1 ^ c.y ^ k.x, lo1, hi0 ^ c.w ^ k.y, lo0);
+        k += uint2(0x9E3779B9u, 0xBB67AE85u);
+    }
+    return c;
+}
+
+inline float2 box_muller(uint a, uint b) {
+    const float u1 = (float(a) + 0.5f) * 2.3283064365386963e-10f, u2 = (float(b) + 0.5f) * 2.3283064365386963e-10f;
+    const float r = sqrt(-2.0f * precise::log(u1)), th = TWO_PI * u2;
+    return float2(r * precise::cos(th), r * precise::sin(th));
+}
+
+struct Walk {
+    float x, y, z;           // where the spin is
+    float l[6];              // Cholesky factor of D, row-major lower triangle: l00 l10 l11 l20 l21 l22
+    uint2 seed;
+    uint spin;
+};
+
+// Effective position over segment s (duration dt) and the move to its end (rng.normals: n1 = z[0:3], n2 = z[3:6]).
+inline float3 walk_segment(thread Walk& w, uint s, float dt) {
+    const uint4 a = philox(uint4(w.spin, s, 0u, 0u), w.seed), b = philox(uint4(w.spin, s, 0u, 1u), w.seed);
+    const float2 z01 = box_muller(a.x, a.y), z23 = box_muller(a.z, a.w), z45 = box_muller(b.x, b.y);
+    const float3 n1 = float3(z01.x, z01.y, z23.x), n2 = float3(z23.y, z45.x, z45.y);
+    const float3 l1 = float3(w.l[0] * n1.x, w.l[1] * n1.x + w.l[2] * n1.y, w.l[3] * n1.x + w.l[4] * n1.y + w.l[5] * n1.z);
+    const float3 l2 = float3(w.l[0] * n2.x, w.l[1] * n2.x + w.l[2] * n2.y, w.l[3] * n2.x + w.l[4] * n2.y + w.l[5] * n2.z);
+    const float3 step = sqrt(2.0f * dt) * l1;
+    const float3 eff = float3(w.x, w.y, w.z) + 0.5f * step + sqrt(2.0f * dt / 12.0f) * l2;
+    w.x += step.x, w.y += step.y, w.z += step.z;
+    return eff;
+}
+
 // The per-spin state and segment step of both kernels: plain Bloch, or with the bound pool.
 struct State {
     float mx, my, mz, mb;
@@ -316,11 +353,16 @@ struct State {
 // V: 0 plain Bloch (no field model, no bound pool), 1 rate-model bound pool and/or field model,
 // 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
 // carry none of the others' per-thread state.
-template <int V>
-inline void advance(thread State& st, thread Modes& md, constant float* segs, constant int* flags, constant float* frf,
-                    uint s, uint mt, constant float* line, constant float* log_f, uint mode, constant int* nsub,
-                    constant float* modes, uint nj) {
+template <int V, bool DIFF>
+inline void advance(thread State& st, thread Modes& md, thread Walk& wk, constant float* segs, constant int* flags,
+                    constant float* frf, uint s, uint mt, constant float* line, constant float* log_f, uint mode,
+                    constant int* nsub, constant float* modes, uint nj) {
     constant float* q = segs + 8 * s;
+    if (DIFF) {  // a moving spin: its effective position for this segment; position-keyed caches are stale
+        const float3 eff = walk_segment(wk, s, q[0]);
+        st.p.px = eff.x, st.p.py = eff.y, st.p.pz = eff.z;
+        st.cache.dt = -1.0f, md.k_dt = -1.0f;
+    }
     const float bz = offset(st.p, st.conc, V == 0 ? 0u : mode, q);
     if (V == 0) step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
     else if (V == 2) step_gen(q, flags[s], bz, uint(nsub[s]), st.mx, st.my, st.mz, st.mb, md, st.p, st.b, modes, nj, st.cache, st.zc);
@@ -418,6 +460,10 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
                         constant float* modes      [[buffer(20)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
                         constant int* nsub         [[buffer(21)]],  // (S,) RF sub-steps (mt 2)
                         constant uint& nj          [[buffer(22)]],  // number of modes (mt 2)
+                        device float* P            [[buffer(23)]],  // (3, N) walker positions, in/out (diffusion)
+                        constant float* chol       [[buffer(24)]],  // (6, N) Cholesky factors of D (diffusion)
+                        constant uint& seed_lo     [[buffer(25)]],
+                        constant uint& seed_hi     [[buffer(26)]],
                         uint i    [[thread_position_in_grid]],
                         uint lane [[thread_index_in_simdgroup]],
                         uint sg   [[simdgroup_index_in_threadgroup]],
@@ -440,6 +486,12 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
     }
     if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
         for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Walk wk;
+    if (@DIFF@) {
+        wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
+        wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
@@ -450,7 +502,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@>(st, md, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
+        advance<@V@, @DIFF@>(st, md, wk, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
@@ -472,6 +524,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],   // (
         M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
         if (@V@ != 0 && mt) MB[j] = st.mb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+        if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
     }
 }
 
@@ -500,6 +553,10 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
                             constant float* modes      [[buffer(22)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
                             constant int* nsub         [[buffer(23)]],  // (S,) RF sub-steps (mt 2)
                             constant uint& nj          [[buffer(24)]],  // number of modes (mt 2)
+                            device float* P            [[buffer(25)]],  // (3, N) walker positions, in/out (diffusion)
+                            constant float* chol       [[buffer(26)]],  // (6, N) Cholesky factors of D (diffusion)
+                            constant uint& seed_lo     [[buffer(27)]],
+                            constant uint& seed_hi     [[buffer(28)]],
                             uint i    [[thread_position_in_grid]],
                             uint lane [[thread_index_in_simdgroup]],
                             uint sg   [[simdgroup_index_in_threadgroup]],
@@ -521,6 +578,12 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
     }
     if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
         for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Walk wk;
+    if (@DIFF@) {
+        wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
+        wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
@@ -530,7 +593,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@>(st, md, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
+        advance<@V@, @DIFF@>(st, md, wk, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -545,6 +608,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],   
         M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
         if (@V@ != 0 && mt) MB[j] = st.mb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+        if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
     }
 }
 """
@@ -560,8 +624,9 @@ def _lib():
         # each kernel three times (advance<V>): plain, with the rate-model bound pool and/or the field
         # model, and with the generalized Bloch modes; extra per-thread state costs the plain
         # kernels ~10-30 % in register pressure otherwise
-        kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v)
-                          for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2")))
+        kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix + dsuf).replace("@V@", v).replace("@DIFF@", diff)
+                          for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
+                          for dsuf, diff in (("", "false"), ("_diff", "true")))
         _LIB = torch.mps.compile_shader(_SOURCE + kernels)
     return _LIB
 
@@ -575,7 +640,8 @@ def available() -> bool:
 
 @torch.no_grad()
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
-                   chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None) -> SimResult:
+                   chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
+                   seed: int = 0) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
@@ -664,15 +730,27 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     if gen_bufs is None:
         dz = torch.zeros(1, device=dev, dtype=f32)
         gen_bufs = [dz, dz, torch.zeros(1, device=dev, dtype=torch.int32), 0]
+    if phantom.diffusion is not None:  # walkers start at the (encoding) positions; L L^T = D
+        D = phantom.diffusion.detach().double().cpu()
+        L = torch.diag_embed(torch.sqrt(D).unsqueeze(-1).expand(n, 3)) if D.dim() == 1 else torch.linalg.cholesky(D)
+        chol = torch.stack([L[:, 0, 0], L[:, 1, 0], L[:, 1, 1], L[:, 2, 0], L[:, 2, 1], L[:, 2, 2]])
+        walk_bufs = [fields.pos.detach().T.to(dev, f32).contiguous(), chol.to(dev, f32).contiguous(),
+                     int(seed) & 0xFFFFFFFF, (int(seed) >> 32) & 0xFFFFFFFF]
+    else:
+        dz = torch.zeros(1, device=dev, dtype=f32)
+        walk_bufs = [dz, dz, 0, 0]
     suffix = "_gen" if gen_bufs[3] else ("_full" if (mt_bufs[5] or conc_buf[1]) else "")
+    if phantom.diffusion is not None:
+        suffix += "_diff"
     lib, S = _lib(), len(seq)
     for s0 in range(0, S, chunk):
         if mma:
             getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), n_tiles,
-                                threads, *mt_bufs, *conc_buf, *gen_bufs, threads=threads, group_size=group)
+                                threads, *mt_bufs, *conc_buf, *gen_bufs, *walk_bufs, threads=threads,
+                                group_size=group)
         else:
             getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, n, n_coils, s0, min(S, s0 + chunk), *mt_bufs,
-                            *conc_buf, *gen_bufs, threads=threads, group_size=group)
+                            *conc_buf, *gen_bufs, *walk_bufs, threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()

@@ -328,3 +328,10 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   1.7–2.3×; shared power budget, bandwidth, one core driving the GPU). Parked.
 - Next: moving spins, starting with free diffusion as exact Brownian segments drawn from
   a counter-based RNG (Philox) shared by the core and the GPU.
+- **Diffusion** (037492a core; Metal next commit): spins as exact Brownian walkers. Per segment of
+  constant gradient the displacement and the bridge integral ∫r dt are jointly Gaussian, so the
+  phase is exact without sub-stepping. The normals come from Philox4x32-10 (Random123 known
+  answers) keyed on (seed, spin, segment): the core and the GPU draw the same walk and agree spin
+  by spin (1e-5), and merged free runs equal segment stepping. Stejskal–Tanner, isotropic and an
+  anisotropic tensor: unbiased (2M walkers × 20 seeds on the GPU: 0.54296 ± 0.00009 vs
+  0.54297). Speed: 2M walkers through a PGSE in 0.07 s on the GPU, 30× the core.

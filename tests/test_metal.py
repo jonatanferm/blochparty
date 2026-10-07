@@ -131,3 +131,28 @@ def test_generalized_bloch_bound_pool(shape, mma):
     out = metal.simulate_metal(ph, seq, coils, mma=mma)
     assert rel(out.signal, ref.signal) < 1e-4 and rel(out.m, ref.m) < 1e-4
     assert float((out.m_bound.double() - ref.m_bound).abs().max() / ref.m.abs().max()) < 1e-4
+
+
+@pytest.mark.parametrize("mma", [False, True])
+def test_diffusion_same_walk_as_core(mma):
+    # the same Philox walk per spin: the engines agree spin by spin, not only statistically
+    import math
+
+    from test_diffusion import pgse
+
+    g = torch.Generator().manual_seed(2)
+    n = 3000
+    th = 0.4
+    rot = torch.tensor([[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]], dtype=torch.float64)
+    dt = rot @ torch.diag(torch.tensor([0.5e-9, 1.5e-9, 2.5e-9], dtype=torch.float64)) @ rot.T
+    ph = bp.Phantom(pos=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.02,
+                    pd=torch.ones(n, dtype=torch.float64), t1=torch.full((n,), 1.0, dtype=torch.float64),
+                    t2=torch.full((n,), 0.08, dtype=torch.float64), db0=(torch.rand(n, generator=g, dtype=torch.float64) - 0.5) * 50,
+                    diffusion=dt.expand(n, 3, 3).contiguous())
+    seq = pgse((1.2e6, 3e5, -2e5), readout=32)
+    coils = bp.birdcage_sensitivities(ph.pos, 4)
+    ref = bp.simulate(ph, seq, coils, seed=9)
+    out = metal.simulate_metal(ph, seq, coils, seed=9, mma=mma)
+    assert rel(out.signal, ref.signal) < 1e-4 and rel(out.m, ref.m) < 1e-3
+    other = metal.simulate_metal(ph, seq, coils, seed=10, mma=mma)
+    assert rel(other.signal, ref.signal) > 1e-2  # a different walk
