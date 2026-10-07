@@ -465,8 +465,12 @@ by Pulseq's own checks.
 - [x] Anatomy M1: susceptibility maps → B0 with padded Fourier dipole convolution and
       order 0–2 shimming (`susceptibility_to_b0`, `shim`); sphere inside/outside RMS
       0.439/0.108 Hz at 3 T, long cylinders < 1.77 Hz, harmonic removal < 1e-12 Hz.
-      BrainWeb/QSM loaders and continuous anatomy follow in [the anatomy spec](docs/specs/ANATOMY.md).
-- [ ] Realistic phantoms: BrainWeb tissue maps, XCAT / MRXCAT; random augmentations
+      QSM forward-field validation follows in M3 of [the anatomy spec](docs/specs/ANATOMY.md).
+- [x] Anatomy M2: checksum-pinned BrainWeb loader, conservative resampling, cited/flagged tissue
+      priors and sub-voxel partial-volume spins; separate susceptibility/scanner shim maps.
+      PD conservation <1e-12, GPU/core error 3.23e-7; full 1-mm head RF/FID 7.77 M spins/s.
+      [Validation and limits](validation/anatomy/RESULTS.md); spatial variability remains M4.
+- [ ] Further realistic phantoms: QSM, XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
 - [ ] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)

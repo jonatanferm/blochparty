@@ -7,6 +7,26 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Fuzzy membership is a density, not subcell geometry.** Keep each tissue's T1/T2 and
+  weight its spins by fraction × PD; averaging relaxation constants gives the wrong
+  mixture signal. Jitter decouples spin positions from reconstruction, but a sharp
+  boundary still needs an independently resolved anatomy grid. Volume-weighted
+  resampling preserves sum(fraction) × voxel volume, not the unweighted sum.
+  (`anatomy.py`, mixed-voxel Ernst and shifted-box Fourier checks)
+- **Observed T2* and susceptibility can double-count dephasing.** There is no universal
+  linewidth to subtract from a macroscopic gradient. Require calibrated macroscopic
+  R2′ or an already separated intrinsic map before combining both. A single Cauchy
+  quantile is the zero median: K=1 cannot produce a finite requested T2′ linewidth.
+  (`test_t2prime_quantile_fid_and_no_double_count`, anatomy M2)
+- **Published tissue numbers need population and uncertainty labels.** Stanisz 2005
+  Table 1 contains ex-vivo animal specimens (human blood), not a normal human atlas.
+  Missing SD is unknown, not zero, and applying a 3 T T2 at 7 T is an assumption.
+  Keep the older BrainWeb simulator priors separate from current tissue priors.
+  (`anatomy.py` provenance; `validation/anatomy/RESULTS.md`)
+- **Normalize fat-peak weights before conserving tissue mass.** Existing rounded Ren
+  amplitudes sum to 0.999; copying them directly loses 0.1% of PD. Normalize locally
+  in new anatomy assembly without changing old phantom defaults. (`test_mt_diffusion_and_fat_bookkeeping`)
+
 - **Even-grid dipole kernels need a Nyquist sign convention.** The usual `(k.b)^2`
   formula followed by `ifft(...).real` breaks joint object/B0 rotation covariance when
   two axes are at Nyquist (~2 Hz in a random small-grid test). Average over the two
@@ -360,6 +380,23 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **Verify delivered BrainWeb bytes, not just its legacy format page.** Subject-04
+  fuzzy files are 0.5-mm (362,434,362), unlike its separate 1-mm T1 reference. The
+  public raw-byte response was signed/offset-encoded despite an unsigned description;
+  naive uint8 decoding made the air background look like nearly equal tissue mixtures.
+  Raw shorts decoded correctly as little-endian 0…4095, despite a big-endian claim.
+  Pin decompressed-byte hashes (gzip headers vary), check range, and record physical
+  origins from the download header. (`validation/anatomy/README.md`, 2026-10-07 capture)
+- **BrainWeb fuzzy totals need asymmetric normalization.** Clamp overfull class sums
+  to unity, but leave deficits as air. Normalizing every tiny positive sum to one
+  amplifies background memberships into full tissue. Include the explicit background
+  class in the normalization before conservative resampling. (`load_brainweb`)
+- **The two BrainWeb releases have different validation coverage.** The newer 20-model
+  set publishes only T1 (22/9.2 ms, 30°); older SBD provides T1/T2/PD. Its older tissue
+  file reproduces older GM/WM contrasts within 0.13%, but newer subject-04 T1 differs
+  by 5.44% GM/WM and 21.31% CSF/GM. Do not present a cross-simulator comparison as
+  clinical validation, or assume both releases use identical parameters. (`RESULTS.md`)
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:
   `tools/snapshot.py save/compare` (both simulators, outputs and gradients, float32/64).

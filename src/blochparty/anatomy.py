@@ -1,0 +1,537 @@
+"""Fuzzy anatomy on a physical grid, conservative resampling, and sub-voxel spins.
+
+Arrays/voxel sizes: (z,y,x); positions/origin: (x,y,z) metres. Assembly runs on
+CPU; transfer the resulting Phantom to an engine afterwards. Fractions describe
+piecewise-constant *densities*, not the location of a boundary inside a cell.
+Use a finer anatomy grid to resolve a sharp boundary independently of reconstruction.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+import gzip
+import hashlib
+import json
+import math
+from pathlib import Path
+import warnings
+
+import numpy as np
+import torch
+from torch import Tensor
+
+from .constants import GAMMA_BAR
+from .exchange import BoundPool
+from .maps import FieldMaps, sample
+from .phantom import FAT_PEAKS, Phantom, _subvoxel_counts
+from .susceptibility import shim, susceptibility_to_b0
+
+AIR_CHI = 0.36e-6  # Jordan et al., JMRI 2013, doi:10.1002/jmri.23762, Theory.
+WATER_CHI = -9.05e-6  # Same source, 37 C; absolute SI, not ppm.
+
+
+@dataclass(frozen=True)
+class Distribution:
+    """Mean and SD with provenance. SD=None means unreported, not zero variance.
+
+    SDs are metadata, not independent per-spin draws. M4 adds spatial variability.
+    ``assumed`` also identifies animal/other-tissue proxies and field extrapolation.
+    """
+    mean: float
+    sd: float | None
+    citation: str
+    assumed: bool = False
+
+    def __post_init__(self):
+        if not math.isfinite(self.mean) or (self.sd is not None and
+                (not math.isfinite(self.sd) or self.sd < 0)) or not self.citation:
+            raise ValueError("a distribution needs a finite mean, nonnegative SD (or None), and citation")
+
+
+@dataclass(frozen=True)
+class TissueProperties:
+    pd: Distribution
+    t1: Distribution
+    t2: Distribution
+    chi: Distribution  # absolute SI
+    t2star: Distribution | None = None  # observed, not intrinsically separated
+    bound_fraction: Distribution | None = None  # fraction of TOTAL pool, not M0b/M0f
+    exchange_rate: Distribution | None = None  # bound -> free, 1/s
+    bound_t2: Distribution | None = None
+    diffusivity: Distribution | None = None  # isotropic m^2/s
+    fat_fraction: Distribution | None = None
+
+    def __post_init__(self):
+        if self.pd.mean < 0 or self.t1.mean <= 0 or self.t2.mean <= 0:
+            raise ValueError("PD must be nonnegative and relaxation times positive")
+        if self.t2star is not None and not 0 < self.t2star.mean <= self.t2.mean:
+            raise ValueError("T2* must be positive and no greater than T2")
+        for value in (self.bound_fraction, self.fat_fraction):
+            if value is not None and not 0 <= value.mean <= 1:
+                raise ValueError("pool fractions must lie in [0,1]")
+        if self.bound_fraction is not None and self.bound_fraction.mean == 1:
+            raise ValueError("a bound pool requires a nonzero free pool")
+        if self.diffusivity is not None and self.diffusivity.mean < 0:
+            raise ValueError("diffusivity must be nonnegative")
+        if self.exchange_rate is not None and self.exchange_rate.mean < 0:
+            raise ValueError("exchange rate must be nonnegative")
+        if self.bound_t2 is not None and self.bound_t2.mean <= 0:
+            raise ValueError("bound T2 must be positive")
+
+
+# Every fallback explicitly says it is an assumption. These are simulation priors,
+# not a normative human atlas. No values in phantom.TISSUES are changed.
+_BW = "BrainWeb MRISIM tissue_mr_parameters.txt (1996), named tissue row; https://brainweb.bic.mni.mcgill.ca/brainweb/tissue_mr_parameters.txt"
+_ST = "Stanisz et al. 2005, Table 1, doi:10.1002/mrm.20605; 37 C excised animal tissue (human blood)"
+_CA = "Caan et al. 2019, Table 1 MP2RAGEME column, doi:10.1002/hbm.24490; human 7 T"
+
+
+def _assumed(value, reason):
+    return Distribution(value, None, "Assumption: " + reason, True)
+
+
+def _tables():
+    # BrainWeb's legacy simulator values are useful for reproducibility only.
+    legacy = dict(csf=(1., 2.569, .329, .058), gm=(.86, .833, .083, .069),
+                  wm=(.77, .500, .070, .061), fat=(1., .350, .070, .058),
+                  muscle=(1., .900, .047, .030))
+    legacy |= {"skin": legacy["muscle"], "connective": legacy["muscle"],
+               "dura": legacy["muscle"], "marrow": legacy["fat"],
+               "vessels": legacy["gm"], "skull": (0., 1., .001, .001),
+               "background": (0., 1., 1., 1.)}
+    bw = {}
+    for name, values in legacy.items():
+        assumed = name not in ("csf", "gm", "wm", "fat", "muscle")
+        params = [Distribution(v, None, _BW + f"; {name}" +
+                   ("; proxy/placeholder for new tissue, not a measured value" if assumed else ""), assumed)
+                  for v in values]
+        chi = AIR_CHI if name == "background" else WATER_CHI
+        if name == "skull":
+            chi -= 2e-6  # M1's cited scale; explicit approximate contrast, not UTE calibration.
+        bw[name] = TissueProperties(params[0], params[1], params[2],
+            _assumed(chi, "water-like soft tissue; bone -2 ppm relative to water; air +0.36 ppm; see susceptibility.py"),
+            params[3], fat_fraction=_assumed(float(name in ("fat", "marrow")), "pure lipid class or no lipid"))
+    # A published simulator constant is not a measured human property. Flag
+    # every legacy fallback, especially when carrying 1.5 T priors to 3 T.
+    default = {}
+    for strength in (1.5, 3.):
+        default[strength] = {}
+        for name, p in bw.items():
+            fallback = {key: _assumed(getattr(p, key).mean,
+                        getattr(p, key).citation + f"; legacy 1.5 T simulator prior used at {strength} T")
+                        for key in ("pd", "t1", "t2", "t2star")}
+            default[strength][name] = replace(p, **fallback)
+    # 1.5 T / 3 T means and specimen SDs, seconds. In-vitro proxies are flagged.
+    rows = {"wm": ((.884,.050,.072,.004), (1.084,.045,.069,.003)),
+            "gm": ((1.124,.050,.095,.008), (1.820,.114,.099,.007)),
+            "muscle": ((1.008,.020,.044,.006), (1.412,.013,.050,.004)),
+            "vessels": ((1.441,.120,.290,.030), (1.932,.085,.275,.050))}
+    for strength, index in ((1.5, 0), (3., 1)):
+        for name, measurements in rows.items():
+            t1, s1, t2, s2 = measurements[index]
+            # T2* at 1.5 T is a legacy model prior; at 3 T use the measured
+            # occipital value from Wansapura (regional proxy, unreported SD).
+            star = min(bw[name].t2star.mean, t2)
+            star_dist = _assumed(star, _BW + "; T2* proxy, clipped to T2; no measured SD")
+            if strength == 3 and name in ("wm", "gm"):
+                star_dist = Distribution(.0484 if name == "wm" else .0416, None,
+                    "Wansapura et al. 1999, abstract FLASH T2* occipital WM/GM; PMID:10232510; regional proxy", True)
+            default[strength][name] = replace(default[strength][name],
+                t1=Distribution(t1,s1,_ST + f"; {name}, {strength} T",True),
+                t2=Distribution(t2,s2,_ST + f"; {name}, {strength} T",True), t2star=star_dist)
+        for name in ("skin", "connective", "dura"):
+            proxy = default[strength]["muscle"]
+            default[strength][name] = replace(proxy,
+                t1=_assumed(proxy.t1.mean, _ST + f"; muscle used for {name}"),
+                t2=_assumed(proxy.t2.mean, _ST + f"; muscle used for {name}"))
+        for name, md, fraction in (("wm", .7e-9, .16), ("gm", .8e-9, .07), ("csf", 3e-9, 0.)):
+            # Explicit modelling priors, not claimed measurements or fitted qMT parameters.
+            default[strength][name] = replace(default[strength][name],
+                diffusivity=_assumed(md, "isotropic brain/CSF design prior; no fibre orientations"),
+                bound_fraction=_assumed(fraction, "WM/GM total-pool fractions 0.16/0.07, CSF zero; illustrative qMT prior"),
+                exchange_rate=_assumed(40., "bound-to-free rate 40/s; must be calibrated for quantitative MT"),
+                bound_t2=_assumed(12e-6, "12 us super-Lorentzian width; see exchange.py; not a tissue measurement"))
+    # Only verified 7 T brain entries: the remaining classes require user-supplied
+    # values. T2 is an explicit 3 T proxy; the T1/T2* means AND SDs are measured.
+    default[7.] = {}
+    for name, t1, s1, star, ss in (("wm",1.19,.02,.0267,.0001), ("gm",2.,.08,.0324,.0007)):
+        p = default[3.][name]
+        default[7.][name] = replace(p, t1=Distribution(t1,s1,_CA), t2star=Distribution(star,ss,_CA),
+            t2=_assumed(p.t2.mean, _ST + "; 3 T T2 carried to 7 T pending calibrated value"))
+    return default, {1.5: bw}
+
+
+DEFAULT_TISSUES, BRAINWEB_TISSUES = _tables()
+
+
+def _triple(values, name, positive=False):
+    values = tuple(float(v) for v in values)
+    if len(values) != 3 or any(not math.isfinite(v) or (positive and v <= 0) for v in values):
+        raise ValueError(f"{name} needs three finite" + (" positive" if positive else "") + " values")
+    return values
+
+
+def _resample(grid, old, new, fill=0.):
+    """Exact separable cell-overlap integrals, no dense interpolation matrix."""
+    out = grid
+    for axis, (a, b) in enumerate(zip(old, new)):
+        if a == b:
+            continue
+        n = out.shape[axis]
+        m = math.ceil(n*a/b - 1e-10)
+        # Accumulate in float64 even for float32 membership volumes.
+        v = out.movedim(axis, 0).double()
+        edges = torch.arange(m+1, dtype=torch.float64) * (b/a)
+        clipped = edges.clamp(max=n)
+        idx = clipped.floor().long().clamp(max=n-1)
+        integral = torch.cat([torch.zeros_like(v[:1]), v.cumsum(0)], 0)
+        shape = (-1,) + (1,)*(v.ndim-1)
+        values = integral[idx] + (clipped-idx).reshape(shape)*v[idx]
+        values += (edges-clipped).reshape(shape)*fill
+        out = ((values[1:]-values[:-1])*(a/b)).to(grid.dtype).movedim(0, axis)
+    return out
+
+
+@dataclass
+class Anatomy:
+    """CPU fractional volumes; missing mass is non-signalling air.
+
+    Fractions may sum to less than one, but not exceed one. Background is an
+    optional explicit air class. Maps are intensive voxel averages (M0 relative
+    water content, R1/R2/R2star in 1/s, intrinsic_r2prime in 1/s). Map names not
+    consumed by assembly are retained by spatial utilities. Origin is a voxel
+    centre, not a corner; axis directions must already be positive x/y/z.
+    """
+    fractions: dict[str, Tensor]
+    voxel: tuple[float, float, float]
+    origin: tuple[float, float, float]
+    chi: Tensor | None = None
+    maps: dict[str, Tensor] = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.voxel = _triple(self.voxel, "voxel", True)
+        self.origin = _triple(self.origin, "origin")
+        if not self.fractions:
+            raise ValueError("anatomy requires at least one tissue")
+        ref = next(iter(self.fractions.values()))
+        if ref.ndim != 3 or min(ref.shape) == 0 or ref.dtype not in (torch.float32,torch.float64) or ref.device.type != "cpu":
+            raise ValueError("anatomy requires nonempty CPU float32/float64 (z,y,x) tensors")
+        total = torch.zeros_like(ref)
+        for name, value in self.fractions.items():
+            self._check_map(value)
+            if (value < 0).any() or (value > 1).any():
+                raise ValueError(f"invalid fractions for {name}")
+            total += value
+        if (total > 1 + 16*torch.finfo(ref.dtype).eps).any():
+            raise ValueError("tissue fractions sum to more than one")
+        for value in ([self.chi] if self.chi is not None else []) + list(self.maps.values()):
+            self._check_map(value)
+
+    def _check_map(self, value):
+        ref = next(iter(self.fractions.values()))
+        if value.shape != ref.shape or value.dtype != ref.dtype or value.device != ref.device or not torch.isfinite(value).all():
+            raise ValueError("all anatomy maps must have matching shape/dtype/device and finite values")
+
+    @property
+    def shape(self):
+        return tuple(next(iter(self.fractions.values())).shape)
+
+    def crop(self, region):
+        """Crop by three unit-step slices in z/y/x order, updating physical origin.
+
+        Cropping discards susceptibility sources. Prefer to_phantom(fov_region=)
+        to restrict spins while evaluating B0 from the complete source anatomy.
+        """
+        if len(region) != 3 or any(not isinstance(s, slice) for s in region):
+            raise ValueError("region needs three slices in z/y/x order")
+        bounds = [s.indices(n) for s,n in zip(region,self.shape)]
+        if any(step != 1 or hi <= lo for lo,hi,step in bounds):
+            raise ValueError("crop must be nonempty with unit steps")
+        region = tuple(slice(lo,hi) for lo,hi,_ in bounds)
+        origin = tuple(o + lo*h for o,(lo,_,_),h in zip(self.origin,reversed(bounds),reversed(self.voxel)))
+        take = lambda v: v[region]
+        return Anatomy({k:take(v) for k,v in self.fractions.items()}, self.voxel, origin,
+                       None if self.chi is None else take(self.chi), {k:take(v) for k,v in self.maps.items()})
+
+    def slab(self, z0, thickness):
+        """Physical z interval [z0,z0+thickness], snapped outward to cell boundaries."""
+        if not math.isfinite(z0) or not math.isfinite(thickness) or thickness <= 0:
+            raise ValueError("slab needs finite z0 and positive thickness in m")
+        edge = self.origin[2] - self.voxel[0]/2
+        lo = max(0, math.floor((z0-edge)/self.voxel[0] + 1e-10))
+        hi = min(self.shape[0], math.ceil((z0+thickness-edge)/self.voxel[0] - 1e-10))
+        if hi <= lo:
+            raise ValueError("slab does not intersect anatomy")
+        return self.crop((slice(lo,hi),slice(None),slice(None)))
+
+    def resample(self, voxel):
+        """Volume-weighted cell averages; preserves sum(fraction)*voxel_volume.
+
+        Lower outer boundary is fixed; upper edge expands by <1 new voxel if
+        needed. Exterior is air (fractions/maps zero; chi=AIR_CHI). This is not
+        nearest-neighbour labelling or recovery of unknown sub-cell anatomy.
+        """
+        voxel = _triple(voxel,"voxel",True)
+        origin = tuple(o+(b-a)/2 for o,a,b in zip(self.origin,reversed(self.voxel),reversed(voxel)))
+        return Anatomy({k:_resample(v,self.voxel,voxel).clamp(0,1) for k,v in self.fractions.items()},
+            voxel,origin,None if self.chi is None else _resample(self.chi,self.voxel,voxel,AIR_CHI),
+            {k:_resample(v,self.voxel,voxel) for k,v in self.maps.items()})
+
+
+def load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32) -> Anatomy:
+    """Load the 20-subject fuzzy models from checksum-pinned raw-short gzip files.
+
+    Run validation/anatomy/fetch_brainweb.py, or obtain the public raw-short files
+    manually and provide a subjectNN.json manifest (see validation/anatomy/README.md).
+    Subject IDs are 4,5,6,18,20,38,41..54, not consecutive 1..20. Native arrays
+    are (362,434,362) at 0.5 mm, z/y/x, positive MINC axes; origin is read from
+    the captured header in the manifest. The similarly named simulated T1 image
+    has a different 1-mm grid. No flipping/transposing of these raw arrays is needed.
+
+    Raw shorts are 0..4095 memberships (captured little-endian, despite the
+    legacy format page claiming big-endian). Quantization can perturb their sum, so all
+    12 classes (including background) are jointly normalized where their sum
+    exceeds one, before resampling. Deficits remain air, not amplified tissue.
+    ``voxel`` downsamples each class as it loads, limiting memory. Returned
+    memberships are normalized at native resolution first, preserving volumes.
+    Loading never downloads data or silently repairs a checksum mismatch.
+    """
+    if subject not in (4,5,6,18,20,38,*range(41,55)):
+        raise ValueError("invalid BrainWeb 20-model subject ID")
+    if dtype not in (torch.float32,torch.float64):
+        raise ValueError("dtype must be float32 or float64")
+    root = Path(root)
+    manifest = json.loads((root/f"subject{subject:02d}.json").read_text())
+    if manifest.get("schema") != 1 or manifest.get("subject") != subject:
+        raise ValueError("invalid BrainWeb manifest")
+    names = ("background","csf","gm","wm","fat","muscle","skin","skull","vessels","connective","dura","marrow")
+    shape = tuple(manifest["shape"])
+    old = tuple(manifest["voxel"])
+    new = old if voxel is None else _triple(voxel,"voxel",True)
+    # uint16 maps + one uint32 total, instead of twelve native float64 volumes.
+    raw_maps = {}
+    storage = np.dtype(manifest["dtype"])
+    if storage.str not in ("<u2", ">u2", "|u1") or manifest["scale"] <= 0:
+        raise ValueError("unsupported raw encoding")
+    total = np.zeros(shape,dtype=np.uint32)
+    for name in names:
+        entry = manifest["files"][name]
+        path = root/entry["path"]
+        if path.resolve().parent != root.resolve():
+            raise ValueError("manifest paths must name files directly inside root")
+        raw = gzip.open(path,"rb").read() if path.suffix == ".gz" else path.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != entry["sha256"]:
+            raise ValueError(f"checksum mismatch: {path}")
+        if len(raw) != math.prod(shape)*storage.itemsize:
+            raise ValueError(f"wrong byte count: {path}")
+        array = np.frombuffer(raw,dtype=storage).reshape(shape)
+        if array.max() > manifest["scale"]:
+            raise ValueError("raw values exceed scale; check byte order")
+        raw_maps[name] = array
+        total += array
+    total = np.maximum(total,manifest["scale"])
+    fractions = {}
+    for name in names:
+        # Divide in float64, then convert only after conservative resampling.
+        value = torch.from_numpy(raw_maps.pop(name).astype(np.float64) / total)
+        fractions[name] = _resample(value,old,new).to(dtype).clamp(0,1)
+    origin = tuple(o+(b-a)/2 for o,a,b in zip(manifest["origin"],reversed(old),reversed(new)))
+    return Anatomy(fractions,new,origin)
+
+
+def _properties(anatomy, table, field_T):
+    if field_T not in table:
+        raise ValueError(f"no tissue table for {field_T} T; provide explicit values (no field interpolation)")
+    props = table[field_T]
+    missing = [k for k,v in anatomy.fractions.items() if k not in props and v.any()]
+    if missing:
+        raise ValueError(f"missing tissue properties at {field_T} T: {missing}")
+    return props
+
+
+def anatomy_field_maps(anatomy, table=DEFAULT_TISSUES, field_T=3., *, shim_order=2,
+                       brain_mask=None, b0_dir=(0,0,1), padding=2.):
+    """Return (tissue susceptibility FieldMaps, scanner correction FieldMaps).
+
+    Sample the FIRST into moving Phantom.db0, and pass the SECOND as scanner
+    maps to simulate(..., maps=...). For stationary anatomy their sum is the
+    shimmed map. Recompute the first for rotations relative to B0. Full-source
+    computation precedes any spin-region crop. Empty/planar masks cannot fit
+    all 3D harmonics: choose a lower order or use shim_order=None explicitly.
+    """
+    props = _properties(anatomy,table,field_T)
+    ref = next(iter(anatomy.fractions.values()))
+    chi = anatomy.chi
+    if chi is None:
+        chi = torch.full_like(ref,AIR_CHI)
+        for name,frac in anatomy.fractions.items():
+            if name in props:
+                chi = chi + frac*(props[name].chi.mean-AIR_CHI)
+    df = susceptibility_to_b0(chi,anatomy.voxel,field_T,b0_dir=b0_dir,padding=padding,background=AIR_CHI)
+    correction = torch.zeros_like(df)
+    if shim_order is not None:
+        if brain_mask is None:
+            brain_mask = sum((anatomy.fractions[k] for k in ("wm","gm","csf") if k in anatomy.fractions),
+                             torch.zeros_like(ref)) > .5
+        residual,_ = shim(df,brain_mask,shim_order,voxel=anatomy.voxel,origin=anatomy.origin)
+        correction = residual-df
+    args = (anatomy.origin,tuple(reversed(anatomy.voxel)))
+    return FieldMaps(*args,b0=df),FieldMaps(*args,b0=correction)
+
+
+def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_region=None,
+               spins_per_voxel=8, jitter="stratified", seed=0, sampling="per_tissue",
+               mt=False, diffusion=False, chi_to_b0=True, shim_order=2,
+               t2star="auto", macroscopic_r2prime=None, field_maps=None,
+               variability=None) -> Phantom:
+    """Assemble independent tissue spins, never average their relaxation constants.
+
+    ``per_tissue`` gives K spins to each nonzero tissue/voxel, PD=fraction*PD/K
+    (exact conservation). ``categorical`` draws K tissue identities per voxel;
+    missing mass is air. It is unbiased but only conserves each tissue's PD in
+    expectation. K is a perfect cube or (kz,ky,kx). Jitter samples each subcell;
+    None uses subcell centres. Seeds change positions (and categorical draws),
+    not material properties. Sampled B0 necessarily changes with positions.
+    PD is per anatomy voxel, matching phantom_from_maps; multiply by physical
+    voxel volume when comparing absolute signals across anatomy resolutions.
+
+    ``t2star='auto'`` uses observed T2* only if chi_to_b0=False; with chi fields
+    it omits uncalibrated R2' (a conservative lower bound, not a complete T2*
+    model). ``'table'`` uses R2*=map R2star or tissue table, subtracts R2, and
+    REQUIRES ``macroscopic_r2prime`` [1/s] when chi is enabled. This is a supplied
+    calibration, not a universal linewidth inferred from field gradients.
+    Alternatively maps['intrinsic_r2prime'] supplies already separated R2'.
+    ``'off'`` disables broadening. Uses the same stratified Cauchy quantiles as
+    phantom_from_maps; K=1 has only the median (zero), so finite R2' requires K>1.
+    Quantile assignments use a separate fixed RNG; spatial seed does not alter
+    their distribution. Fat classes use phantom.FAT_PEAKS (Ren et al. 2008).
+
+    Optional maps R1/R2/M0 override tissue rates/density voxelwise. MT converts
+    total bound fraction p to BoundPool.f=p/(1-p), assumes bound T1=free T1,
+    and uses model='rate'. Missing requested MT/diffusion parameters raise.
+    ``field_maps`` can reuse a precomputed (tissue, scanner-shim) pair. This
+    stationary combined db0 is NOT suitable for motion; use anatomy_field_maps
+    and keep only susceptibility attached to the moving tissue instead.
+
+    fov_region is three voxel slices: B0 is computed on the full anatomy first.
+    Apple GPU full 1-mm head (categorical K=1, 5,328,321 spins): 32-sample FID
+    after 50 RF segments, 0.686 s / 7.77 million spins/s; phantom 149 MB, process
+    peak RSS 3.64 GB, MPS driver allocation 1.08 GB. This benchmark excludes B0,
+    T2', MT and diffusion; it is not full k-space imaging speed. Reproduction
+    and memory-accounting limits: validation/anatomy/RESULTS.md.
+    Spatial variability is M4; a non-None value is rejected until implemented.
+    """
+    if variability is not None:
+        raise NotImplementedError("spatial variability is M4")
+    if sampling not in ("per_tissue","categorical") or jitter not in (None,"stratified"):
+        raise ValueError("invalid sampling or jitter mode")
+    if t2star not in ("auto","off","table"):
+        raise ValueError("t2star must be auto, off or table")
+    counts = _subvoxel_counts(spins_per_voxel,3)
+    k = math.prod(counts)
+    props = _properties(anatomy,table,field_T)
+    maps_pair = None
+    if chi_to_b0:
+        maps_pair = field_maps if field_maps is not None else anatomy_field_maps(anatomy,table,field_T,shim_order=shim_order)
+    if t2star == "table" and chi_to_b0 and macroscopic_r2prime is None and "intrinsic_r2prime" not in anatomy.maps:
+        raise ValueError("observed T2* plus chi requires macroscopic_r2prime calibration")
+    if macroscopic_r2prime is not None:
+        macro = torch.as_tensor(macroscopic_r2prime,dtype=next(iter(anatomy.fractions.values())).dtype)
+        if macro.ndim and macro.shape != anatomy.shape or not torch.isfinite(macro).all() or (macro < 0).any():
+            raise ValueError("macroscopic_r2prime must be a nonnegative scalar or full anatomy map")
+        if fov_region is not None and macro.ndim:
+            macro = macro[fov_region]
+    else:
+        macro = 0.
+    if fov_region is not None:
+        anatomy = anatomy.crop(fov_region)
+    ref = next(iter(anatomy.fractions.values()))
+    gen = torch.Generator().manual_seed(seed)
+    qgen = torch.Generator().manual_seed(0)
+    cells = torch.cartesian_prod(*(torch.arange(c) for c in counts)).reshape(k,3)
+    names = sorted(name for name,p in props.items() if name in anatomy.fractions and p.pd.mean > 0)
+    category = None
+    if sampling == "categorical":
+        # Sequential thresholds avoid a (voxels,K,tissues) temporary.
+        u = torch.rand((*anatomy.shape,k),dtype=ref.dtype,generator=gen)
+        category = torch.full(u.shape,-1,dtype=torch.long)
+        cumulative = torch.zeros_like(ref)
+        for i,name in enumerate(names):
+            previous = cumulative
+            cumulative = cumulative+anatomy.fractions[name]
+            category[(u >= previous[...,None]) & (u < cumulative[...,None])] = i
+    parts = {key:[] for key in ("pos","pd","t1","t2","db0","f","rate","t2b","diff")}
+    active_broadening = False
+    for ti,name in enumerate(names):
+        p = props[name]
+        fraction = anatomy.fractions[name]
+        mask = fraction > 0 if category is None else (category == ti).any(-1)
+        if not mask.any():
+            continue
+        idx = mask.nonzero()
+        n = len(idx)
+        u = torch.rand((n,k,3),dtype=ref.dtype,generator=gen) if jitter else torch.full((n,k,3),.5,dtype=ref.dtype)
+        offsets = (cells+u)/torch.tensor(counts)-.5
+        origin = torch.tensor(anatomy.origin,dtype=ref.dtype)
+        spacing = torch.tensor(anatomy.voxel,dtype=ref.dtype)
+        pos = origin+(idx[:,None,:]+offsets).flip(-1)*spacing.flip(-1)
+        select = torch.ones((n,k),dtype=torch.bool) if category is None else category[mask] == ti
+        expand = lambda value: (value[:,None].expand(-1,k) if value.ndim else value.expand(n,k))[select]
+        parameter = lambda key,default: anatomy.maps[key][mask] if key in anatomy.maps else ref.new_tensor(default)
+        density = parameter("M0",p.pd.mean)
+        r1, r2 = parameter("R1",1/p.t1.mean),parameter("R2",1/p.t2.mean)
+        if (density < 0).any() or (r1 <= 0).any() or (r2 <= 0).any():
+            raise ValueError("M0 must be nonnegative; R1 and R2 positive")
+        pd = expand(density) / k
+        if category is None:
+            pd = pd*expand(fraction[mask])
+        pos = pos[select]
+        db0 = torch.zeros_like(pd)
+        if maps_pair is not None:
+            for fm in maps_pair:
+                db0 += sample(fm.b0[None],ref.new_tensor(fm.origin),ref.new_tensor(fm.spacing),pos)[:,0]
+        if t2star != "off":
+            rate = None
+            if "intrinsic_r2prime" in anatomy.maps:
+                rate = anatomy.maps["intrinsic_r2prime"][mask]
+            elif t2star == "table" or not chi_to_b0:
+                rstar = parameter("R2star",1/p.t2star.mean if p.t2star else 1/p.t2.mean)
+                rate = rstar-r2-(macro[mask] if isinstance(macro,Tensor) and macro.ndim else macro)
+            if rate is not None:
+                if (rate < -1e-6).any():
+                    raise ValueError("R2* - R2 - macroscopic R2' is negative; incompatible calibration")
+                active_broadening |= bool((rate > 0).any())
+                q = (torch.arange(k,dtype=ref.dtype)+.5)/k
+                q = q[torch.argsort(torch.rand(n,k,generator=qgen),dim=1)]
+                db0 += expand(rate.clamp_min(0))*torch.tan(math.pi*(q-.5))[select]/(2*math.pi)
+        f = p.bound_fraction.mean if p.bound_fraction else 0.
+        if mt and (p.bound_fraction is None or (f > 0 and (p.exchange_rate is None or p.bound_t2 is None))):
+            raise ValueError(f"missing MT properties for {name}")
+        if diffusion and p.diffusivity is None:
+            raise ValueError(f"missing diffusivity for {name}")
+        # Chemical species share spatial/relaxation/MT parameters within this class.
+        ff = p.fat_fraction.mean if p.fat_fraction else 0.
+        species = [(1-ff,0.)] if ff < 1 else []
+        if ff > 0:
+            total_amp = sum(amp for _,amp in FAT_PEAKS)
+            species += [(ff*amp/total_amp,shift*1e-6*GAMMA_BAR*field_T) for shift,amp in FAT_PEAKS]
+        for weight,shift in species:
+            parts["pos"].append(pos)
+            parts["pd"].append(pd*weight)
+            parts["t1"].append(1/expand(r1))
+            parts["t2"].append(1/expand(r2))
+            parts["db0"].append(db0+shift)
+            if mt:
+                parts["f"].append(torch.full_like(pd,f/(1-f)))
+                parts["rate"].append(torch.full_like(pd,p.exchange_rate.mean if f else 0.))
+                parts["t2b"].append(torch.full_like(pd,p.bound_t2.mean if f else 12e-6))
+            if diffusion:
+                parts["diff"].append(torch.full_like(pd,p.diffusivity.mean))
+    if active_broadening and k == 1:
+        warnings.warn("one spin per tissue/voxel cannot represent T2' broadening; use more spins",UserWarning,stacklevel=2)
+    cat = lambda key: torch.cat(parts[key]) if parts[key] else torch.empty((0,3) if key == "pos" else (0,),dtype=ref.dtype)
+    ph = Phantom(*(cat(key) for key in ("pos","pd","t1","t2","db0")))
+    if mt:
+        ph.bound = BoundPool(cat("f"),cat("rate"),ph.t1,cat("t2b"),model="rate")
+    if diffusion:
+        ph.diffusion = cat("diff")
+    return ph

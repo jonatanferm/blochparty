@@ -1,6 +1,7 @@
 # Spec: realistic anatomy and susceptibility-driven B0
 
-Status: M1 implemented and analytically checked, 2026-10-07; M2–M5 open.
+Status: M1–M2 implemented and checked, 2026-10-07; M3–M5 open.
+M2 results and remaining clinical-validation limits: [RESULTS](../../validation/anatomy/RESULTS.md).
 The QSM forward-field cross-check remains part of M3. Coordination rules at the end.
 Read first: `CLAUDE.md` (working rules), `docs/REALISM.md` (rows "Realistic anatomy and fuzzy
 tissue", "Continuous anatomy (inverse crime)", "B0 inhomogeneity from anatomy"),
@@ -9,8 +10,8 @@ tissue", "Continuous anatomy (inverse crime)", "B0 inhomogeneity from anatomy"),
 
 ## 1. Why
 
-Every phantom in the project today is geometric (Shepp-Logan ellipses, NIST spheres, tubes) and
-rasterised on the grid it is reconstructed on. Real images differ in three ways this item closes:
+Before this work, the project phantoms were geometric (Shepp-Logan ellipses, NIST spheres,
+tubes) and rasterised on the grid they were reconstructed on. Real images differ in three ways this item closes:
 
 1. **Anatomy**: brain geometry with partial volume between tissues (fuzzy membership), not
    piecewise-constant labels.
@@ -52,7 +53,7 @@ everything maps onto existing `Phantom` fields. If one seems needed, stop and wr
 
 | Source | What | Access / licence (to verify) | Use |
 |---|---|---|---|
-| BrainWeb, 20 normal anatomical models (Aubert-Broche et al., NeuroImage 2006; brainweb.bic.mni.mcgill.ca) | fuzzy membership volumes per tissue class (background, CSF, GM, WM, fat, muscle, muscle/skin, skull, vessels, around-fat, dura, bone marrow), 1 mm isotropic, 256 x 256 x 181 | free download through the site's form; check terms, do not redistribute | M2 primary anatomy |
+| BrainWeb, 20 normal anatomical models (Aubert-Broche et al., NeuroImage 2006; brainweb.bic.mni.mcgill.ca) | fuzzy membership volumes per tissue class (background, CSF, GM, WM, fat, muscle, muscle/skin, skull, vessels, around-fat, dura, bone marrow), 0.5 mm isotropic, (362,434,362) z/y/x; T1 reference is a separate 1-mm grid | public form verified 2026-10-07; optional identity fields, citation request, no explicit redistribution licence found; do not redistribute | M2 primary anatomy |
 | QSM Challenge 2.0 head phantom (Marques et al., MRM 2021, doi:10.1002/mrm.28716; data doi:10.34973/m20r-jt17) | chi (two models), R1, R2*, M0, 16-label segmentation, 0.64 mm and 1 mm, plus simulation code | CC BY 4.0; Radboud/Donders repository, may need an account (verify) | M3 anatomy + chi for M1; its forward field is an independent check of M1 |
 | MIDA, XCAT, Virtual Population | whole-head / body models | licences required | not used |
 
@@ -125,7 +126,8 @@ class Anatomy:
 
 Fractions need not sum to 1 (background); document how the remainder is treated.
 Convert ppm source data by 1e-6 on loading, keeping the Anatomy and M1 units identical. Loaders:
-`load_brainweb(subject: int, root)`, `load_qsm2(root, resolution="1mm")`. Utilities:
+`load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32)`;
+`load_qsm2(root, resolution="1mm")` follows in M3. Utilities:
 `crop`, `slab(z0, thickness)`, `resample(voxel)` (fraction-preserving, i.e. area/volume
 weighted, not nearest neighbour), `reorient` if a source uses another axis convention (state the
 conventions explicitly in the docstring; ours are (z, y, x) arrays, positions in (x, y, z) m).
@@ -136,7 +138,7 @@ A data structure (and a default instance) giving, per tissue and field strength 
 7 T where sources exist): PD (relative water content), T1, T2, T2* (or T2'), chi, and optionally
 MT (`BoundPool` f, k, T2b), diffusivity (mean, and FA for white matter if tensors are used),
 fat fraction. Each entry is a distribution (mean, SD across subjects or within tissue), not just a
-mean, and **every number carries a citation** (author, year, table) in the code next to it; where
+mean (`sd=None` explicitly records an unreported SD), and **every number carries a citation** (author, year, table) in the code next to it; where
 a value is assumed, say so. Starting points to verify, not to copy blindly:
 
 - T1/T2 at 1.5 and 3 T: Stanisz et al., MRM 2005 (many tissues, both fields, MT parameters too);
@@ -162,8 +164,11 @@ seed=0, mt=False, diffusion=False, chi_to_b0=True, shim_order=2, variability=Non
 - T2*: from the table's T2* (or the QSM 2.0 R2* map) as T2' = 1 / (1/T2* - 1/T2), applied with
   the existing `t2prime` mechanism of `phantom_from_maps` (quantile Cauchy offsets, many spins).
   The susceptibility field from M1 is the *macroscopic* part and must not be double counted:
-  document that table T2* values already include intravoxel macroscopic gradients in the source
-  measurements, and choose (and justify) what to subtract.
+  observed T2* may include intravoxel macroscopic gradients, depending on the measurement
+  and correction method. M2 defaults to `t2star="auto"`: use table broadening only without
+  susceptibility. With susceptibility, omit uncalibrated R2′ (a lower-bound model, not full
+  T2*) or supply `maps["intrinsic_r2prime"]`. Explicit `t2star="table"` plus susceptibility
+  requires `macroscopic_r2prime` calibration in 1/s; no universal subtraction is assumed.
 - B0: `chi -> df` via M1 on the anatomy grid (air outside the head must be in the chi map; the
   BrainWeb background is air), then shimmed (2nd order over the brain mask by default), sampled
   at each spin's position (trilinear, as `maps.sample`). Return it in `Phantom.db0` and also
@@ -185,16 +190,48 @@ real data only in an opt-in marked test or a validation script)
    per voxel, with ideal spoiling and one spin per tissue.
 3. No inverse crime: a sharp tissue boundary at a sub-voxel offset gives the k-space of the
    continuous object (analytic box / sphere FT) to within the spin-sampling error, measured as a
-   function of spins per voxel; contrast with the on-grid phantom.
+   function of spins per voxel; contrast with the on-grid phantom. A membership volume
+   specifies cell-average density, not an unknown subcell boundary: resolve boundaries on
+   an independent, finer anatomy grid. Jitter alone cannot recover missing geometry.
 4. B0 path: a chi map with a single sphere in the anatomy reproduces `b0_sphere` at spin positions.
-5. Determinism: same seed -> identical phantom; different seeds -> different jitter only.
+5. Determinism: same seed -> identical phantom; different seeds -> different spatial jitter,
+   with fixed material properties. Categorical tissue draws and B0 sampled at changed
+   positions also change; quantile broadening uses its own fixed random stream.
 6. GPU = core on a small anatomical phantom (relative error ~1e-5, as `tests/test_metal.py`).
 
-Validation script (`validation/anatomy_brainweb.py`, results in a RESULTS file): simulate
-BrainWeb's published simulator settings (their T1w/T2w/PD-weighted protocols at 1.5 T; BrainWeb
-publishes the parameters and simulated images) and compare tissue contrast ratios (GM/WM, CSF/GM)
-with their simulated images and with published in-vivo ratios. This is a plausibility check
-between simulators, not ground truth; say so.
+Validation script (`validation/anatomy_brainweb.py`, [RESULTS](../../validation/anatomy/RESULTS.md)):
+compare tissue contrast ratios (GM/WM, CSF/GM) against downloaded references. The newer
+20-model set publishes only SFLASH T1 (22/9.2 ms, 30°); the older SBD publishes SFLASH T1
+(18/10 ms, 30°) and DSE T2/PD (TR 3300 ms, echoes 35/120 ms). These are separate comparisons.
+Older GM/WM differences are <0.13%, CSF/GM <4.74%; newer subject-04 T1 differs by −5.44% and
+−21.31%, respectively, using the older tissue priors. Do not claim those priors are the exact
+newer simulator parameters. This is cross-simulator plausibility, not scanner ground truth.
+M2 propagates published human 3 T relaxation values through these protocols as a sensitivity
+check; a comparison to observed, protocol-matched in-vivo ratios remains unvalidated.
+
+M2 delivered API and limits:
+
+- `Anatomy`, `Distribution`, `TissueProperties`, `DEFAULT_TISSUES`, `BRAINWEB_TISSUES`,
+  `load_brainweb`, `to_phantom`, `anatomy_field_maps` are exported. See the
+  [usage and data-format notes](../../validation/anatomy/README.md).
+- Pinned subject-04 raw-short data: little-endian 0…4095, verified from delivered files,
+  despite the website's legacy endian description. Checksum is over decompressed bytes.
+  Normalize only overfull class totals; deficits stay air. Data is git-ignored.
+- Separate per-tissue spins conserve PD to 1e-12; categorical sampling conserves in
+  expectation. Resampling conserves physical volume to 1e-6. The box Fourier error falls
+  0.1771 → 1.44e-5 over 1→64 x samples/cell; sphere B0 RMS at spin positions is 0.464 Hz;
+  GPU/core relative signal error with B0, MT and diffusion is 3.23e-7.
+- 1.5/3 T priors include flagged ex-vivo and other-tissue proxies. Verified 7 T T1/T2*
+  entries cover WM/GM only, with an explicit 3 T T2 proxy; missing classes raise. Optional
+  MT/diffusion parameters are illustrative assumptions, not calibrated measurements.
+  Unreported SDs remain unknown; M4 spatial sampling is not implemented.
+- Full 1-mm head: 5.33 million spins, RF/FID GPU 0.686 s (7.77 million spins/s), phantom
+  149 MB, peak process RSS 3.64 GB, end-of-run MPS driver allocation 1.08 GB. Benchmark
+  excludes B0/T2′/MT/diffusion; it does not establish full imaging speed or convergence.
+- Full 2-mm head B0 at 3 T: brain RMS 45.30 → 19.17 Hz after second-order shim with
+  scalar tissue/air/bone priors. A measured field comparison is still pending M3.
+- 449 tests pass with Apple GPU access; 4 opt-in crosschecks deselected. Existing output
+  and gradient snapshots are bit-identical. No engine, `phantom.py` or `maps.py` edits.
 
 ## 6. M4: within-tissue variability
 

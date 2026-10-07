@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "snapshot": "2026-10-07",
+  "shape": [
+    181,
+    217,
+    181
+  ],
+  "dtype": "<u2",
+  "scale": 4095,
+  "origin": [
+    -0.09,
+    -0.126,
+    -0.072
+  ],
+  "voxel": [
+    0.001,
+    0.001,
+    0.001
+  ],
+  "files": {
+    "wm": {
+      "path": "legacy_wm.raws.gz",
+      "sha256": "f7d816d73e23b7ac9204383412e3b13c02cf2047c54e7249482fa5ca5c9237db",
+      "alias": "phantom_1.0mm_normal_wht"
+    },
+    "gm": {
+      "path": "legacy_gm.raws.gz",
+      "sha256": "09a81cc7c70c2661ca467b7eab4eed60621b0c90d4ff34fe8be610d9656e1f8f",
+      "alias": "phantom_1.0mm_normal_gry"
+    },
+    "csf": {
+      "path": "legacy_csf.raws.gz",
+      "sha256": "79b816a0902e3f446d2550a8dd78f965f7da9e531ca6a280670374111f21e0bf",
+      "alias": "phantom_1.0mm_normal_csf"
+    },
+    "T1": {
+      "path": "legacy_T1.raws.gz",
+      "sha256": "66bbc0e19d768e30561121b8c062e0a79aae089ca60c9da81d8e7597cad6a347",
+      "alias": "T1 ICBM normal 1mm pn0 rf0"
+    },
+    "T2": {
+      "path": "legacy_T2.raws.gz",
+      "sha256": "82ff8fe76398fe6f618260feb0a84f956d51309311a3531409480e97c108026b",
+      "alias": "T2 ICBM normal 1mm pn0 rf0"
+    },
+    "PD": {
+      "path": "legacy_PD.raws.gz",
+      "sha256": "01b005577f4d1c36a11b9691f00a7c4fbe40b7162ecd599940ceb62b60e68332",
+      "alias": "PD ICBM normal 1mm pn0 rf0"
+    }
+  }
+}
