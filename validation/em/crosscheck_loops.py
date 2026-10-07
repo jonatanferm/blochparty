@@ -11,9 +11,7 @@ sphere: E is azimuthal). The receive map fixes the conventions (mariepy: exp(+j 
 plus = Bx + j By, minus = Bx - j By).
 """
 
-import math
 
-import numpy as np
 import torch
 
 from mariepy.body import VoxelBody
@@ -48,7 +46,8 @@ def run(field_t, offset_x=0.0):
     r_qs = float(qs.resistance(A, torch.full((len(pts),), SIGMA, dtype=torch.float64),
                                torch.full((len(pts),), H**3, dtype=torch.float64), medium.frequency)[0, 0])
     fw_p, fw_rx = plus[0][m].to(torch.complex128) / 2, torch.conj(minus[0][m].to(torch.complex128)) / 2
-    rel = lambda a, b: float((a - b).abs().pow(2).sum().sqrt() / b.abs().pow(2).sum().sqrt())
+    def rel(a, b):
+        return float((a - b).abs().pow(2).sum().sqrt() / b.abs().pow(2).sum().sqrt())
     print(f"{field_t:6.3f} T ({medium.frequency / 1e6:6.2f} MHz), loop offset {offset_x * 1e3:4.0f} mm: "
           f"|B1+| rel. diff {rel(fw_p.abs(), b1p.abs()):.4f}, receive rel. diff {rel(fw_rx, rx.to(torch.complex128)):.4f} "
           f"(conj convention {rel(torch.conj(fw_rx), rx.to(torch.complex128)):.4f}); "
