@@ -218,8 +218,9 @@ def test_tables_have_provenance_and_no_silent_7t_fallback():
                     assert isinstance(d,Distribution) and d.citation
     assert DEFAULT_TISSUES[3]["wm"].t1.sd == .045
     assert DEFAULT_TISSUES[7]["wm"].t1.mean == 1.19
-    assert DEFAULT_TISSUES[3]["csf"].t1.assumed
-    assert DEFAULT_TISSUES[3]["fat"].t2.assumed
+    assert not DEFAULT_TISSUES[3]["csf"].t1.assumed and DEFAULT_TISSUES[3]["csf"].t2.mean == 2.03
+    assert DEFAULT_TISSUES[1.5]["csf"].t2.assumed  # the 3 T value carried to 1.5 T
+    assert DEFAULT_TISSUES[3]["fat"].t1.mean == .382 and DEFAULT_TISSUES[3]["fat"].t2.sd == .004
     assert not BRAINWEB_TISSUES[1.5]["csf"].t1.assumed
     a = Anatomy({"csf":torch.ones(1,1,1,dtype=torch.float64)},(.001,)*3,(0,0,0))
     with pytest.raises(ValueError,match="missing tissue"):
@@ -234,8 +235,9 @@ def test_invalid_anatomy_and_options():
         Anatomy(a.fractions,(0,.001,.001),(0,0,0))
     with pytest.raises(ValueError):
         a.crop((slice(None,None,2),slice(None),slice(None)))
-    with pytest.raises(NotImplementedError):
-        to_phantom(a,variability={})
+    assert torch.equal(to_phantom(a,variability={},chi_to_b0=False).t1,to_phantom(a,chi_to_b0=False).t1)
+    with pytest.raises(ValueError,match="nonnegative"):
+        to_phantom(a,variability={"t1":-.1,"length":.01},chi_to_b0=False)
     with pytest.raises(ValueError):
         to_phantom(a,spins_per_voxel=2)
 
@@ -252,3 +254,33 @@ def test_gpu_equals_core():
     error = (actual-ref).abs().max()/ref.abs().max()
     print("anatomy GPU relative signal error:",error.item())
     assert error < 1e-5
+
+
+def test_variability_statistics_and_defaults():
+    # a 96^3 one-tissue anatomy at 1 mm, L = 4 mm: the realised log-SD, mean and correlation at
+    # lag L match the request within 10 %; T1 / T2 / PD fields are independent; default is off
+    a = Anatomy({"wm": torch.ones(96, 96, 96, dtype=torch.float64)}, (.001,)*3, (0, 0, 0))
+    var = {"t1": .1, "t2": .05, "pd": .02, "length": .004, "seed": 3}
+    base = to_phantom(a, chi_to_b0=False, t2star="off", spins_per_voxel=1, jitter=None)
+    ph = to_phantom(a, chi_to_b0=False, t2star="off", spins_per_voxel=1, jitter=None, variability=var)
+    assert torch.equal(base.pos, ph.pos)
+    for key, sd in (("t1", .1), ("t2", .05), ("pd", .02)):
+        f = (getattr(ph, key) / getattr(base, key)).reshape(96, 96, 96)
+        assert abs(float(f.mean()) - 1) < .01
+        assert abs(float(f.std()) / sd - 1) < .1, (key, float(f.std()))
+        g = f.log() - f.log().mean()
+        rho = float((g[:, :, :-4] * g[:, :, 4:]).mean() / g.var())
+        assert abs(rho / math.exp(-.5) - 1) < .1, (key, rho)
+    c = torch.corrcoef(torch.stack([(ph.t1 / base.t1).log(), (ph.pd / base.pd).log()]))[0, 1]
+    assert abs(float(c)) < .05
+    # same variability seed, other jitter seed: same texture; other variability seed: different
+    again = to_phantom(a, chi_to_b0=False, t2star="off", spins_per_voxel=1, jitter=None, seed=9, variability=var)
+    assert torch.equal(again.t1, ph.t1)
+    other = to_phantom(a, chi_to_b0=False, t2star="off", spins_per_voxel=1, jitter=None, variability=var | {"seed": 4})
+    assert not torch.equal(other.t1, ph.t1)
+    # crops see the same realisation as the full anatomy
+    cut = to_phantom(a, chi_to_b0=False, t2star="off", spins_per_voxel=1, jitter=None, variability=var,
+                     fov_region=(slice(10, 12), slice(None), slice(None)))
+    assert torch.allclose(cut.t1, ph.t1.reshape(96, 96, 96)[10:12].reshape(-1))
+    with pytest.raises(ValueError, match="variability"):
+        to_phantom(a, chi_to_b0=False, variability={"t1": .1})

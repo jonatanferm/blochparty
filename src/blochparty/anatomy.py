@@ -83,6 +83,13 @@ class TissueProperties:
 _BW = "BrainWeb MRISIM tissue_mr_parameters.txt (1996), named tissue row; https://brainweb.bic.mni.mcgill.ca/brainweb/tissue_mr_parameters.txt"
 _ST = "Stanisz et al. 2005, Table 1, doi:10.1002/mrm.20605; 37 C excised animal tissue (human blood)"
 _CA = "Caan et al. 2019, Table 1 MP2RAGEME column, doi:10.1002/hbm.24490; human 7 T"
+_RO = ("Rooney et al. 2007, doi:10.1002/mrm.21122: CSF T1 ~4.4 s, nearly field-independent (value as quoted by "
+       "Spijkerman et al. 2018, ref. 13)")
+_SP = ("Spijkerman et al. 2018, doi:10.1007/s10334-017-0659-3: 3 T ventricular CSF T2 median 2.03 s "
+       "(range 1.73-2.16 s; peripheral 1.79 s), T2-prepared, 7 volunteers")
+_DB = "de Bazelaire et al. 2004, doi:10.1148/radiol.2303021331: subcutaneous fat at 3 T, abdomen"
+_IT = ("IT'IS Foundation tissue database, relaxation times, SAT (subcutaneous fat) 1.5 T: mean of 2 studies "
+       "(T1 288-343 ms, T2 58-165 ms); itis.swiss, checked 2026-10-07")
 
 
 def _assumed(value, reason):
@@ -143,6 +150,18 @@ def _tables():
             default[strength][name] = replace(proxy,
                 t1=_assumed(proxy.t1.mean, _ST + f"; muscle used for {name}"),
                 t2=_assumed(proxy.t2.mean, _ST + f"; muscle used for {name}"))
+        # CSF and subcutaneous fat: measured values replace the legacy 1.5 T simulator priors,
+        # whose CSF (T1 2.57 s, T2 0.33 s) was the largest error in T2-weighted contrast.
+        csf, fat = default[strength]["csf"], default[strength]["fat"]
+        csf_t2 = Distribution(2.03, None, _SP, strength != 3.)
+        default[strength]["csf"] = replace(csf, t1=Distribution(4.4, None, _RO),
+            t2=csf_t2 if strength == 3. else replace(csf_t2, citation="Assumption: " + _SP + "; 3 T value used at 1.5 T"),
+            t2star=_assumed(2.03, "CSF T2* = T2: no intrinsic broadening; pulsation and macroscopic fields not included"))
+        if strength == 3.:
+            default[strength]["fat"] = replace(fat, t1=Distribution(.382, .013, _DB), t2=Distribution(.068, .004, _DB))
+        else:
+            default[strength]["fat"] = replace(fat, t1=Distribution(.3124, .029, _IT), t2=Distribution(.1174, .0564, _IT),
+                t2star=_assumed(.058, _BW + "; fat T2* legacy prior"))
         for name, md, fraction in (("wm", .7e-9, .16), ("gm", .8e-9, .07), ("csf", 3e-9, 0.)):
             # Explicit modelling priors, not claimed measurements or fitted qMT parameters.
             default[strength][name] = replace(default[strength][name],
@@ -481,6 +500,72 @@ def load_qsm2(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     return anatomy if resolution is None else anatomy.resample(resolution)
 
 
+# Units of the AHEAD v3 templates: the publisher record does not state them. ppm and 1/s
+# follow from the values (WM R1 ~0.8 /s and R2* ~ 35 /s at 7 T match Caan et al. 2019, same
+# MP2RAGEME method; pallidal QSM ~ +0.1 is ppm, not ppb); checked in validation/anatomy_ahead.py.
+AHEAD_UNITS = {"chi": 1e-6, "R1": 1.0, "R2star": 1.0, "relative_PD": 1.0}
+
+
+def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
+    """Load the AHEAD v3 7 T population-median brain templates (Bazin et al.; figshare
+    doi:10.21942/uva.19646364.v3, CC BY 4.0) fetched by validation/anatomy/fetch_ahead.py into
+    ``root`` (pins: root/verified_source.json, decompressed SHA-256 checked here).
+
+    A brain-only template: one tissue class ``"brain"`` (where R1 > 0 and PD > 0; QSM can be
+    zero inside tissue, so it does not define the mask), maps ``M0`` (relative PD, not absolute
+    density), ``R1``, ``R2star`` [1/s] and ``brain_mask``, and ``chi`` (QSM, converted ppm -> SI,
+    relative to its own reference, so ``chi_background = 0``: no air or bone around it).
+    ``map_field_T = 7``: simulating at another field raises (no field scaling). There is no
+    R2 map: ``to_phantom`` needs a table entry ``"brain"`` at 7 T giving T2 (and the T2* policy
+    as for other measured R2star maps). Stored RPS; reoriented to RAS without interpolation and
+    transposed to (z, y, x). ``resolution``: 'native' (0.5 mm), '1mm' (default, conservative
+    cell averages) or a (dz, dy, dx) tuple [m]. Optional dependency: nibabel (``[anatomy]``).
+    """
+    try:
+        import nibabel as nib
+    except ImportError as exc:
+        raise ImportError("load_ahead requires the anatomy extra: pip install 'blochparty[anatomy]'") from exc
+    if dtype not in (torch.float32, torch.float64):
+        raise ValueError("dtype must be float32 or float64")
+    root = Path(root).resolve()
+    manifest = json.loads((root/"verified_source.json").read_text())
+    if manifest.get("schema") != 1 or manifest.get("doi") != "10.21942/uva.19646364.v3":
+        raise ValueError("unexpected AHEAD manifest")
+    arrays, affine = {}, None
+    for key in ("chi", "R1", "R2star", "relative_PD"):
+        entry = manifest["files"][key]
+        path = (root/entry["path"]).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError("AHEAD manifest paths must stay inside root")
+        if _file_sha256(path) != entry["decompressed_sha256"]:
+            raise ValueError(f"checksum mismatch: {path}")
+        img = nib.as_closest_canonical(nib.load(path))
+        mat = img.affine
+        if img.header.get_xyzt_units()[0] != "mm" or not np.allclose(mat[:3, :3], np.diag(np.diag(mat[:3, :3])), atol=1e-6) \
+                or (np.diag(mat)[:3] <= 0).any():
+            raise ValueError(f"unexpected AHEAD grid: {key}")
+        if affine is None:
+            affine = mat
+        elif not np.allclose(mat, affine, atol=1e-6):
+            raise ValueError(f"AHEAD maps do not share a grid: {key}")
+        data = img.get_fdata(dtype=np.float64 if dtype == torch.float64 else np.float32)
+        arrays[key] = torch.from_numpy(np.ascontiguousarray(data.transpose(2, 1, 0))) * AHEAD_UNITS[key]
+    pd, r1, r2s = arrays["relative_PD"], arrays["R1"], arrays["R2star"]
+    mask = ((r1 > 0) & (pd > 0)).to(dtype)
+    if (pd < 0).any() or (r1 < 0).any() or (r2s < 0).any():
+        raise ValueError("AHEAD PD and rates must be nonnegative")
+    voxel = tuple((np.diag(affine)[:3]*1e-3)[::-1])
+    origin = tuple(affine[:3, 3]*1e-3)
+    maps = {"M0": pd*mask, "R1": torch.where(mask > 0, r1, 0.), "R2star": torch.where(mask > 0, r2s, 0.), "brain_mask": mask}
+    anatomy = Anatomy({"brain": mask}, voxel, origin, arrays["chi"]*mask, maps, 0.0, 7.0)
+    if isinstance(resolution, str):
+        options = {"native": None, "1mm": (.001,)*3}
+        if resolution not in options:
+            raise ValueError("resolution must be native, 1mm, or a voxel tuple")
+        resolution = options[resolution]
+    return anatomy if resolution is None else anatomy.resample(resolution)
+
+
 def _properties(anatomy, table, field_T):
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T; provide explicit values (no field interpolation)")
@@ -521,6 +606,59 @@ def anatomy_field_maps(anatomy, table=DEFAULT_TISSUES, field_T=3., *, shim_order
         correction = residual-df
     args = (anatomy.origin,tuple(reversed(anatomy.voxel)))
     return FieldMaps(*args,b0=df),FieldMaps(*args,b0=correction)
+
+
+_VARIABLE = ("t1", "t2", "pd")
+
+
+def gaussian_random_field(anatomy: Anatomy, length: float, generator: torch.Generator) -> tuple[Tensor, tuple, tuple]:
+    """A zero-mean, unit-variance Gaussian random field over the anatomy's extent with covariance
+    exp(-r^2 / (2 length^2)) [length in m], on a coarse (z, y, x) grid of spacing length / 4 padded
+    by 3 lengths (so periodic copies do not correlate across the head): (grid, origin (x, y, z),
+    spacing (x, y, z)) for ``maps.sample``. White noise is filtered by the square root of the
+    spectral density exp(-2 pi^2 length^2 |k|^2) and divided by the exact discrete standard
+    deviation sqrt(mean S); trilinear sampling between nodes lowers the SD by < 1 %."""
+    if not math.isfinite(length) or length <= 0:
+        raise ValueError("variability length must be positive [m]")
+    h, pad = length / 4, 3 * length
+    lo = [o - v / 2 - pad for o, v in zip(anatomy.origin, reversed(anatomy.voxel))]  # (x, y, z)
+    n = [math.ceil((v * m + 2 * pad) / h) + 1 for v, m in zip(reversed(anatomy.voxel), reversed(anatomy.shape))]
+    shape = tuple(reversed(n))  # (z, y, x)
+    k = [torch.fft.fftfreq(m, d=h, dtype=torch.float64) for m in shape]
+    k2 = k[0][:, None, None] ** 2 + k[1][None, :, None] ** 2 + k[2][None, None, :] ** 2
+    spectrum = torch.exp(-2 * math.pi**2 * length**2 * k2)
+    white = torch.randn(shape, generator=generator, dtype=torch.float64)
+    field = torch.fft.ifftn(spectrum.sqrt() * torch.fft.fftn(white, norm="ortho"), norm="ortho").real
+    return field / spectrum.mean().sqrt(), tuple(lo), (h, h, h)
+
+
+def _variability_factors(anatomy, names, variability):
+    """{(tissue, property): (nz, ny, nx) mean-1 log-normal factor} with relative SD per property."""
+    import zlib
+
+    unknown = set(variability) - {*_VARIABLE, "length", "seed"}
+    if unknown or "length" not in variability:
+        raise ValueError(f"variability takes {_VARIABLE} relative SDs, 'length' [m] and optional 'seed'; got {sorted(variability)}")
+    seed = int(variability.get("seed", 0))
+    ref = next(iter(anatomy.fractions.values()))
+    nz, ny, nx = anatomy.shape
+    idx = torch.cartesian_prod(torch.arange(nz), torch.arange(ny), torch.arange(nx)).to(torch.float64)
+    centres = torch.tensor(anatomy.origin, dtype=torch.float64) + idx.flip(-1) * torch.tensor(anatomy.voxel[::-1])
+    out = {}
+    for name in names:
+        for prop in _VARIABLE:
+            sd = float(variability.get(prop, 0.0))
+            if sd < 0 or not math.isfinite(sd):
+                raise ValueError("variability SDs must be nonnegative")
+            if sd == 0:
+                continue
+            gen = torch.Generator().manual_seed((seed * 1_000_003 + zlib.crc32(f"{name}/{prop}".encode())) % 2**63)
+            grid, origin, spacing = gaussian_random_field(anatomy, float(variability["length"]), gen)
+            g = sample(grid[None], torch.tensor(origin, dtype=torch.float64), torch.tensor(spacing, dtype=torch.float64),
+                       centres)[:, 0].reshape(nz, ny, nx)
+            sigma2 = math.log1p(sd**2)  # log-normal with mean 1 and SD sd
+            out[name, prop] = torch.exp(math.sqrt(sigma2) * g - sigma2 / 2).to(ref.dtype)
+    return out
 
 
 def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_region=None,
@@ -565,10 +703,13 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     peak RSS 3.64 GB, MPS driver allocation 1.08 GB. This benchmark excludes B0,
     T2', MT and diffusion; it is not full k-space imaging speed. Reproduction
     and memory-accounting limits: validation/anatomy/RESULTS.md.
-    Spatial variability is M4; a non-None value is rejected until implemented.
+    ``variability`` (default None: none) = {"t1": sd, "t2": sd, "pd": sd, "length": L [m],
+    "seed": 0}: each tissue's T1, T2 and PD are multiplied by its own mean-1 log-normal field
+    of relative SD ``sd`` and Gaussian correlation exp(-r^2 / 2L^2) (``gaussian_random_field``),
+    evaluated at voxel centres on the full anatomy before ``fov_region``. Its seed is separate
+    from ``seed`` (positions), so jitter does not change the texture. It models within-tissue
+    texture, not the population SDs of the table (``Distribution.sd``).
     """
-    if variability is not None:
-        raise NotImplementedError("spatial variability is M4")
     if sampling not in ("per_tissue","categorical") or jitter not in (None,"stratified"):
         raise ValueError("invalid sampling or jitter mode")
     if t2star not in ("auto","off","table"):
@@ -591,8 +732,13 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
             macro = macro[fov_region]
     else:
         macro = 0.
+    factors = {}
+    if variability:  # on the full anatomy, so crops and slabs share one realisation
+        live = [n for n, p in props.items() if n in anatomy.fractions and p.pd.mean > 0]
+        factors = _variability_factors(anatomy, live, variability)
     if fov_region is not None:
         anatomy = anatomy.crop(fov_region)
+        factors = {key: value[fov_region] for key, value in factors.items()}
     ref = next(iter(anatomy.fractions.values()))
     gen = torch.Generator().manual_seed(seed)
     qgen = torch.Generator().manual_seed(0)
@@ -638,6 +784,13 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         if signal_fraction is not None:
             density = density/signal_fraction[mask]
         r1, r2 = parameter("R1",1/p.t1.mean),parameter("R2",1/p.t2.mean)
+        r2_base = r2  # R2' = R2* - R2 uses the untextured R2: texture must not create negative R2'
+        if (name, "t1") in factors:  # T1 x factor
+            r1 = r1 / factors[name, "t1"][mask]
+        if (name, "t2") in factors:
+            r2 = r2 / factors[name, "t2"][mask]
+        if (name, "pd") in factors:
+            density = density * factors[name, "pd"][mask]
         if (density < 0).any() or (r1 <= 0).any() or (r2 <= 0).any():
             raise ValueError("M0 must be nonnegative; R1 and R2 positive")
         pd = expand(density) / k
@@ -654,7 +807,7 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
                 rate = anatomy.maps["intrinsic_r2prime"][mask]
             elif t2star == "table" or not chi_to_b0:
                 rstar = parameter("R2star",1/p.t2star.mean if p.t2star else 1/p.t2.mean)
-                rate = rstar-r2-(macro[mask] if isinstance(macro,Tensor) and macro.ndim else macro)
+                rate = rstar-r2_base-(macro[mask] if isinstance(macro,Tensor) and macro.ndim else macro)
             if rate is not None:
                 if (rate < -1e-6).any():
                     raise ValueError("R2* - R2 - macroscopic R2' is negative; incompatible calibration")

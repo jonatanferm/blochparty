@@ -121,3 +121,53 @@ Code records means, reported SDs, source/row and assumption flags. Unknown SD is
 (human 7 T WM/GM T1/T2*). Full 7 T tissue coverage, calibrated MT/diffusion,
 microstructure/iron susceptibility and spatial variability are not provided.
 See [README.md](README.md) for the explicit T2* subtraction policy and usage.
+
+# M3 (AHEAD), M4, M5 and the tissue-table update — 2026-10-07
+
+## Tissue table: CSF and fat
+
+The legacy BrainWeb 1.5 T priors for CSF (T1 2.57 s, T2 0.33 s) and fat were the largest
+contrast errors at 3 T. Replaced by CSF T1 4.4 s (Rooney et al. 2007, field-independent),
+3 T CSF T2 2.03 s (Spijkerman et al. 2018, ventricular median; 1.79 s peripheral), 3 T fat
+T1/T2 382 ± 13 / 68 ± 4 ms (de Bazelaire et al. 2004) and 1.5 T fat 312 ± 29 / 117 ± 56 ms (IT'IS
+database, 2 studies). The 1.5 T CSF T2 is the 3 T value, flagged as an assumption.
+
+## M4: within-tissue variability
+
+`tests/test_anatomy.py::test_variability_statistics_and_defaults`, 96^3 voxels at 1 mm,
+L = 4 mm: realised mean 1.0006 / 1.0020 / 1.0006, SD 0.966 / 0.954 / 0.995 of the requested
+0.10 / 0.05 / 0.02 (T1 / T2 / PD), correlation at lag L 1.011 / 0.993 / 1.014 x exp(-1/2);
+T1 and PD fields uncorrelated (|r| < 0.05); same texture for another spin seed, another
+texture for another variability seed, crops identical to the full realisation; default off.
+
+## M3 alternative: AHEAD v3 loader (`load_ahead`, `validation/anatomy_ahead.py`)
+
+Synthetic RPS files (`tests/test_anatomy_ahead.py`): every voxel's encoded world position
+survives the reorientation exactly; ppm -> SI; mask; PD volume conserved by resampling (1e-12).
+Real templates at 1 mm (2,111,978 brain voxels):
+
+| check | AHEAD | reference |
+|---|---|---|
+| WM R1 mode | 0.877 /s (T1 1.14 s) | Caan 2019, 7 T: 1.19 s |
+| GM R1 mode | 0.548 /s (T1 1.83 s) | 2.0 s |
+| R2* at the WM / GM modes | 35.6 / 32.6 /s (T2* 28.1 / 30.7 ms) | 26.7 / 32.4 ms |
+| QSM, basal-ganglia 99th percentile | 0.064 ppm (0.118 ppm max at 0.5 mm) | iron-rich pallidum: positive, tenths of ppm in individuals |
+| brain centroid, MNI | (-0.3, -21.0, 9.7) mm; MNI origin inside the brain | MNI2009b |
+
+Caan 2019 uses the same MP2RAGEME method, so the rate rows check units and consistency, not
+an independent measurement. The publisher states no units; these values fix ppm and 1/s.
+
+![AHEAD 7 T](anatomy_ahead.png)
+
+7 T spoiled GRE (192^2, 2 mm slab at MNI z = 0, 32 spins per voxel) from the measured R1 /
+R2* / PD maps with the QSM field and shim; T2 50 ms assumed, R2' = R2* - R2. At TE 20 ms the
+iron-rich pallidum and putamen darken.
+
+## M5: example (`examples/anatomy_brain.py`)
+
+![BrainWeb at 3 T](anatomy_brain.png)
+
+BrainWeb subject 04, 3 T, 2 mm axial slab (z = 60-61 mm), full-head chi -> B0 (-625 to
++479 Hz) with 2nd-order shim, 8 spins per tissue and voxel (1,859,776 spins), texture 5 / 5 / 2 %
+at 1 cm. Apple M4 GPU: setup 16.4 s, T1w spoiled GRE 7.7 s, T2w TSE (ETL 8, ESP 12 ms) 11.4 s,
+long-TE GRE 8.2 s; 44.2 s in total.

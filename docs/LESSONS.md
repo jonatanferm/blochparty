@@ -295,6 +295,17 @@ says where it came from so it can be re-checked.
   shared tubes have no 3 T values, and agarose T2 depends on field and echo spacing (here 35–50 %
   below the references). Not an independent 3 T T2 reference.
 
+- **Legacy simulator tissue values are not tissue values** (anatomy, 2026-10-07): BrainWeb's
+  MRISIM file gives CSF T2 0.33 s (measured at 3 T: ~2 s) and T1 2.57 s (~4.4 s); used at 3 T it
+  made T2-weighted CSF dark, the most visible error in a brain image. Flags marked it as an
+  assumption, but nothing stopped it being the default — check defaults against images.
+- **The T2* policy can silently drop a measured R2* map**: with susceptibility on, the default
+  (`t2star="auto"`) omits R2' to avoid double counting, so AHEAD's measured R2* produced no T2*
+  contrast at all until R2' was supplied explicitly. Look at a long-TE image before trusting it.
+- **AHEAD v3 states no units**; ppm and 1/s follow from WM R1 ~0.88 /s, R2* ~ 36 /s at 7 T
+  (Caan 2019) and a positive pallidum. PMC served a CAPTCHA for the methods paper: do not try to
+  get around it; use the publisher record and the values.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

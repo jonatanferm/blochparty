@@ -473,6 +473,11 @@ by Pulseq's own checks.
 - [ ] Anatomy M3: QSM loader and public Sim1/Sim2 checks implemented (forward RMS
       2.11e-16 / 3.76e-16 Hz vs independent Python reference). Full-source R1/R2*/M0
       validation and original MATLAB check need authorized data; [details](validation/anatomy/QSM.md).
+- [x] Anatomy M3 (alternative): `load_ahead` for the open AHEAD v3 7 T templates (measured
+      R1/R2*/PD/QSM); units and geometry checked against Caan 2019 / MNI2009b.
+- [x] Anatomy M4: within-tissue texture (`variability`), statistics tested.
+- [x] Anatomy M5: `examples/anatomy_brain.py` (3 T BrainWeb: T1w GRE, T2w TSE, long-TE GRE) and
+      `validation/anatomy_ahead.py` (7 T measured maps).
 - [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data

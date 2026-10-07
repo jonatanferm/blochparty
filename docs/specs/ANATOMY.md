@@ -1,7 +1,7 @@
 # Spec: realistic anatomy and susceptibility-driven B0
 
-Status: M1–M2 complete; M3 loader and public-data checks implemented, full-source
-validation pending; M4–M5 open (2026-10-07).
+Status: M1, M2, M4, M5 complete; M3: QSM loader and public-data checks implemented, the
+restricted full-head source not available, AHEAD 7 T maps loaded as the open alternative (2026-10-07).
 M2 results and remaining clinical-validation limits: [RESULTS](../../validation/anatomy/RESULTS.md).
 M3 progress/access requirements: [QSM notes](../../validation/anatomy/QSM.md).
 Verified alternative for brain parameter maps: [AHEAD v3 and source comparison](../../validation/anatomy/ALTERNATIVE_SOURCES.md).

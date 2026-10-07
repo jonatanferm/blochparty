@@ -119,6 +119,11 @@ metadata; spatial variability is M4 and is explicitly rejected for now.
   are provided. Bound fraction is of the total pool; assembly converts it to the
   engine's bound/free ratio. Bound T1 equals free T1; the rate model is used.
 
+CSF and subcutaneous fat use measured values since 2026-10-07 (CSF T1 4.4 s, Rooney 2007;
+3 T CSF T2 2.03 s, Spijkerman 2018; 3 T fat T1/T2 382/68 ms, de Bazelaire 2004; 1.5 T fat from the
+IT'IS database), replacing the legacy simulator priors (CSF T2 0.33 s) that made T2-weighted CSF
+dark. The 1.5 T CSF T2 is the 3 T value, flagged.
+
 `BRAINWEB_TISSUES` separately preserves the older simulator's 1.5 T relaxation
 priors for reference comparisons. Existing `phantom.TISSUES` is untouched.
 
@@ -138,3 +143,21 @@ maps; preserve any chemical/intrinsic offsets. Translation carries the tissue
 field; rotation relative to B0 requires recomputing it. A thin planar mask cannot
 fit all 3D second-order harmonics: compute the full head first or explicitly choose
 a lower shim order.
+
+## Spatial variability (M4)
+
+`to_phantom(..., variability={"t1": .05, "t2": .05, "pd": .02, "length": .01, "seed": 0})`
+multiplies each tissue's T1, T2 and PD by its own mean-1 log-normal field (relative SD as
+given, Gaussian correlation exp(-r^2 / 2L^2)), drawn on a coarse grid (L / 4) over the whole
+anatomy and interpolated to voxel centres, so crops and slabs share one realisation; its seed
+is independent of the spin-position seed. It is texture within a tissue, not the population
+spread recorded in `Distribution.sd`.
+
+## AHEAD 7 T templates
+
+`load_ahead(root)` reads the four pinned AHEAD v3 maps fetched by `fetch_ahead.py`: one
+`"brain"` class (R1 > 0 and PD > 0), measured `M0` (relative PD), `R1`, `R2star`, and relative
+QSM as `chi` (no air or bone: `chi_background = 0`), `map_field_T = 7`. There is no R2 map:
+supply a 7 T table entry `"brain"` with T2, and, because the default T2* policy omits R2'
+when susceptibility is on, supply `maps["intrinsic_r2prime"]` (e.g. R2* - R2) to keep the
+measured R2* contrast (`validation/anatomy_ahead.py` does both, as stated assumptions).
