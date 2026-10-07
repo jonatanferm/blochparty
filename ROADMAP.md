@@ -102,7 +102,10 @@ count) are impractical at current speed. 3D is the target workload for this phas
       `tests/test_metal.py`). 5.8× the CPU fused kernel on the real NIST TSE (85 k spins, 4.1 M
       segments, 1 coil: 40 s vs 232 s); slower than the CPU on 8-coil GRE benchmarks, where the
       per-sample coil reduction dominates
-- [ ] Metal: many-coil ADC reduction via simdgroup matrix multiply; adjoint; scanner model
+- [x] Metal many-coil ADC reduction: the coil sum as complex matrix products on 8×8 simdgroup
+      matrices; cost nearly flat in the coil count (48³ GRE: 1 coil 0.41 s, 8 coils 0.42 s
+      (was 1.21 s; CPU 1.98 s), 64 coils 1.6 s), no coil limit
+- [ ] Metal: adjoint; scanner model
 - [ ] CUDA port
 
 **Verify:** every optimization must reproduce the existing test outputs bit-for-bit
@@ -253,6 +256,33 @@ isochromat simulator exactly once isochromats outnumber the dephasing orders pre
 - Default builders: bit-identical sequences to before (sha256); autograd through flip angles
   of the new blocks matches finite differences.
 
+## Phase 2c – Spin system: exchange and magnetization transfer (`docs/REALISM.md` R2)
+
+- [x] Bound (semi-solid) pool: Henkelman two-pool model with Graham's rate W = ω1²G
+      (super-Lorentzian with a per-pool cut, Lorentzian), saturated at each spin's offset from
+      the RF's instantaneous frequency, so slice-selective pulses cause incidental MT
+      (`exchange.py`, `Phantom.bound`). In the PyTorch core, the fused CPU kernel (forward and
+      adjoint, 1.45× the plain cost) and the Apple GPU (+15 %)
+- [x] Free exchanging pools (`Phantom.pools`: CEST, myelin water): exact Bloch–McConnell
+      engine in the PyTorch core (one matrix exponential per segment)
+- [x] Generalized Bloch model of the bound pool (`generalized_bloch.py`, Assländer et al.):
+      a pulse-level reference solver
+- [ ] Free pools in the fused and Metal kernels; a faster engine for imaging with pools
+- [ ] Generalized Bloch in the engines via the paper's linearized R2,s,l (the rate model
+      cannot invert the pool for pulses ≤ 100 µs and under-saturates on-resonance pulses)
+- [ ] Incidental MT validated on data with a known fat-saturation pulse
+
+**Verified**: lineshape vs SciPy quadrature (1e-11); exchange step vs matrix exponential;
+two-pool ODE with second-order convergence; CW steady state; gradcheck; fused vs core
+(1e-15 forward, every gradient ≤ 7e-13); Metal vs core (2e-6). **BMCTool**
+(`validation/RESULTS_BMCTOOL.md`): Lorentzian Z-spectra to 5.8e-7 (2.1e-5 through the
+`.seq` file); its 5-pool CEST model to 8.3e-7; the super-Lorentzian differs only by the
+near-resonance convention (with BMCTool's lineshape ≤ 4e-7). Free pools vs the SciPy ODE
+(< 1e-8) and closed-form two-site exchange. Generalized Bloch: the Bloch equations for a
+Lorentzian (second order), Henkelman's steady state for three lineshapes (≤ 2e-4), the
+hard-pulse rotation. Incidental MT vs Shin et al. 2009: the mechanism and trend, with a
+magnitude set by an unreported pulse (`validation/RESULTS_INCIDENTAL_MT.md`).
+
 ## Phase 2b – Scanner field model (`docs/REALISM.md` R1)
 
 - [x] Concomitant (Maxwell) fields, leading order as a per-spin quadratic form (free runs stay
@@ -360,11 +390,18 @@ from the PyPulseq repo; round-trip read→write→read is lossless.
 - [x] Benchmark 2 (`nist_tse.py`): the T2 plane, 23-echo CPMG. Echo-train shapes predicted to
       2.25 % (spheres 1–10) vs 10.5 % for mono-exponential decay, nothing fitted; reproduces
       the stimulated-echo signature. A global B1⁺ fit does not improve held-out spheres
-- [ ] Model the fill fluid (water around the spheres) and sphere walls: the main remaining
-      error source for short-T2 spheres in benchmark 2 and a suspect in benchmark 1
+- [x] Monte Carlo estimation (`validation/real/nist.py`): scrambled-Sobol spin placement
+      (error ∝ N^-0.75, ~12× fewer spins than stratified), seeds averaged in the complex
+      domain, the magnitude bias removed, jackknife error bars. Benchmark 1: 1.51 ± 0.05 %
+      (1024 spins/pixel); benchmark 2: 2.20 ± 0.04 %
+- [x] Fill fluid (water around the spheres) and sphere walls: halves the short-T2 spheres'
+      error in benchmark 2, no effect in benchmark 1; wall thickness scanned (0.5–1.5 mm)
+- [ ] Short-T2 spheres 11–14 (6.5–8.7 % in the first echoes): reference T2 values, wall and
+      noise ruled out; suspects are local B1⁺ and played-vs-written timing (needs a B1⁺ map)
 - [ ] Absolute (not just shape) agreement: coil sensitivities and B1⁺ fitted from the data
       (digital twin, R7), fill fluid, temperature
-- [ ] More datasets: RRSG 2020 T1 challenge (multi-site NIST data), Pulseq-CEST phantom data
+- [ ] More datasets: RRSG 2020 T1 challenge (multi-site NIST data), Pulseq-CEST phantom data,
+      a multi-slice acquisition with its fat-saturation pulse (incidental MT, below)
 
 ## Phase 4 – Differentiable sequence design
 
