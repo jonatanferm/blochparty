@@ -184,6 +184,27 @@ says where it came from so it can be re-checked.
   came out 0.6 off in Mz against BMCTool. Opt-in `max_rf_step=` cuts it (defaults stay
   bit-identical).
 
+- **Scholand IR-bSSFP data (Zenodo 7654462), facts not in any document** (benchmark 3,
+  2026-10-07): BART trajectory `traj -x 384 -y 1 -s7 -G -t 1000 -D -r`: spoke n at n pi / (phi + 6)
+  (tiny golden angle 7; `-D` does not double golden angles since BART v0.4); samples at
+  (i - 192 + 1/2) / 2 base-grid units. Measured spokes sit at -d(theta) along the readout (the
+  other sign triples the data residual). The receiver phase follows the alternating RF phase.
+  The B1 map (304 x 192 asymmetric echo; k-space centre at sample 111 of 384) uses an 80 deg
+  preparation (hard-coded in the authors' script).
+- **The authors' two ROI sets are ordered differently**: the Cartesian set lists sphere 1 first,
+  the radial set sphere 14 first, as their reference table does. Geometry cannot tell: the
+  spheres form a near-symmetric ring, so a 123 deg rotation and a mirror both match the centres
+  to 0.55 mm. The signals can: a 14 x 14 matrix of curve-vs-simulation residuals is diagonal
+  only for the reversed order. First tried the mirror, and every result was nonsense.
+- **Vendor preconditioned-TurboFLASH B1 maps read low in short-T1 compartments** (0.87 against a
+  smooth 1.09 in a T1 = 0.13 s sphere): T1 recovery during the readout raises the prepared
+  image. In a phantom, fit a smooth field to the long-T1 background (agrees with long-T1 spheres
+  to 0.02).
+- **A single-echo SE series with first TE 15 ms cannot measure T2 < 15 ms**, and the magnitude
+  (RSS) fit then returns the noise floor: 735 ms for a 5 ms sphere in the published table.
+  Combining coils with a complex reference and fitting the real part removes the floor (25 ± 11 ms:
+  unbiased, but still uninformative).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -260,6 +281,14 @@ says where it came from so it can be re-checked.
   name) so the common path carries nothing extra. Also: `half` is a type in Metal
   Shading Language; don't name a variable that.
 
+- **A low-rank (subspace) reconstruction biases what it is validated with unless its basis
+  spans the true curves**: built from non-selective signals only, the basis biased fitted T2 by
+  +11 to +41 % on a digital phantom even with the exact model; adding slice-selective signals
+  (and both inversion models, so the basis does not favour one model) brought spheres 2–8 to
+  within ±11 %. The first ~0.1 s of a single-spoke-per-frame transient is unrecoverable either way.
+  Always push a digital twin of the acquisition (measured coil maps, trajectory, noise) through
+  the same pipeline before reading physics into reconstructed curves.
+
 ## Process and tooling
 
 - **Guard default behaviour with bit-identity snapshots** before and after any core change:
@@ -297,3 +326,8 @@ says where it came from so it can be re-checked.
   record resolves to 17244380 (31.6 GB), while an indexed older version is 12.3 GB. HTTP range
   reads verified the actual phantom raw files, sequences and calibration scans from its
   ~63 kB ZIP directory without downloading the archive. `SOURCES.md` records the version.
+- **finufft and torch cannot share a process on macOS** (each loads its own libomp: "OMP: Error
+  #15", either import order). `KMP_DUPLICATE_LIB_OK` is documented as unsafe; run the NUFFT
+  stages in their own process (`scholand_recon.py`) and pass arrays by file.
+- **Pipe-buffered Python prints arrive only at exit**: a long driver looks hung under `| grep`;
+  check the cache files it writes instead (or use `python -u`).

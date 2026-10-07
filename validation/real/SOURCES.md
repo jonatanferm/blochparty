@@ -189,10 +189,11 @@ Checked from record pages / repository READMEs only; nothing downloaded.
 
 Corrections to the ranking above, given what the simulator already has:
 
-- **Scholand et al. 7654462 is the NIST Model 130 T2 plate** with IR-bSSFP at several RF pulse
-  durations, IR-FLASH, a preconditioned-pulse TurboFLASH B1 map and SE / IR-SE gold
-  standards. That is the open short-T2 question (`RESULTS.md`: B1+ versus finite pulses /
-  timing) and goes first.
+- **Scholand et al. 7654462 has the NIST Model 130 T2 plate** with one radial IR-bSSFP (1 ms
+  pulses), a preconditioned-pulse TurboFLASH B1 map and SE / IR-SE gold standards; the RF
+  pulse-duration variants and IR-FLASH are volunteer brain scans (corrected after download).
+  Now benchmark 3 (`RESULTS.md`): it confirms the slice-profile physics on spheres 2–8 but cannot
+  reach T2 <= 33 ms, so it does not settle the short-T2 question.
 - **Free diffusion in a water bottle adds little** beyond the exact Stejskal-Tanner tests; the
   value of PulseqDiffusion is the imaging chain (eddy currents, EPI ghosts), which needs the
   acquisition `.seq`. R. G. Nunes is a co-author of the Tong data already used: ask for it.

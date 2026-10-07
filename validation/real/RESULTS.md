@@ -87,6 +87,46 @@ per pixel along the readout (85 k spins), RF merged 4:1, 8 warm-up TRs before th
   (2) Reference-value uncertainty: the worst long-T2 sphere (5) is one whose T2 the manual
   withholds; MnCl2 T2 is temperature-sensitive and the scan temperature is unknown.
 
+## Benchmark 3: NIST T2 plane, 3 T radial single-shot IR-bSSFP (`scholand_irbssfp.py`)
+
+Scholand et al. 2023 (Zenodo 7654462; `scholand.py` has the protocol): 1000 radial spokes of
+an IR-bSSFP (TR 4.88 ms, 45 deg, 1 ms sinc, hyperbolic-secant inversion, alpha/2 preparation) on a
+Skyra, with a vendor B1 map and Cartesian IR-SE / SE gold standards of the same slice. No `.seq`
+exists: the sequence is rebuilt from the paper, the authors' scripts and BART's simulator. The
+transient is the measurement, so per-sphere curves come from a low-rank reconstruction
+(`scholand_recon.py`). Its own accuracy was measured by pushing a digital copy of the phantom
+(measured coil maps, trajectory, noise covariance) through it.
+
+Measured 2026-10-07, Apple M4 GPU, 101 spins across the slice, rank-12 basis:
+
+| sphere | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|
+| gold T1 / T2 [ms] | 2271 / 386 | 1948 / 270 | 1591 / 182 | 1539 / 174 | 1053 / 95 | 842 / 70 | 633 / 49 |
+| digital phantom: method bias T1 / T2 | +0 / −1 % | +2 / −7 % | +0 / +1 % | +0 / −1 % | −1 / +5 % | +3 / −7 % | −3 / +11 % |
+| **measured, full model** | **−5 / −5 %** | **−7 / −1 %** | **+2 / −33 %** | **−4 / −14 %** | **−10 / −9 %** | −27 / +35 % | edge |
+| measured, B1 = 1 | −4 / −14 % | −5 / −10 % | +3 / −40 % | −3 / −23 % | −9 / −19 % | −26 / +22 % | edge |
+| measured, perfect inversion | −5 / −5 % | −7 / −3 % | +0 / −33 % | −4 / −14 % | −12 / −8 % | −29 / +41 % | edge |
+| measured, no slice profile | −8 / +35 % | −9 / +43 % | −3 / +11 % | −8 / +35 % | −14 / +52 % | −30 / +111 % | edge |
+
+- **The slice profile is the physics that matters**: without it T2 comes out 35–55 % high; with
+  it −1 to −14 % (spheres 2, 3, 5, 6), as the authors found with their own Bloch model.
+  The B1 map moves T2 by ~10 %. Hyperbolic-secant and perfect inversion differ by ≤ 2 %.
+- **What is left is larger than the method's own error**: fit residuals 4–9 % against 1.4–2.3 %
+  on the digital phantom, T1 4–10 % low, and sphere 4 (−33 % T2) disagreeing with its twin,
+  sphere 5. The digital phantom uses the same coil maps and trajectory as the reconstruction and
+  no off-resonance, so the candidates are exactly those (B0 is unmeasured; bSSFP is sensitive),
+  plus the rebuilt sequence's unknowns (gradient waveforms, inversion-to-preparation gap).
+- **Spheres 9–14 (T2 ≤ 33 ms) are beyond this pipeline**: the digital phantom does not recover
+  them (−20 to +77 % T2, T1 on the grid edge), and the SE gold standard (first echo 15 ms)
+  cannot measure them either (the authors' 735 ms for sphere 14 is the magnitude noise floor;
+  the complex refit gives 25 ± 11 ms against NIST's 5.3 ms). **This dataset does not settle the
+  short-T2 question of benchmark 2.**
+- Sphere 1 (T2 1.4 s) is not determined by 5 s of bSSFP (digital: −41 % T2).
+- Data facts found on the way: the vendor B1 map reads low in short-T1 spheres (0.87 against
+  1.09 in sphere 14), so a smooth fit to the background water is used (spheres 1–5 agree with
+  it to 0.02); the gradient delay is anisotropic, ~0.6–0.8 oversampled samples; the receiver
+  phase follows the RF phase.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
