@@ -9,8 +9,8 @@ Checks (printed; recorded in validation/anatomy/RESULTS.md):
   tenths of a ppm positive (iron), which fixes ppm against ppb.
 * geometry: the brain centroid in MNI2009b coordinates and the MNI origin inside the brain.
 * a 7 T spoiled GRE of an axial slab through the basal ganglia from the measured R1 / R2* /
-  relative PD maps, with the QSM-derived field (brain only, relative); T2 an explicit assumption and
-  R2' = R2* - R2 (32 Cauchy-quantile spins per voxel).
+  relative PD maps, with the QSM-derived field (brain only, relative); T2 an explicit assumption; the
+  default T2* policy separates microscopic R2' from the field's own dephasing (32 spins per voxel).
 
     uv run python validation/anatomy/fetch_ahead.py && uv run python validation/anatomy_ahead.py
 """
@@ -24,7 +24,7 @@ import numpy as np
 import torch
 
 import blochparty as bp
-from blochparty.anatomy import Distribution, TissueProperties
+from blochparty.anatomy import AHEAD_R2STAR_ACQUISITION, Distribution, TissueProperties
 
 ROOT = Path(__file__).resolve().parent / "anatomy" / "data" / "ahead"
 
@@ -70,9 +70,14 @@ def main():
                                             t2=Distribution(0.05, None, note, True),
                                             chi=Distribution(0.0, None, "Assumption: QSM map used", True))}}
     k0 = int(round((0 - a.origin[2]) / a.voxel[0]))
-    # R2' = R2* - R2 from the measured R2* map and the assumed T2 (clamped at 0 where R2* < R2,
-    # e.g. CSF). Assumption: the brain-only QSM field adds little macroscopic dephasing on top.
-    a.maps["intrinsic_r2prime"] = torch.where(m, (a.maps["R2star"] - 1 / 0.05).clamp_min(0), 0.0)
+    # the default T2* policy separates the measured R2* into R2 (assumed T2), the macroscopic part
+    # the QSM field causes at AHEAD's acquisition (0.64 mm, TE 3-27.5 ms), and microscopic R2'
+    fields = bp.anatomy_field_maps(a, table, 7.0, shim_order=2)
+    macro = bp.estimate_macroscopic_r2prime(sum(fm.b0.double() for fm in fields), a.voxel,
+                                            AHEAD_R2STAR_ACQUISITION)[m].numpy()
+    total = (a.maps["R2star"][m] - 1 / 0.05).clamp_min(0).numpy()
+    print(f"macroscopic part of R2* - R2 at the AHEAD acquisition: median {np.median(macro):.2f} /s, 99th "
+          f"percentile {np.percentile(macro, 99):.1f} /s (R2* - R2 median {np.median(total):.1f} /s)")
     import matplotlib
 
     matplotlib.use("Agg")
@@ -83,7 +88,8 @@ def main():
     ax[0].set_title("AHEAD QSM [ppm], z = 0 (MNI)")
     for j, (te, label) in enumerate(((5e-3, "TE 5 ms"), (20e-3, "TE 20 ms"))):
         ph = bp.to_phantom(a, table, 7.0, fov_region=(slice(k0, k0 + 2), slice(None), slice(None)),
-                           spins_per_voxel=(2, 4, 4), shim_order=2)
+                           spins_per_voxel=(2, 4, 4), shim_order=2, field_maps=fields,
+                           r2star_acquisition=AHEAD_R2STAR_ACQUISITION)
         ph.pos = ph.pos - ph.pos.mean(0)
         seq = bp.gre_2d(192, 0.24, flip_deg=15.0, tr=30e-3, te=te, n_dummy=40)
         try:

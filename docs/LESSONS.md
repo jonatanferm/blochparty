@@ -311,6 +311,13 @@ says where it came from so it can be re-checked.
   per class, so BrainWeb at 1.5 mm in float64 raised "fractions sum to more than one" (float32
   hid it: its tolerance is 2e-6). Renormalise by max(total, 1) after resampling.
 
+- **A measured T2* is not an intrinsic property once the simulation computes fields**: it
+  includes the macroscopic dephasing at the measurement's voxel size and echo times. Separating it
+  needs those acquisition parameters (AHEAD: MP2RAGEME, TE 3/11.5/19/27.5 ms); the round trip
+  (simulate the acquisition, fit R2*, compare with the input) is the test, and a field strong
+  enough to exceed R2* - R2 on its own means the inputs disagree (clip, do not error). Fixing it
+  exposed the next issue at once: the occipital WM/GM T2* proxies make cortex dark at long TE.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

@@ -158,8 +158,11 @@ def test_t2prime_quantile_fid_and_no_double_count():
     with pytest.raises(ValueError,match="calibration"):
         to_phantom(a,chi_to_b0=True,shim_order=None,t2star="table")
     pair = (bp.FieldMaps((0,0,0),(.001,)*3,b0=torch.zeros(1,1,1,dtype=torch.float64)),)*2
-    no_micro = to_phantom(a,field_maps=pair)
-    assert not no_micro.db0.any()
+    assert not to_phantom(a,field_maps=pair,t2star="off").db0.any()
+    # a flat field has no macroscopic part: 'auto' (= 'separate') puts the whole R2* - R2 on the spins
+    sep = to_phantom(a,field_maps=pair,spins_per_voxel=(1,1,64))
+    full = to_phantom(a,chi_to_b0=False,spins_per_voxel=(1,1,64),t2star="table")
+    assert torch.allclose(sep.db0,full.db0)
     a.maps["intrinsic_r2prime"] = torch.full((1,1,1),8.,dtype=torch.float64)
     micro = to_phantom(a,field_maps=pair)
     assert micro.db0.abs().max() > 0
@@ -299,3 +302,38 @@ def test_float64_resampling_keeps_fractions_valid():
         for k in a.fractions:
             assert float(r.fractions[k].sum()) * math.prod(voxel) == pytest.approx(
                 float(a.fractions[k].sum()) * .0005**3, rel=1e-6)
+
+
+@pytest.mark.parametrize("grad_hz_per_mm", [5.0, 8.0, 15.0])
+def test_measured_r2star_round_trip_without_double_counting(grad_hz_per_mm):
+    # A tissue whose table T2* came from a 1 mm, 5-40 ms multi-echo fit, in a voxel-scale field
+    # gradient: the assembled phantom (microscopic R2' on the spins + the field at their positions)
+    # must give back that measured R2* when "acquired" the same way. Without the separation the
+    # field is counted twice ('table' with no macroscopic term); dropping R2' ('off') undercounts.
+    from blochparty.anatomy import DEFAULT_R2STAR_ACQUISITION, estimate_macroscopic_r2prime
+    g = grad_hz_per_mm * 1e3  # Hz/m along x
+    a = Anatomy({"wm": torch.ones(3, 3, 3, dtype=torch.float64)}, (.001,)*3, (-.001, -.001, -.001))
+    x = torch.arange(3, dtype=torch.float64)[None, None, :].expand(3, 3, 3) * .001 - .001
+    pair = (bp.FieldMaps(a.origin, (.001,)*3, b0=g * x), bp.FieldMaps(a.origin, (.001,)*3, b0=torch.zeros(3, 3, 3, dtype=torch.float64)))
+    te = torch.tensor(DEFAULT_R2STAR_ACQUISITION["te"], dtype=torch.float64)
+    est = estimate_macroscopic_r2prime(pair[0].b0, a.voxel)
+    r2s_in = 1 / DEFAULT_TISSUES[3]["wm"].t2star.mean
+
+    def measured(t2star, **kw):
+        ph = to_phantom(a, field_maps=pair, spins_per_voxel=(1, 1, 8192), t2star=t2star,
+                        fov_region=(slice(1, 2),)*3, **kw)
+        sig = torch.exp(-te[:, None] / ph.t2 - 2j * math.pi * te[:, None] * ph.db0) @ ph.pd.to(torch.complex128)
+        y = sig.abs().log()
+        tc = te - te.mean()
+        return float(-(tc * (y - y.mean())).sum() / tc.square().sum())
+
+    sinc_rate = float(-(torch.sinc(g * .001 * te).abs().log() * (te - te.mean())).sum() / (te - te.mean()).square().sum())
+    assert float(est[1, 1, 1]) == pytest.approx(sinc_rate, rel=1e-9)  # the estimator is the closed form
+    out = measured("auto")
+    r2 = 1 / DEFAULT_TISSUES[3]["wm"].t2.mean
+    if sinc_rate < r2s_in - r2:  # consistent: 1.9 and 4.9 /s of the 6.2 /s R2* - R2
+        assert out == pytest.approx(r2s_in, rel=0.02), (out, r2s_in)
+        assert measured("table", macroscopic_r2prime=0.0) > r2s_in + 0.5 * sinc_rate  # double counted
+        assert measured("off") < r2s_in - 1.0  # microscopic R2' lost
+    else:  # 15 Hz/mm alone dephases faster (19 /s) than the measured R2*: R2' clips at 0
+        assert out == pytest.approx(measured("off"), rel=1e-12) and out > r2s_in

@@ -171,3 +171,26 @@ BrainWeb subject 04, 3 T, 2 mm axial slab (z = 60-61 mm), full-head chi -> B0 (-
 +479 Hz) with 2nd-order shim, 8 spins per tissue and voxel (1,859,776 spins), texture 5 / 5 / 2 %
 at 1 cm. Apple M4 GPU: setup 16.4 s, T1w spoiled GRE 7.7 s, T2w TSE (ETL 8, ESP 12 ms) 11.4 s,
 long-TE GRE 8.2 s; 44.2 s in total.
+
+## T2* from measured R2* without double counting (2026-10-07)
+
+`tests/test_anatomy.py::test_measured_r2star_round_trip_without_double_counting`: a WM voxel
+(table T2* 48.4 ms, R2* 20.66 /s) in a linear field gradient, "acquired" as its T2* was (1 mm,
+8 echoes 5-40 ms, log-linear magnitude fit) with 8192 spins:
+
+| gradient | separated (default) | field counted twice ('table', no macro term) | R2' dropped (old default) |
+|---|---:|---:|---:|
+| 5 Hz/mm (macro 1.9 /s) | 20.73 /s | 22.52 /s | 16.37 /s |
+| 8 Hz/mm (macro 4.9 /s) | 20.66 /s | 25.54 /s | 19.39 /s |
+
+At 15 Hz/mm the field alone (19 /s) exceeds R2* - R2 (6.2 /s): R2' clips at 0, as documented.
+The estimator equals the closed-form sinc fit to 1e-9. BrainWeb, 3 T, 1 mm: the macroscopic part
+inside the brain is small except near air (median 0.07, 90th 0.41, 99th percentile 3.1 /s, max
+255 /s); 0.38 % of brain voxels clip. AHEAD (brain-only relative QSM, 0.64 mm, 3-27.5 ms): median
+0.00, 99th percentile 0.1 /s, so the measured R2* contrast now appears without manual R2' (figure
+above, regenerated).
+
+Known issue (flagged in the table, follow-up on the roadmap): the 3 T WM/GM T2* proxies are
+occipital values (Wansapura 1999: GM 41.6 < WM 48.4 ms), so long-TE GRE now shows cortex darker
+than white matter; whole-brain cortical T2* is reported longer than WM (Hoogenraad/Peters et al.
+2007, values not yet verified from the paper).

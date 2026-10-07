@@ -617,6 +617,39 @@ def anatomy_field_maps(anatomy, table=DEFAULT_TISSUES, field_T=3., *, shim_order
     return FieldMaps(*args,b0=df),FieldMaps(*args,b0=correction)
 
 
+# The R2* measurement a T2* value or map came from (voxel (dz, dy, dx) [m], echo times [s]):
+# the macroscopic part of its decay is estimated at these, not at the simulation grid.
+# Default (table values whose protocols are not encoded): an assumption, 1 mm, 8 echoes 5-40 ms.
+DEFAULT_R2STAR_ACQUISITION = {"voxel": (1e-3, 1e-3, 1e-3), "te": tuple(5e-3 * k for k in range(1, 9))}
+# AHEAD (MP2RAGEME, Caan et al. 2019: second-inversion echoes 3 / 11.5 / 19 / 27.5 ms). Voxel 0.64 mm:
+# the commonly cited AHEAD resolution; the papers say "submillimetre" (unverified here).
+AHEAD_R2STAR_ACQUISITION = {"voxel": (.64e-3, .64e-3, .64e-3), "te": (3e-3, 11.5e-3, 19e-3, 27.5e-3)}
+
+
+def estimate_macroscopic_r2prime(df: Tensor, voxel, acquisition=None) -> Tensor:
+    """The part of a measured R2* that the voxel-scale field ``df`` [Hz] on a (z, y, x) grid of
+    spacing ``voxel`` [m] causes by itself [1/s]: each axis's linear gradient g [Hz/m] dephases a
+    box voxel of the acquisition's size d as |sinc(g d t)| (independent axes multiply), and a
+    log-linear magnitude fit over the acquisition's echo times turns that into a rate, as a
+    multi-echo R2* fit would (Fernandez-Seara & Wehrli, MRM 2000; Yablonskiy, MRM 1998). Gradients
+    are central differences on the grid; |sinc| is floored at 1e-3. Fields resolved finer than the
+    grid, and curvature within the voxel, are not included. Where this alone exceeds the measured
+    R2* - R2 (a field too strong for the stated acquisition), ``to_phantom`` clips R2' at 0."""
+    acq = DEFAULT_R2STAR_ACQUISITION if acquisition is None else acquisition
+    te = torch.as_tensor(acq["te"], dtype=df.dtype)
+    if te.ndim != 1 or len(te) < 2 or (te <= 0).any():
+        raise ValueError("acquisition needs two or more positive echo times")
+    d = _triple(acq["voxel"], "acquisition voxel", True)
+    grads = [torch.gradient(df, spacing=float(h), dim=ax)[0] if df.shape[ax] > 1 else torch.zeros_like(df)
+             for ax, h in enumerate(voxel)]  # a single-voxel axis has no resolved gradient
+    tc = te - te.mean()
+    num = torch.zeros_like(df)
+    for k in range(len(te)):  # sum_k tc_k ln F(t_k), one echo at a time (memory)
+        lnf = sum(torch.sinc(g * di * te[k]).abs().clamp_min(1e-3).log() for g, di in zip(grads, d))
+        num = num + tc[k] * lnf
+    return (-num / tc.square().sum()).clamp_min(0)
+
+
 _VARIABLE = ("t1", "t2", "pd")
 
 
@@ -674,7 +707,7 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
                spins_per_voxel=8, jitter="stratified", seed=0, sampling="per_tissue",
                mt=False, diffusion=False, chi_to_b0=True, shim_order=2,
                t2star="auto", macroscopic_r2prime=None, field_maps=None,
-               variability=None) -> Phantom:
+               variability=None, r2star_acquisition=None) -> Phantom:
     """Assemble independent tissue spins, never average their relaxation constants.
 
     ``per_tissue`` gives K spins to each nonzero tissue/voxel, PD=fraction*PD/K
@@ -686,9 +719,14 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     PD is per anatomy voxel, matching phantom_from_maps; multiply by physical
     voxel volume when comparing absolute signals across anatomy resolutions.
 
-    ``t2star='auto'`` uses observed T2* only if chi_to_b0=False; with chi fields
-    it omits uncalibrated R2' (a conservative lower bound, not a complete T2*
-    model). ``'table'`` uses R2*=map R2star or tissue table, subtracts R2, and
+    ``t2star='auto'`` (default): with chi fields, ``'separate'``; without, R2' = R2* - R2.
+    ``'separate'``: a measured R2* (map R2star or table T2*) contains R2, microscopic R2'
+    and the dephasing from the voxel-scale field this simulation computes itself; the last is
+    estimated by ``estimate_macroscopic_r2prime`` from the field (tissue + shim) at the voxel size and
+    echo times of the R2* measurement (``r2star_acquisition``, default
+    ``DEFAULT_R2STAR_ACQUISITION``; ``AHEAD_R2STAR_ACQUISITION`` for ``load_ahead``) and
+    subtracted: R2' = max(R2* - R2 - R2'_macro, 0) goes onto the spins, and the simulated field
+    supplies the rest. ``'table'`` uses R2*=map R2star or tissue table, subtracts R2, and
     REQUIRES ``macroscopic_r2prime`` [1/s] when chi is enabled. This is a supplied
     calibration, not a universal linewidth inferred from field gradients.
     Alternatively maps['intrinsic_r2prime'] supplies already separated R2'.
@@ -721,8 +759,12 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     """
     if sampling not in ("per_tissue","categorical") or jitter not in (None,"stratified"):
         raise ValueError("invalid sampling or jitter mode")
-    if t2star not in ("auto","off","table"):
-        raise ValueError("t2star must be auto, off or table")
+    if t2star not in ("auto","off","table","separate"):
+        raise ValueError("t2star must be auto, separate, off or table")
+    if t2star == "auto":
+        t2star = "separate" if chi_to_b0 else "table"
+    if t2star == "separate" and not chi_to_b0:
+        raise ValueError("t2star='separate' needs chi_to_b0 (the field it separates)")
     if anatomy.map_field_T is not None and field_T != anatomy.map_field_T:
         raise ValueError(f"relaxation maps were acquired at {anatomy.map_field_T} T; no automatic field scaling")
     counts = _subvoxel_counts(spins_per_voxel,3)
@@ -745,9 +787,16 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     if variability:  # on the full anatomy, so crops and slabs share one realisation
         live = [n for n, p in props.items() if n in anatomy.fractions and p.pd.mean > 0]
         factors = _variability_factors(anatomy, live, variability)
+    macro_est = None
+    if t2star == "separate" and "intrinsic_r2prime" not in anatomy.maps and macroscopic_r2prime is None:
+        if any(tuple(fm.b0.shape) != anatomy.shape for fm in maps_pair):
+            raise ValueError("t2star='separate' needs field maps on the anatomy grid (anatomy_field_maps)")
+        macro_est = estimate_macroscopic_r2prime(sum(fm.b0.to(torch.float64) for fm in maps_pair), anatomy.voxel,
+                                        r2star_acquisition)
     if fov_region is not None:
         anatomy = anatomy.crop(fov_region)
         factors = {key: value[fov_region] for key, value in factors.items()}
+        macro_est = None if macro_est is None else macro_est[fov_region]
     ref = next(iter(anatomy.fractions.values()))
     gen = torch.Generator().manual_seed(seed)
     qgen = torch.Generator().manual_seed(0)
@@ -814,9 +863,12 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
             rate = None
             if "intrinsic_r2prime" in anatomy.maps:
                 rate = anatomy.maps["intrinsic_r2prime"][mask]
-            elif t2star == "table" or not chi_to_b0:
+            elif t2star in ("table", "separate"):
                 rstar = parameter("R2star",1/p.t2star.mean if p.t2star else 1/p.t2.mean)
-                rate = rstar-r2_base-(macro[mask] if isinstance(macro,Tensor) and macro.ndim else macro)
+                if macro_est is not None:  # an estimate: clip, a mismatch is not an inconsistent calibration
+                    rate = (rstar-r2_base-macro_est[mask].to(rstar.dtype)).clamp_min(0)
+                else:
+                    rate = rstar-r2_base-(macro[mask] if isinstance(macro,Tensor) and macro.ndim else macro)
             if rate is not None:
                 if (rate < -1e-6).any():
                     raise ValueError("R2* - R2 - macroscopic R2' is negative; incompatible calibration")

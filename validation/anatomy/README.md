@@ -127,12 +127,14 @@ dark. The 1.5 T CSF T2 is the 3 T value, flagged.
 `BRAINWEB_TISSUES` separately preserves the older simulator's 1.5 T relaxation
 priors for reference comparisons. Existing `phantom.TISSUES` is untouched.
 
-Observed T2* may include macroscopic dephasing. Default `t2star="auto"` adds table
-T2′ only when susceptibility is disabled. With susceptibility enabled it omits
-uncalibrated microscopic broadening; this is a lower-bound model, not complete T2*.
-`t2star="table"` plus susceptibility requires a supplied `macroscopic_r2prime`
-calibration in 1/s. Alternatively supply `maps["intrinsic_r2prime"]` with an already
-separated rate. No universal subtraction is inferred from a spatial gradient.
+A measured T2* (map or table) contains R2, microscopic R2' (vessels, myelin, iron) and the
+dephasing that the voxel-scale field causes, which the simulation computes itself from chi. The
+default `t2star="auto"` (= `"separate"` with chi on) estimates that last part from the simulated
+field's gradient at the voxel size and echo times of the R2* measurement
+(`estimate_macroscopic_r2prime`; `r2star_acquisition`, default 1 mm and 5-40 ms, an assumption for
+table values; `AHEAD_R2STAR_ACQUISITION` for AHEAD) and puts only R2' = max(R2* - R2 - macro, 0) on
+the spins. Without chi, R2' = R2* - R2. `t2star="table"` with chi still accepts a supplied
+`macroscopic_r2prime`, and `maps["intrinsic_r2prime"]` an already separated rate.
 `t2star="off"` disables that broadening. Cauchy quantiles need many spins to resolve
 an FID; K=1 has only the zero median and emits a warning for finite requested T2′.
 
