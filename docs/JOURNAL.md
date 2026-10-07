@@ -376,3 +376,7 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   and clipping; a tone lands in the image column of its frequency. Test mistake: I expected a
   zipper line, but a tone coherent with the TR lands at one phase-encode point; real zippers are
   lines because interference is incoherent.
+- **Transmit chain** (`transmit.py`): the RF amplifier per pulse: Rapp AM/AM (gain, saturation,
+  sharpness), Saleh-type AM/PM, droop with delivered energy; ideal by default. Checks: linear and
+  saturation limits; a hard pulse's flip and phase after the amplifier predicted exactly
+  (Mxy = i e^{iψ} sin α in blochparty's own RF phase); droop law.
