@@ -493,7 +493,11 @@ by Pulseq's own checks.
 - [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
-- [ ] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)
+- [x] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)
+      (`loops.py`; `em.py` reads mariepy full-wave maps: B1+, receive weights, noise resistance;
+      BrainWeb 3 T birdcage + 8 loops in `validation/em/`)
+- [ ] Complex (pTx) B1+ in the engines: `FieldMaps.b1` is a real scale, so the transmit phase of
+      imported maps is dropped (exact for one transmit channel up to an image phase)
 - [ ] Motion (rigid, then deformable), flow, diffusion
 - [ ] Dataset writer (ISMRMRD / HDF5) with full provenance (sequence, phantom, seed)
 - [ ] Fast path: signal-equation forward model for cases where Bloch fidelity isn't needed

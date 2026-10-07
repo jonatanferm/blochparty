@@ -327,6 +327,18 @@ says where it came from so it can be re-checked.
   across positions: 2 i w0 with (Bx - iBy)/2, a 137 % spread with the conjugate. With full-wave
   phasors (exp(+j w t)) the same derivation gives transmit conj(minus)/2, receive conj(plus)/2.
 
+- **Full-wave map import** (2026-10-07, `em.py`, `validation/em/`): (1) mariepy leaves which
+  circular component excites to the reader; for protons with B0 along +z it is `minus`
+  (clockwise), conjugated into blochparty's rotating frame. A birdcage's two quadrature drives
+  (1, +-j) differ by ~6x in mean |B1+| on a head (1.09 vs 0.17 uT per uT), so picking the wrong
+  sense is obvious in magnitude, but a wrong conjugation is not: test against a rotating field
+  with a non-zero phase. (2) The solver stores zeros outside the body; trilinear sampling at the
+  skin then mixes in zero B1 / coil weight, so fill the outside with nearest-inside values. (3)
+  Noise resistance from E sampled at voxel centres falls 2-3 % below mariepy's exact absorbed
+  power (piecewise-linear basis) at 5 mm; rescale the matrix so its diagonal matches. (4) A
+  registration check that survives near-symmetric maps: correlate the image ratio (B1 map on /
+  off) with the sampled map and with its transpose and mirror (-0.995 vs -0.93 / -0.97).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
