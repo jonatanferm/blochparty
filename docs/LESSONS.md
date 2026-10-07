@@ -113,6 +113,19 @@ says where it came from so it can be re-checked.
 - **Metal kernels take at most 31 buffers** (indices 0–30). Pack the scalars into one
   `constant uint*` array per dispatch rather than one `constant uint&` each.
 
+- **A hard pulse in one segment misses relaxation during the pulse** (benchmark 4, 2026-10-07):
+  relaxation is Strang-split around the whole rotation, so a 180 deg in one step spends no time
+  transverse: Mz after a 912 us pi pulse with T2 = 75 ms is −0.9987 instead of −0.9933
+  (~T_RF / (2 T2) lost). Sampled pulses (Pulseq, sinc) take small steps and are fine; give
+  `SequenceBuilder.rf` ~10+ `n_steps` when T_RF is not short against T2. Found because MnCl2
+  fitted 0.84 % instead of the authors' 0.70 %; with 50 steps it matches to every digit.
+- **The generalized-Bloch Green's-function taper is visible in real data**: memory 100 T2b
+  (taper 0.50 at 70 T2b, the longest pulse) costs 4 % chi^2 and −3 % in m0s on BSA; 300 halves it.
+  Comparing an engine against its own reference solver hides this (they share the taper); only
+  the untapered kernel on real data shows it. The reference solver itself needs h <= T2b / 16 and
+  >= 64 steps: with 15 steps for a 22.8 us pi pulse its Heun free-pool rotation was 3e-3 off, and
+  that error happened to *lower* the residual — a converged reference first, then conclusions.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.
@@ -204,6 +217,11 @@ says where it came from so it can be re-checked.
   (RSS) fit then returns the noise floor: 735 ms for a 5 ms sphere in the published table.
   Combining coils with a complex reference and fitting the real part removes the floor (25 ± 11 ms:
   unbiased, but still uninformative).
+
+- **Asslaender NMR data**: Magritek `data.2d` = 12 header bytes, int32 501 (complex), size1,
+  size2, 1, 1, then complex float32, column-major; the authors trim 6 points at each end. Column 1
+  is the *shortest* inversion time (3 ms), although their T2* comment says 5 s. TI carries a
+  timing correction 12 x 22.8 us + (13 x 15.065 − 5) us and is counted from the pulse centre.
 
 ## Other simulators
 

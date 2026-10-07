@@ -133,9 +133,14 @@ def rectangular(alpha: float, t_rf: float, h: float, delta: float = 0.0) -> np.n
 _MODES: dict = {}
 
 
-def modes(shape: str) -> tuple[np.ndarray, np.ndarray]:
+def modes(shape: str, memory: float = MEMORY) -> tuple[np.ndarray, np.ndarray]:
     """G(s) ~ sum_j c_j exp(-p_j s / T2) with complex poles p_j (in units of 1/T2) and weights
     c_j in conjugate pairs (so the sum is real) and sum_j c_j = G(0) = 1.
+
+    ``memory`` [T2] is the super-Lorentzian's taper (ignored for the other shapes); the slowest
+    pole sits at 1 / memory. Within the 30 modes, memory 300 still fits its G to 2e-4; 1000
+    only to 2e-3. Real data prefer the longer memories (``validation/real/RESULTS.md``,
+    benchmark 4: BSA inversion with pulses to 70 T2).
 
     The Lorentzian is one exact mode. Others: least squares with poles lambda e^{+-i theta},
     theta in {0, 0.6, 1.2}. Super-Lorentzian: the tapered G (``MEMORY``), six lambda
@@ -146,15 +151,16 @@ def modes(shape: str) -> tuple[np.ndarray, np.ndarray]:
     over [0.3, 6] on [0, 40 T2], 25 modes, error 2e-3. A flat-topped G needs the complex
     poles: positive real exponentials alone leave Lorentzian wings (12-18x the
     super-Lorentzian at 30 kHz)."""
-    if shape in _MODES:
-        return _MODES[shape]
+    key = (shape, float(memory)) if shape == "superlorentzian" else shape
+    if key in _MODES:
+        return _MODES[key]
     if shape == "lorentzian":
         out = (np.array([1.0 + 0j]), np.array([1.0 + 0j]))
     else:
-        if shape == "superlorentzian":  # tapered at MEMORY T2; fit its whole support
-            x = np.concatenate([np.linspace(0, 4, 400), np.logspace(math.log10(4), math.log10(8 * MEMORY), 600)])
-            lams = np.logspace(-2, math.log10(3.0), 6)
-            g = green(x, 1.0, shape, MEMORY)
+        if shape == "superlorentzian":  # tapered at memory T2; fit its whole support
+            x = np.concatenate([np.linspace(0, 4, 400), np.logspace(math.log10(4), math.log10(8 * memory), 600)])
+            lams = np.logspace(-math.log10(memory), math.log10(3.0), 6)
+            g = green(x, 1.0, shape, memory)
         else:  # Gaussian: gone within ~8 T2; fit to 40 T2 so the tail stays zero
             x = np.concatenate([np.linspace(0, 10, 800), np.linspace(10, 40, 300)[1:]])
             lams = np.logspace(math.log10(0.3), math.log10(6.0), 5)
@@ -183,5 +189,5 @@ def modes(shape: str) -> tuple[np.ndarray, np.ndarray]:
                 i += 1
         cs = np.array(cs)
         out = (np.array(ps), cs / cs.sum().real)
-    _MODES[shape] = out
+    _MODES[key] = out
     return out

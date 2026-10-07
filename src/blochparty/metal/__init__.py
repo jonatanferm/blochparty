@@ -842,7 +842,7 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
         if pool.model == "generalized":  # modes instead of the saturation lineshape
             from ..generalized_bloch import modes as green_modes
 
-            pm, cm = green_modes(pool.lineshape)
+            pm, cm = green_modes(pool.lineshape, pool.memory)
             table = torch.tensor([[q.real, q.imag, c.real, c.imag] for q, c in zip(pm, cm)], dtype=f32)
             t2b_min = float(pool.t2.detach().min())
             dts = seq.dt.detach().double().cpu()

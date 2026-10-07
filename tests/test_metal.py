@@ -156,3 +156,18 @@ def test_diffusion_same_walk_as_core(mma):
     assert rel(out.signal, ref.signal) < 1e-4 and rel(out.m, ref.m) < 1e-3
     other = metal.simulate_metal(ph, seq, coils, seed=10, mma=mma)
     assert rel(other.signal, ref.signal) > 1e-2  # a different walk
+
+
+@pytest.mark.parametrize("memory", [100.0, 300.0])
+def test_generalized_bloch_memory(memory):
+    # the Green's-function memory reaches the kernel (the two memories differ by ~1e-3 in Mzb)
+    one = lambda v: torch.full((4,), v, dtype=torch.float64)
+    ph = bp.Phantom(pos=torch.zeros(4, 3, dtype=torch.float64), pd=one(0.9), t1=one(1.0), t2=one(0.05),
+                    db0=torch.tensor([0.0, 50.0, -30.0, 10.0], dtype=torch.float64),
+                    bound=bp.BoundPool(f=one(0.1), k=one(60.0), t1=one(1.0), t2=one(12e-6), model="generalized",
+                                       memory=memory))
+    seq = (bp.SequenceBuilder().rf(1e-3, flip_deg=180.0, n_steps=100).delay(5e-3)
+           .rf(0.5e-3, flip_deg=90.0, n_steps=50).readout(32, 10e-6).build())
+    a, b = bp.simulate(ph, seq), metal.simulate_metal(ph, seq)
+    assert float((a.signal - b.signal).abs().max() / a.signal.abs().max()) < 5e-5
+    assert float((a.m_bound - b.m_bound.to(a.m_bound.dtype)).abs().max()) < 5e-6

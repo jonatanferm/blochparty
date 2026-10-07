@@ -439,7 +439,10 @@ class SequenceBuilder:
         self.time += float(dt.detach().sum())
 
     def rf(self, duration, *, flip_deg=None, amplitude=None, phase=0.0, grad=None, n_steps=1):
-        """Rectangular (hard) pulse; give either ``flip_deg`` or ``amplitude`` [Hz]."""
+        """Rectangular (hard) pulse; give either ``flip_deg`` or ``amplitude`` [Hz], in ``n_steps``
+        segments. Relaxation is split around each segment's whole rotation, so one segment for a
+        large flip misses the T2 decay while M is transverse (~T_RF / (2 T2) for a 180: 0.5 % at
+        912 us and T2 = 75 ms, ``validation/real/asslaender_ir.py``); use ~10+ steps when that matters."""
         dur = self._t(duration)
         amp = self._t(flip_deg) / 360.0 / dur if flip_deg is not None else self._t(amplitude)
         ph = self._t(phase)

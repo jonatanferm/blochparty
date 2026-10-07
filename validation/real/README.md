@@ -16,6 +16,9 @@ Benchmark 3 (radial IR-bSSFP, Scholand et al. 2023, Zenodo 7654462, CC BY 4.0, ~
 `uv run python validation/real/fetch_scholand.py && uv run python validation/real/scholand_irbssfp.py`
 (results in [RESULTS.md](RESULTS.md); needs the dev dependency `finufft`).
 
+Benchmark 4 (generalized Bloch on BSA / MnCl2 NMR, Asslaender et al. 2022, MIT, ~240 MB):
+`uv run python validation/real/fetch_asslaender.py && uv run python validation/real/asslaender_ir.py`.
+
 Additional diffusion, CEST, MT and hardware-validation sources, with verified raw-data
 formats and remaining metadata gaps: [SOURCES.md](SOURCES.md).
 

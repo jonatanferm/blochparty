@@ -63,6 +63,9 @@ class BoundPool:
     # "rate": saturation at W = w1^2 G (Graham); "generalized": the generalized Bloch model, RF
     # rotates the pool through modes of its lineshape's Green's function (generalized_bloch.modes)
     model: str = "rate"
+    # generalized super-Lorentzian only: Green's-function memory [T2], the taper exp(-s / (memory T2))
+    # that keeps it finite on resonance (a homogeneous broadening 1 / (2 pi memory T2))
+    memory: float = 100.0
 
     def __post_init__(self):
         if self.lineshape not in LINESHAPES:
@@ -293,6 +296,6 @@ def pool_modes(pool: BoundPool, like: Tensor) -> tuple[Tensor, Tensor]:
     """(J,) complex poles [1/T2b] and weights of the bound pool's Green's function modes."""
     from .generalized_bloch import modes
 
-    p, c = modes(pool.lineshape)
+    p, c = modes(pool.lineshape, pool.memory)
     cdt = torch.complex128 if like.dtype == torch.float64 else torch.complex64
     return torch.as_tensor(p, dtype=cdt, device=like.device), torch.as_tensor(c, dtype=cdt, device=like.device)

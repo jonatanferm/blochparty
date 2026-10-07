@@ -294,7 +294,7 @@ def simulate_fused(
     if gen:  # generalized Bloch: the mode table and the modes' state (at rest), after mzb
         from ..generalized_bloch import modes as green_modes
 
-        pm, cm = green_modes(pool.lineshape)
+        pm, cm = green_modes(pool.lineshape, pool.memory)
         modes = torch.tensor([[p.real, p.imag, c.real, c.imag] for p, c in zip(pm, cm)], dtype=dtype)
         m0 = torch.cat([m0, m0.new_zeros(n, 2 * len(pm))], dim=-1)
     elif pool is None and m0.shape[-1] == 4:

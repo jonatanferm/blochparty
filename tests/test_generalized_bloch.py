@@ -140,3 +140,27 @@ def test_engine_gradients():
     args = [torch.tensor([0.15], dtype=torch.float64, requires_grad=True), torch.tensor([30.0], dtype=torch.float64, requires_grad=True),
             torch.tensor([12.0], dtype=torch.float64, requires_grad=True), seq.rf.clone().requires_grad_()]
     assert torch.autograd.gradcheck(fn, args, eps=1e-6, atol=1e-7, rtol=1e-4)
+
+
+def test_longer_memory_modes_fit_their_taper():
+    # the slowest pole follows the memory; 30 modes still fit the tapered G closely
+    x = np.linspace(0, 600, 30001)
+    p, c = gb.modes("superlorentzian", 300.0)
+    fit = (c[None] * np.exp(-p[None] * x[:, None])).sum(1).real
+    assert len(p) == 30 and np.abs(fit - gb.green(x, 1.0, "superlorentzian", 300.0)).max() < 5e-4
+    assert np.array_equal(gb.modes("superlorentzian")[0], gb.modes("superlorentzian", gb.MEMORY)[0])
+
+
+@pytest.mark.parametrize("memory", [100.0, 300.0])
+def test_engine_memory_matches_reference_solver(memory, monkeypatch):
+    # a 1 ms pi pulse (83 T2): the taper matters (the two memories differ by > 2e-3 in z_s)
+    t_rf, alpha = 1e-3, math.pi
+    seq = bp.SequenceBuilder().rf(t_rf, flip_deg=180.0, n_steps=400).build()
+    zb = float(bp.simulate(single_pool("superlorentzian", memory=memory), seq).m_bound[0])
+    orig = gb.green
+    monkeypatch.setattr(gb, "green", lambda s, t2, sh, memory_=memory: orig(s, t2, sh, memory_))
+    h = t_rf / 4000
+    ref = gb.simulate_pulse(gb.rectangular(alpha, t_rf, h), h, t2s=12e-6, shape="superlorentzian", r1s=1.0)["zs"][-1]
+    assert zb == pytest.approx(ref, abs=5e-5)
+    other = float(bp.simulate(single_pool("superlorentzian", memory=400.0 - memory), seq).m_bound[0])
+    assert abs(other - zb) > 2e-3

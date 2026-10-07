@@ -127,6 +127,37 @@ Measured 2026-10-07, Apple M4 GPU, 101 spins across the slice, rank-12 basis:
   it to 0.02); the gradient delay is anisotropic, ~0.6–0.8 oversampled samples; the receiver
   phase follows the RF phase.
 
+## Benchmark 4: generalized Bloch on BSA / MnCl2 inversion recovery NMR (`asslaender_ir.py`)
+
+Asslaender et al. 2022 (data at their cited commit): 1 T benchtop NMR, rectangular pi pulses of
+22.8–912 us (1.8–70 T2 of the bound pool), 20 inversion times 3 ms–5 s, first FID point. Global
+6-parameter fits as the authors' (m0, inversion efficiency, m0s, shared R1, T2s, Rex; free T2 =
+T2* from the FID), compared with their published fits. Measured 2026-10-07, core, float64:
+
+| 15 % BSA | m0s | R1 [/s] | T2s [us] | Rex [/s] | residual |
+|---|---|---|---|---|---|
+| authors (generalized Bloch, their solver) | 0.0855 ± 0.0010 | 1.1978 | 12.96 ± 0.61 | 71.3 ± 2.0 | 0.4136 % |
+| exact-kernel reference (`simulate_pulse`, untapered) | 0.0851 ± 0.0011 | 1.1977 | 12.67 ± 0.66 | 71.6 ± 2.0 | 0.4127 % |
+| **blochparty engine, memory 300 T2b** | 0.0842 ± 0.0011 | 1.1977 | 12.64 ± 0.67 | 71.8 ± 2.0 | 0.4171 % |
+| blochparty engine, memory 100 T2b (default) | 0.0826 ± 0.0010 | 1.1976 | 12.58 ± 0.67 | 72.1 ± 2.0 | 0.4221 % |
+| blochparty rate model | 0.0922 | 1.2093 | 1.90 | 229 | 1.307 % |
+| authors, Graham's spectral model | 0.0699 | 1.1790 | 2.86 | 73.8 | 1.834 % |
+
+- **The generalized Bloch engine fits real short-pulse MT data as well as its authors' model**
+  (0.42 % vs 0.41 %), with the same parameters within ~1–3 σ; the rate model cannot (3x the
+  residual, an unphysical T2s of 2 us), as the generalized Bloch paper says.
+- **The Green's-function memory is visible in real data**: the engine reproduces its own tapered
+  model exactly (post-pulse z within 4e-5 of the reference solver with the same taper), and the
+  taper exp(-s / (100 T2b)) costs 4 % in chi^2 (194 dof) and biases m0s by −3 %. Memory 300 (still
+  30 modes, fitted to 2e-4) halves both; the untapered kernel fits best. `BoundPool.memory`
+  (default 100, unchanged) selects it.
+- **MnCl2** (one pool) with the pulse in 50 segments: R1 1.478733 ± 0.002525 /s and residual
+  0.6984 % — the authors' numbers to every printed digit. With the pulse as one segment, 0.839 %:
+  the Strang split around a 180 deg rotation misses the T2* decay during the pulse
+  (`SequenceBuilder.rf` docstring). The remaining misfit is in the shortest pulses (1.1 % at
+  22.8 us vs 0.15–0.6 % for the rest), a pulse-length-dependent inversion efficiency of the
+  hardware that a constant factor does not capture — the same in both samples.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
