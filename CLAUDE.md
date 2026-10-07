@@ -1,7 +1,8 @@
 # Bloch Party
 
 Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
-implementation) and a fused C++ kernel with a hand-written adjoint (`src/blochparty/fused/`).
+implementation), an Apple-GPU kernel (`src/blochparty/metal/`, the main fast engine) and a fused
+C++ kernel with a hand-written adjoint (`src/blochparty/fused/`, frozen).
 Goal: the most physically realistic simulator, judged against real scanners
 (`docs/REALISM.md`); roadmap in `ROADMAP.md`.
 
@@ -11,8 +12,10 @@ Goal: the most physically realistic simulator, judged against real scanners
   the signal equation, MRzero (`validation/`), or real data (`validation/real/`).
 - **Defaults stay bit-identical.** New physics is opt-in. Before and after a core change run
   `uv run python tools/snapshot.py save <file>` and `compare <before> <after>`.
-- **Every new term goes into the PyTorch core and the fused kernel's forward and adjoint**,
-  with gradients checked against autograd and finite differences.
+- **One fast engine: Apple GPU (`blochparty.metal`).** New physics goes into the PyTorch core
+  (the readable reference, checked on small cases) and the Metal kernel, which must agree with
+  it. The fused CPU kernel is frozen (it keeps its forward and adjoint for what it has; new
+  physics raises there). Other engines, GPU gradients and the CPU+GPU hybrid come later.
 - **Record what you learn in `docs/LESSONS.md`**: anything that took more than a few minutes
   to figure out (physics, numerics, data/format quirks, tool behaviour, process), with where
   it came from.

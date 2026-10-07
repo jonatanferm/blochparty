@@ -317,3 +317,14 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
 - Not ported: free pools on Metal (a dense ~17×17 exponential per thread and segment, which
   overflows registers; pools are used for spectra and few spins, where the CPU kernel suffices),
   and the Metal adjoint (the whole reverse sweep for every physics variant: the largest port).
+
+## 2026-10-07 — direction: one realistic core, on this Mac
+
+- The owner: realism of the simulator core comes before agentic sequence design or datasets,
+  and for now one engine, the fastest on this Mac. Decision: the Metal GPU kernel is the main
+  engine and the PyTorch core the reference; the fused CPU kernel is frozen (new physics
+  raises there); GPU gradients, the hybrid runner and other engines come later (CLAUDE.md).
+- Measured CPU+GPU concurrency on the 48³ GRE: 1.15–1.5× over the faster device (ideal
+  1.7–2.3×; shared power budget, bandwidth, one core driving the GPU). Parked.
+- Next: moving spins, starting with free diffusion as exact Brownian segments drawn from
+  a counter-based RNG (Philox) shared by the core and the GPU.
