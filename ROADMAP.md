@@ -478,6 +478,15 @@ by Pulseq's own checks.
 - [x] Anatomy M4: within-tissue texture (`variability`), statistics tested.
 - [x] Anatomy M5: `examples/anatomy_brain.py` (3 T BrainWeb: T1w GRE, T2w TSE, long-TE GRE) and
       `validation/anatomy_ahead.py` (7 T measured maps).
+- [ ] **T2* from measured R2* without double counting** (next physics item): a measured R2*
+      contains the macroscopic dephasing from the voxel-scale susceptibility field that the
+      simulation now computes itself, plus microscopic R2' (vessels, myelin, iron) that it
+      does not. Today `t2star="auto"` drops R2' when chi is on, so measured R2* contrast vanishes
+      (AHEAD at 7 T: no pallidal darkening until R2' was supplied by hand). Plan: estimate the
+      macroscopic part from the simulated field's within-voxel gradients (sinc-type decay,
+      Yablonskiy/Fernandez-Seara) at the acquisition's voxel size and TE range, subtract it to
+      get microscopic R2' per voxel, and make that the default; check against a multi-echo GRE
+      of the same anatomy (simulated R2* fit vs the input map) and the static-dephasing limit.
 - [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data

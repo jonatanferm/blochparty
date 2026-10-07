@@ -284,3 +284,18 @@ def test_variability_statistics_and_defaults():
     assert torch.allclose(cut.t1, ph.t1.reshape(96, 96, 96)[10:12].reshape(-1))
     with pytest.raises(ValueError, match="variability"):
         to_phantom(a, chi_to_b0=False, variability={"t1": .1})
+
+
+def test_float64_resampling_keeps_fractions_valid():
+    # cumulative-sum resampling of complementary classes along long axes rounds by ~n eps per
+    # class; in float64 that exceeded the 16 eps sum check (BrainWeb at 1.5 mm, float64, failed)
+    g = torch.Generator().manual_seed(0)
+    a_ = torch.rand(30, 400, 37, generator=g, dtype=torch.float64)
+    b_ = torch.rand(30, 400, 37, generator=g, dtype=torch.float64) * (1 - a_)
+    a = Anatomy({"wm": a_, "gm": b_, "background": 1 - a_ - b_}, (.0005,)*3, (0, 0, 0))
+    for voxel in ((.0015,)*3, (.0007, .0013, .0011)):
+        r = a.resample(voxel)
+        assert float(sum(r.fractions.values()).max()) <= 1 + 16 * torch.finfo(torch.float64).eps
+        for k in a.fractions:
+            assert float(r.fractions[k].sum()) * math.prod(voxel) == pytest.approx(
+                float(a.fractions[k].sum()) * .0005**3, rel=1e-6)

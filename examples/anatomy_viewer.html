@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BrainWeb Head Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: full-bleed WebGL stage with a fixed instrument panel on the right (stacks below on phones). */
+:root {
+  --bg: #eef1f3; --panel: #f9fafb; --fg: #1d2429; --muted: #5b6770; --line: #d5dbe0; --accent: #2f6f8f;
+  --stage: #e4e8eb;
+  --sans: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1418; --panel: #151b20; --fg: #dfe6ea; --muted: #8b98a2; --line: #26313a; --accent: #6db3d4; --stage: #0b1013; color-scheme: dark } }
+:root[data-theme="dark"] { --bg: #0f1418; --panel: #151b20; --fg: #dfe6ea; --muted: #8b98a2; --line: #26313a; --accent: #6db3d4; --stage: #0b1013; color-scheme: dark }
+html, body { height: 100%; margin: 0 }
+body { background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans); display: grid; grid-template-columns: minmax(0, 1fr) 340px; }
+#stage { position: relative; min-height: 0; background: var(--stage) }
+#stage canvas { display: block; width: 100%; height: 100% }
+#hint { position: absolute; left: 16px; bottom: 12px; font: 12px var(--mono); color: var(--muted) }
+aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding-block: 20px; padding-inline: 20px; display: flex; flex-direction: column; gap: 22px }
+h1 { font-size: 19px; margin: 0; font-weight: 600; text-wrap: balance }
+.sub { color: var(--muted); font-size: 13px; margin: 4px 0 0 }
+h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; font-weight: 600 }
+.layers { display: grid; gap: 6px }
+.layer { display: grid; grid-template-columns: 18px 14px minmax(0, 1fr) 72px; align-items: center; gap: 8px }
+.sw { width: 14px; height: 14px; border-radius: 3px; border: 1px solid var(--line) }
+.layer span { min-width: 0 }
+input[type=range] { width: 100%; accent-color: var(--accent) }
+.row { display: flex; gap: 8px; flex-wrap: wrap }
+button { font: 500 12px var(--sans); color: var(--fg); background: transparent; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer }
+button[aria-pressed=true] { border-color: var(--accent); color: var(--accent) }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.num { font: 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums }
+p { margin: 0 0 8px; max-width: 62ch }
+.how p { font-size: 13px; color: var(--fg) }
+.legend { display: flex; justify-content: space-between; font: 11px var(--mono); color: var(--muted) }
+.bar { height: 8px; border-radius: 2px; background: linear-gradient(90deg, #2166ac, #f7f7f7, #b2182b) }
+@media (max-width: 760px) { body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 60vh auto } aside { border-left: 0; border-top: 1px solid var(--line) } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important } }
+</style>
+</head>
+<body>
+<div id="stage"><div id="hint">drag to rotate · scroll to zoom · right-drag to pan</div></div>
+<aside>
+  <div>
+    <h1>BrainWeb subject 04 in blochparty</h1>
+    <p class="sub">Tissue surfaces of the fuzzy anatomy model, with the simulated 3&nbsp;T slab where it sits in the head.</p>
+  </div>
+  <section>
+    <h2>Tissues</h2>
+    <div class="layers" id="layers"></div>
+  </section>
+  <section>
+    <h2>Cut</h2>
+    <div class="row" id="cutaxis">
+      <button data-axis="none" aria-pressed="true">None</button>
+      <button data-axis="axial" aria-pressed="false">Axial</button>
+      <button data-axis="coronal" aria-pressed="false">Coronal</button>
+      <button data-axis="sagittal" aria-pressed="false">Sagittal</button>
+    </div>
+    <input id="cut" type="range" min="0" max="1" step="0.002" value="0.6" aria-label="Cut position">
+    <div class="num" id="cutval"></div>
+  </section>
+  <section>
+    <h2>Simulated slab</h2>
+    <div class="row" id="slabimg">
+      <button data-img="t2w" aria-pressed="true">T2w TSE</button>
+      <button data-img="t1w" aria-pressed="false">T1w GRE</button>
+      <button data-img="b0" aria-pressed="false">B0 field</button>
+      <button data-img="off" aria-pressed="false">Hide</button>
+    </div>
+    <div id="b0legend" hidden>
+      <div class="bar"></div>
+      <div class="legend"><span>−150 Hz</span><span>0</span><span>+150 Hz</span></div>
+    </div>
+    <p class="num" id="slabinfo"></p>
+  </section>
+  <section class="how">
+    <h2>How the model works</h2>
+    <p><b>Anatomy.</b> BrainWeb gives, for each 0.5&nbsp;mm voxel, the fraction of each of 12 tissue classes (CSF, grey and white matter, fat, muscle, skin, skull, marrow, vessels, dura, connective tissue, air). The fractions are resampled to the simulation grid by exact volume averaging, so partial volume survives.</p>
+    <p><b>Spins.</b> Every voxel becomes spins of each tissue it contains, at jittered sub-voxel positions, each weighted by that tissue's fraction and carrying its own T1, T2 and proton density from a cited table (3&nbsp;T: Stanisz, Spijkerman, de Bazelaire and others), optionally with within-tissue texture, magnetization transfer and diffusion. Tissues are never averaged into one voxel value.</p>
+    <p><b>Field.</b> Each tissue has a magnetic susceptibility (water −9.05&nbsp;ppm, air +0.36, bone about −2 relative to water). The B0 field of the whole head is computed by Fourier dipole convolution, then a second-order shim is fitted over the brain, as a scanner would. Each spin sees the field where it sits.</p>
+    <p><b>Surfaces here</b> are 50&nbsp;% iso-surfaces of the fractions at 1.5&nbsp;mm, for display only; the simulation uses the fractions themselves.</p>
+  </section>
+</aside>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const DATA = /*DATA*/null;
+const LAYERS = [
+  { key: "skin", label: "Skin and scalp", color: 0xd9a58b, opacity: 0.18, on: true },
+  { key: "skull", label: "Skull and marrow", color: 0xe8e1cf, opacity: 0.3, on: true },
+  { key: "csf", label: "CSF", color: 0x5aa8d6, opacity: 0.45, on: false },
+  { key: "grey", label: "Grey matter (cortex)", color: 0xb98f8a, opacity: 1, on: true },
+  { key: "white", label: "White matter", color: 0xe6dcc6, opacity: 1, on: false },
+  { key: "vessels", label: "Vessels", color: 0xc0392b, opacity: 1, on: false },
+];
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.localClippingEnabled = true;
+stage.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 1, 3000);
+camera.position.set(260, 140, -300);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x3a4652, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 0.6); sun.position.set(1, 2, -1.5); scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.25); fill.position.set(-1, -0.5, 1); scene.add(fill);
+
+const lo = DATA.lo, hi = DATA.hi, c = DATA.centre;
+// world (x, y, z) mm -> three (x, z up, -y)
+const toThree = (x, y, z) => [x - c[0], z - c[2], -(y - c[1])];
+const clip = new THREE.Plane(new THREE.Vector3(0, -1, 0), 0);
+const meshes = {};
+function decode(b64, Type) { const s = atob(b64), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); return new Type(u.buffer); }
+for (const L of LAYERS) {
+  const m = DATA.meshes[L.key]; const q = decode(m.pos, Uint16Array); const idx = decode(m.idx, Uint32Array);
+  const pos = new Float32Array(q.length);
+  for (let i = 0; i < m.n; i++) {
+    const x = lo[0] + q[3*i] / 65535 * (hi[0] - lo[0]), y = lo[1] + q[3*i+1] / 65535 * (hi[1] - lo[1]), z = lo[2] + q[3*i+2] / 65535 * (hi[2] - lo[2]);
+    const t = toThree(x, y, z); pos[3*i] = t[0]; pos[3*i+1] = t[1]; pos[3*i+2] = t[2];
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.BufferAttribute(pos, 3)); g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({ color: L.color, roughness: 0.75, metalness: 0, transparent: L.opacity < 1, opacity: L.opacity,
+    depthWrite: L.opacity >= 1, side: THREE.DoubleSide, clippingPlanes: [clip] });
+  const mesh = new THREE.Mesh(g, mat); mesh.visible = L.on; mesh.renderOrder = L.opacity < 1 ? 2 : 1; scene.add(mesh); meshes[L.key] = mesh;
+}
+// simulated slab: image grid x_j = cx - fov/2 + j fov/n (pixel centres), rows = y
+const S = DATA.slab, half = S.fov_mm / 2, px = S.fov_mm / S.n;
+const x0 = S.centre_mm[0] - half - px / 2, x1 = x0 + S.fov_mm, y0 = S.centre_mm[1] - half - px / 2, y1 = y0 + S.fov_mm, zs = S.z_mm;
+const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y]) => toThree(x, y, zs));
+const pg = new THREE.BufferGeometry();
+pg.setAttribute("position", new THREE.BufferAttribute(new Float32Array(corners.flat()), 3));
+pg.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), 2));
+pg.setIndex([0, 1, 2, 0, 2, 3]);
+const textures = {}; const loader = new THREE.TextureLoader();
+for (const k of ["t2w", "t1w", "b0"]) { const t = loader.load(S.images[k]); t.flipY = false; textures[k] = t; }
+const slabMat = new THREE.MeshBasicMaterial({ map: textures.t2w, transparent: true, side: THREE.DoubleSide, alphaTest: 0.02 });
+const slab = new THREE.Mesh(pg, slabMat); slab.renderOrder = 3; scene.add(slab);
+document.getElementById("slabinfo").textContent =
+  `z = ${zs.toFixed(1)} mm · 2 mm thick · ${S.spins.toLocaleString("en-US")} spins · B0 ${S.b0_range_hz[0].toFixed(0)} to +${S.b0_range_hz[1].toFixed(0)} Hz after shim`;
+
+// panel
+const layersEl = document.getElementById("layers");
+for (const L of LAYERS) {
+  const row = document.createElement("label"); row.className = "layer";
+  row.innerHTML = `<input type="checkbox" id="ly-${L.key}" ${L.on ? "checked" : ""}><span class="sw" style="background:#${L.color.toString(16).padStart(6, "0")}"></span><span>${L.label}</span><input type="range" id="op-${L.key}" min="0.05" max="1" step="0.05" value="${L.opacity}" aria-label="${L.label} opacity">`;
+  layersEl.appendChild(row);
+  row.querySelector(`#ly-${L.key}`).addEventListener("change", e => { meshes[L.key].visible = e.target.checked; });
+  row.querySelector(`#op-${L.key}`).addEventListener("input", e => { const m = meshes[L.key].material, v = +e.target.value;
+    m.opacity = v; m.transparent = v < 1; m.depthWrite = v >= 1; meshes[L.key].renderOrder = v < 1 ? 2 : 1; m.needsUpdate = true; });
+}
+let axis = "none";
+const box = new THREE.Box3().setFromObject(meshes.skin);
+function updateCut() {
+  const t = +document.getElementById("cut").value; const out = document.getElementById("cutval");
+  if (axis === "none") { clip.normal.set(0, -1, 0); clip.constant = 1e4; out.textContent = "no cut"; return; }
+  const ax = { axial: ["y", [0, -1, 0], "z (up)"], coronal: ["z", [0, 0, 1], "y (front)"], sagittal: ["x", [-1, 0, 0], "x (right)"] }[axis];
+  const a = ax[0], v = box.min[a] + t * (box.max[a] - box.min[a]);
+  clip.normal.set(...ax[1]);  // three.js keeps n.p + constant >= 0
+  clip.constant = -(clip.normal.x * (a === "x" ? v : 0) + clip.normal.y * (a === "y" ? v : 0) + clip.normal.z * (a === "z" ? v : 0));
+  out.textContent = `${axis} cut at ${v.toFixed(0)} mm along ${ax[2]}`;
+}
+document.getElementById("cutaxis").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+  axis = b.dataset.axis; for (const x of e.currentTarget.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b); updateCut(); });
+document.getElementById("cut").addEventListener("input", updateCut);
+document.getElementById("slabimg").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return;
+  for (const x of e.currentTarget.querySelectorAll("button")) x.setAttribute("aria-pressed", x === b);
+  const k = b.dataset.img; slab.visible = k !== "off"; if (k !== "off") { slabMat.map = textures[k]; slabMat.needsUpdate = true; }
+  document.getElementById("b0legend").hidden = k !== "b0"; });
+updateCut();
+function resize() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / Math.max(r.height, 1); camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(stage); resize();
+(function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+</script>
+</body>
+</html>

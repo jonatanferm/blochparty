@@ -306,6 +306,11 @@ says where it came from so it can be re-checked.
   (Caan 2019) and a positive pallidum. PMC served a CAPTCHA for the methods paper: do not try to
   get around it; use the publisher record and the values.
 
+- **A sum-to-one check at 16 eps fails after cumulative-sum resampling in float64**: resampling
+  complementary fractions by differencing cumulative sums along a 362-voxel axis leaves ~1e-14
+  per class, so BrainWeb at 1.5 mm in float64 raised "fractions sum to more than one" (float32
+  hid it: its tolerance is 2e-6). Renormalise by max(total, 1) after resampling.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

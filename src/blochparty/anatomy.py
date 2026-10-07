@@ -189,6 +189,15 @@ def _triple(values, name, positive=False):
     return values
 
 
+def _renormalize(fractions: dict) -> dict:
+    """Divide every class by max(total, 1): resampling by cumulative-sum differences leaves
+    rounding of ~(axis length) x eps per class, which can push a sum of ones past 1 + 16 eps
+    in float64. Volumes change by that rounding only."""
+    total = sum(fractions.values())
+    scale = torch.where(total > 1, total, torch.ones_like(total))
+    return {k: v / scale for k, v in fractions.items()}
+
+
 def _resample(grid, old, new, fill=0.):
     """Exact separable cell-overlap integrals, no dense interpolation matrix."""
     out = grid
@@ -308,7 +317,7 @@ class Anatomy:
                 if name in maps:
                     weighted = _resample(self.maps[name]*self.maps["M0"],self.voxel,voxel)
                     maps[name] = torch.where(density > 0,weighted/density.clamp_min(torch.finfo(density.dtype).tiny),0.)
-        return Anatomy({k:_resample(v,self.voxel,voxel).clamp(0,1) for k,v in self.fractions.items()},
+        return Anatomy(_renormalize({k:_resample(v,self.voxel,voxel).clamp(0,1) for k,v in self.fractions.items()}),
             voxel,origin,None if self.chi is None else _resample(self.chi,self.voxel,voxel,self.chi_background),
             maps,
             self.chi_background,self.map_field_T)
@@ -372,7 +381,7 @@ def load_brainweb(subject: int, root, *, voxel=None, dtype=torch.float32) -> Ana
         value = torch.from_numpy(raw_maps.pop(name).astype(np.float64) / total)
         fractions[name] = _resample(value,old,new).to(dtype).clamp(0,1)
     origin = tuple(o+(b-a)/2 for o,a,b in zip(manifest["origin"],reversed(old),reversed(new)))
-    return Anatomy(fractions,new,origin)
+    return Anatomy(_renormalize(fractions),new,origin)
 
 
 # Label IDs published with the QSM Challenge 2.0 head model; independently
