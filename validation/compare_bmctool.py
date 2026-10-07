@@ -178,6 +178,7 @@ def main(argv=None):
     if args.quick:
         seq_offsets = seq_offsets[[0, 3, 6, 7]]
     check_replica()
+    print(cest_comparison(args.quick), flush=True)
     with tempfile.TemporaryDirectory() as tmp:
         full, short = Path(tmp) / "zspec.seq", Path(tmp) / "zspec_short.seq"
         write_seq(full, offsets)
@@ -214,3 +215,57 @@ def main(argv=None):
 
 if __name__ == "__main__":
     main()
+
+
+# ---------------------------------------------------------------- CEST: free exchanging pools
+
+
+def cest_comparison(quick: bool = False) -> str:
+    """BMCTool's own 5-pool library model (water, amide, guanidine, NOE, and MT modelled as a
+    free Lorentzian pool), as ``Phantom.pools`` in blochparty's exact Bloch-McConnell engine."""
+    import importlib.resources
+
+    import yaml
+    from bmctool.parameters import Parameters
+    from bmctool.simulation import BMCSim
+
+    cfg_path = importlib.resources.files("bmctool") / "library" / "sim-library" / "config_5pool.yaml"
+    cfg = yaml.safe_load(cfg_path.read_text())
+    cfg["max_pulse_samples"] = 10**6
+    water = cfg["water_pool"]
+    pools = tuple(bp.ExchangePool(f=q["f"], k=float(q["k"]), t1=q["t1"], t2=q["t2"], dw=hz(q["dw"]))
+                  for q in cfg["cest_pool"].values())
+    offsets = np.concatenate([[-300.0], np.arange(-6, 6.01, 0.25)])
+
+    def ours_as_spins():
+        amp = GAMMA_BAR * B1_UT * 1e-6
+        seq = bp.SequenceBuilder().rf(T_SAT, amplitude=amp).delay(5e-3).spoil().build()  # one exact segment
+        db0 = -hz(torch.tensor(offsets, dtype=torch.float64))
+        n = len(db0)
+        ph = bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=torch.ones(n, dtype=torch.float64),
+                        t1=torch.full((n,), water["t1"], dtype=torch.float64),
+                        t2=torch.full((n,), water["t2"], dtype=torch.float64), db0=db0, pools=pools)
+        return bp.simulate(ph, seq).m[:, 2].numpy()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "cest.seq"
+        write_seq(path, offsets)
+        t0 = time.perf_counter()
+        sim = BMCSim(Parameters.from_dict(cfg), str(path), verbose=False)
+        sim.run()
+        ref = sim.get_zspec(return_abs=False)[1]
+        t_bmc = time.perf_counter() - t0
+        t0 = time.perf_counter()
+        ours = ours_as_spins()
+        t_ours = time.perf_counter() - t0
+    z_ref, z_ours = ref / ref[0], ours / ours[0]
+    asym = lambda z, o: float(z[offsets == -o][0] - z[offsets == o][0])
+    lines = [f"\nCEST, BMCTool's config_5pool.yaml (water + amide 3.5, guanidine 2, NOE -3, MT -3 ppm as free pools), "
+             f"{B1_UT} uT block pulse {T_SAT} s; BMCTool {t_bmc:.1f} s, blochparty {t_ours:.1f} s ({len(offsets)} "
+             f"offsets as spins, one exact segment each)",
+             f"max |dZ| {np.abs(z_ours - z_ref).max():.1e}; MTR_asym(3.5 ppm) BMCTool {asym(z_ref, 3.5):+.5f}, "
+             f"blochparty {asym(z_ours, 3.5):+.5f} (the .seq path is checked with MT above; the exact engine costs "
+             f"~0.3 ms per segment with 4 pools)",
+             "| offset [ppm] | BMCTool | blochparty | difference |", "|---|---|---|---|"]
+    lines += [f"| {o:g} | {r:.6f} | {b:.6f} | {b - r:+.1e} |" for o, r, b in zip(offsets, z_ref, z_ours)]
+    return "\n".join(lines)

@@ -136,8 +136,8 @@ def simulate_chunked(
         kspace = simulate_chunked(phantom, seq, spin_chunk=512).signal
         kspace.abs().sum().backward()  # fills flip.grad and t1.grad
     """
-    if phantom.bound is not None:
-        raise NotImplementedError("magnetization transfer (Phantom.bound) is not implemented here yet; use blochparty.simulate")
+    if phantom.bound is not None or phantom.pools:
+        raise NotImplementedError("exchange (Phantom.bound / pools) is not implemented here yet; use blochparty.simulate")
 
     if spin_chunk < 1:
         raise ValueError(f"spin_chunk must be positive, got {spin_chunk}")

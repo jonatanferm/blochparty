@@ -157,6 +157,8 @@ def simulate_fused(
         backward pass replays one such interval at a time (default:
         ``default_checkpoint_every``). Gradients do not depend on it.
     """
+    if getattr(phantom, "pools", None):
+        raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
     pd = phantom.pd
     dtype = pd.dtype
     if dtype not in (torch.float32, torch.float64):

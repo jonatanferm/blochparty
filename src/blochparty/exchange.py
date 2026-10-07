@@ -214,3 +214,71 @@ def saturation_rate(pool: BoundPool, rf: Tensor, b1: Tensor | None, delta: Tenso
     if b1 is not None:
         w1sq = w1sq * b1 * b1
     return w1sq * lineshape(pool, delta)
+
+
+# ---------------------------------------------------------------- free pools: Bloch-McConnell
+
+
+@dataclass
+class ExchangePool:
+    """A free pool exchanging with the water (CEST pool, myelin water, ...): full Bloch dynamics
+    (Mx, My, Mz) at its own shift, equilibrium f PD, exchanging all three components with the
+    water at k (pool -> water) and k f (water -> pool), as BMCTool's CEST pools. Its transverse
+    magnetization is part of the signal. Tensors of shape (N,) or scalars."""
+
+    f: Tensor | float
+    k: Tensor | float  # [Hz], pool -> water
+    t1: Tensor | float  # [s]
+    t2: Tensor | float  # [s]
+    dw: Tensor | float = 0.0  # resonance shift from water [Hz]
+
+    def expand(self, n: int, like: Tensor) -> ExchangePool:
+        conv = lambda v: torch.as_tensor(v, dtype=like.dtype, device=like.device).expand(n)
+        return ExchangePool(conv(self.f), conv(self.k), conv(self.t1), conv(self.t2), conv(self.dw))
+
+    def to(self, dtype=None, device=None) -> ExchangePool:
+        conv = lambda v: v.to(dtype=dtype, device=device) if isinstance(v, Tensor) else v
+        return ExchangePool(conv(self.f), conv(self.k), conv(self.t1), conv(self.t2), conv(self.dw))
+
+
+def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat):
+    """(N, d, d) augmented Bloch-McConnell matrix of one segment: state (Mx, My, Mz) of the water
+    and of every free pool, then Mzb of the bound pool (if any), then 1."""
+    n, p = bz.shape[0], len(pools)
+    nb = 1 if bound is not None else 0
+    d = 3 * (p + 1) + nb + 1
+    one = d - 1
+    A = bz.new_zeros(n, d, d)
+    two_pi = 2 * math.pi
+    sx, sy = two_pi * rf[0], two_pi * rf[1]
+    wx, wy = (sx * b1, sy * b1) if b1 is not None else (sx.expand(n), sy.expand(n))
+    params = [(spins.pd, spins.r1, spins.r2, bz)] + [(q.f * spins.pd, 1 / q.t1, 1 / q.t2, bz + q.dw) for q in pools]
+    for i, (m0, r1, r2, off) in enumerate(params):
+        x, y, z = 3 * i, 3 * i + 1, 3 * i + 2
+        wz = two_pi * off
+        A[:, x, y] += wz
+        A[:, x, z] -= wy
+        A[:, y, x] -= wz
+        A[:, y, z] += wx
+        A[:, z, x] += wy
+        A[:, z, y] -= wx
+        A[:, x, x] -= r2
+        A[:, y, y] -= r2
+        A[:, z, z] -= r1
+        A[:, z, one] += r1 * m0
+    for i, q in enumerate(pools, start=1):
+        k_out, k_in = q.k * q.f, q.k  # water -> pool, pool -> water
+        for c in range(3):
+            A[:, c, c] -= k_out
+            A[:, c, 3 * i + c] += k_in
+            A[:, 3 * i + c, c] += k_out
+            A[:, 3 * i + c, 3 * i + c] -= k_in
+    if bound is not None:
+        zb = 3 * (p + 1)
+        A[:, 2, 2] -= bound.k * bound.f
+        A[:, 2, zb] += bound.k
+        A[:, zb, 2] += bound.k * bound.f
+        A[:, zb, zb] -= 1 / bound.t1 + bound.k + (w_sat if w_sat is not None else 0)
+        A[:, zb, one] += bound.f * spins.pd / bound.t1
+    return A
+

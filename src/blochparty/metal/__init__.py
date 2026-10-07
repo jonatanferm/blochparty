@@ -433,6 +433,8 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     if scanner is not None:
         raise NotImplementedError("the scanner field model is not implemented on Metal; use simulate_fused")
 
+    if getattr(phantom, "pools", None):
+        raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)

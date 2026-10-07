@@ -32,7 +32,7 @@ import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
-from .exchange import BoundPool, rf_frequency, saturation_rate, z_exchange
+from .exchange import BoundPool, _bm_matrix, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
 from .phantom import Phantom
 from .sequence import Sequence
@@ -59,6 +59,7 @@ class SimResult:
     signal: Tensor  # (C, n_adc) complex, in ADC order
     m: Tensor  # (N, 3) magnetization after the last segment
     m_bound: Tensor | None = None  # (N,) bound-pool Mz after the last segment (with ``Phantom.bound``)
+    m_pools: Tensor | None = None  # (N, P, 3) free exchanging pools after the last segment (``Phantom.pools``)
 
 
 def _relax(mx, my, mz, dt, spins: _Spins):
@@ -237,6 +238,71 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
     return mx, my, mz, mb, sig
 
 
+def _simulate_exchange(phantom: Phantom, seq: Sequence, coils, m_init, scanner) -> SimResult:
+    """Water + free exchanging pools (+ bound pool): one exact matrix exponential per segment,
+    with its RF (no splitting), as BMCTool. The signal is the sum of every free pool's
+    transverse magnetization; consecutive identical segments reuse their exponential."""
+    pd = phantom.pd
+    n = len(phantom)
+    seq = seq.to(dtype=pd.dtype, device=pd.device)
+    if coils is None:
+        sens_re, sens_im = torch.ones_like(pd)[:, None], torch.zeros_like(pd)[:, None]
+    else:
+        sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
+    fields = spin_fields(scanner, phantom.pos)
+    bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
+    pools = [q.expand(n, pd) for q in phantom.pools]
+    spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
+                   fields.conc, fields.mode, bound)
+    f_rf = rf_frequency(seq) if bound is not None else None
+    off_all = seq.b0_offset
+    np_ = len(pools)
+    d = 3 * (np_ + 1) + (1 if bound is not None else 0) + 1
+    # initial state: water from m_init (N, 3 or 4), pools and bound pool at equilibrium
+    v = [pd.new_zeros(n), pd.new_zeros(n), pd]
+    if m_init is not None:
+        v = list(m_init[:, :3].unbind(-1))
+    for q in pools:
+        v += [pd.new_zeros(n), pd.new_zeros(n), q.f * pd]
+    if bound is not None:
+        v.append(m_init[:, 3] if m_init is not None and m_init.shape[-1] == 4 else bound.f * pd)
+    v.append(torch.ones_like(pd))
+    v = torch.stack(v, -1)
+    transverse = torch.zeros(d, dtype=torch.bool, device=pd.device)
+    for i in range(np_ + 1):
+        transverse[3 * i] = transverse[3 * i + 1] = True
+    keep = (~transverse).to(pd.dtype)
+    samples, key, E = [], None, None
+    for s in range(len(seq)):
+        dt, rf, g = seq.dt[s], seq.rf[s], seq.grad[s]
+        off = off_all[s] if off_all is not None else None
+        new_key = (float(dt), float(rf[0]), float(rf[1]), *map(float, g), 0.0 if off is None else float(off),
+                   float(f_rf[s]) if f_rf is not None and seq.is_rf[s] else 0.0)
+        if new_key != key or torch.is_grad_enabled():
+            bz = spins.pos @ g + spins.db0
+            if off is not None:
+                bz = bz + off
+            if spins.mode:
+                bz = bz + _concomitant(bz, g, spins)
+            rf_s = rf if seq.is_rf[s] else rf.new_zeros(2)
+            w_sat = None
+            if bound is not None and seq.is_rf[s]:
+                w_sat = saturation_rate(bound, rf, spins.b1, f_rf[s] - bz - bound.dw)
+            E = torch.linalg.matrix_exp(_bm_matrix(rf_s, bz, spins.b1, spins, pools, bound, w_sat) * dt)
+            key = new_key
+        v = (E @ v[..., None])[..., 0]
+        if seq.adc[s]:
+            mx = sum(v[:, 3 * i] for i in range(np_ + 1))
+            my = sum(v[:, 3 * i + 1] for i in range(np_ + 1))
+            samples.append(_sample(mx, my, seq.adc_phase[s], spins)[None])
+        if seq.spoil[s]:
+            v = v * keep
+    sig = torch.cat(samples) if samples else pd.new_zeros(0, 2, sens_re.shape[1])
+    m_pools = torch.stack([v[:, 3 * i:3 * i + 3] for i in range(1, np_ + 1)], 1) if np_ else None
+    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, v[:, :3], v[:, 3 * (np_ + 1)] if bound is not None else None,
+                     m_pools)
+
+
 def simulate(
     phantom: Phantom,
     seq: Sequence,
@@ -259,7 +325,13 @@ def simulate(
         False steps segment by segment; the results agree to rounding error.
     scanner: hardware field model (``fields.Scanner``: concomitant fields); None is
         the ideal scanner. ``seq.b0_offset`` (None: zeros) is always applied.
+
+    With ``Phantom.pools`` (free exchanging pools: CEST, myelin water) every segment is one
+    exact matrix exponential of the Bloch-McConnell system instead (slower; checkpoint_every
+    and merge_free_runs do not apply).
     """
+    if phantom.pools:
+        return _simulate_exchange(phantom, seq, coils, m_init, scanner)
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)
     n = len(phantom)
