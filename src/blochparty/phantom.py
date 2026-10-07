@@ -10,6 +10,7 @@ from torch import Tensor
 
 from .constants import GAMMA_BAR
 from .exchange import BoundPool, ExchangePool
+from .motion import Motion
 from .restriction import Restriction
 
 
@@ -27,6 +28,7 @@ class Phantom:
     diffusion: Tensor | None = None
     # restricted diffusion: each spin walks in its own impermeable compartment (restriction.py)
     restriction: Restriction | None = None
+    motion: Motion | None = None  # flow, periodic deformation, rigid motion (motion.py)
 
     def __len__(self) -> int:
         return self.pd.shape[0]
@@ -38,7 +40,8 @@ class Phantom:
                        bound=None if self.bound is None else self.bound.to(dtype=dtype, device=device),
                        pools=None if self.pools is None else tuple(q.to(dtype=dtype, device=device) for q in self.pools),
                        diffusion=conv(self.diffusion),
-                       restriction=None if self.restriction is None else self.restriction.to(dtype=dtype, device=device))
+                       restriction=None if self.restriction is None else self.restriction.to(dtype=dtype, device=device),
+                       motion=None if self.motion is None else self.motion.to(dtype=dtype, device=device))
 
 
 def grid_positions(shape: int | tuple[int, ...], fov: float, dtype=torch.float64) -> Tensor:

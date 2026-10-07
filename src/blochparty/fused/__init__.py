@@ -259,6 +259,8 @@ def simulate_fused(
         backward pass replays one such interval at a time (default:
         ``default_checkpoint_every``). Gradients do not depend on it.
     """
+    if getattr(phantom, "motion", None) is not None:
+        raise NotImplementedError("motion (Phantom.motion) is in blochparty.simulate and the Metal kernel")
     if getattr(phantom, "diffusion", None) is not None:
         raise NotImplementedError("diffusion (Phantom.diffusion) is in blochparty.simulate and the Metal kernel")
     if getattr(phantom, "pools", None):

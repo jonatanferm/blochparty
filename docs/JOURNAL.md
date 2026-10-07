@@ -348,3 +348,15 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
   pulse), planes vs Tanner–Stejskal's series at Δ = 10/25/200 ms within 3e-3, free along the
   cylinder. GPU = core to 1e-5 (same walk, reflections included). Metal's 31-buffer limit was
   hit; the scalars are now one parameter array (plain kernels unchanged at 0.39 s).
+- **Flow and motion, positions** (`motion.py`, `Phantom.motion`; core and Metal): r(t) =
+  A(t)(r0 + u(t) + v t + d w(t)) + b(t), evaluated at each segment's mid-time (exact for the
+  phase of a constant velocity), on top of the diffusion walk in the tissue frame. Checks:
+  phase contrast 2πGvτ² exact; a constant rigid transform equals the moved phantom; a jump
+  between k-space halves equals the static k-spaces stitched (Fourier shift); inflow in a
+  spoiled GRE vs the time-of-flight recursion within 1 % at 0/0.05/0.15 m/s; GPU = core with
+  flow, periodic displacement, rotation and diffusion at once. Test bugs on the way: the textbook
+  ideal-slice inflow formula was the wrong reference (the sinc's edges tip less, so the static
+  signal is 36 % higher); the reference now uses the pulse's own complex profile. The flow
+  column must be long enough to feed the slice for the whole run, and the profile must be read
+  before the spoiler. Not yet: fields sampled at the moving position (coils, B1⁺, scanner B0),
+  and motion with gradient nonlinearity or concomitant fields (raise).

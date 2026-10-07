@@ -35,6 +35,7 @@ from torch.utils.checkpoint import checkpoint
 
 from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
 from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
+from .motion import positions
 from .restriction import n_sub, start_offsets, tau_max, walk_segment
 from .rng import normals
 from .phantom import Phantom
@@ -57,6 +58,7 @@ class _Spins(NamedTuple):
     bound: BoundPool | None = None  # magnetization transfer (``exchange.py``), expanded to (N,)
     modes: tuple | None = None  # generalized Bloch bound pool: (J,) complex poles [1/T2b] and weights
     walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky (N, 3, 3), seed, spin indices, restriction)
+    move: tuple | None = None  # motion: (Motion, per-segment terms, r0 (N, 3))
 
 
 @dataclass
@@ -304,6 +306,9 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
         eff = None
         if spins.walk is not None:  # diffusion: where each spin is during these segments
             eff, r = _walk(r, seq.dt[a:b], a, spins)
+        if spins.move is not None:  # motion on top, in the tissue frame
+            mot, seg, r0 = spins.move
+            eff = positions(r0 if eff is None else eff, mot, seg, a, b)
         if seq.is_rf[a]:
             off = seq.b0_offset[a] if use_off else None
             sp = spins if eff is None else spins._replace(pos=eff[:, 0])
@@ -424,8 +429,8 @@ def simulate(
     and merge_free_runs do not apply).
     """
     if phantom.pools:
-        if phantom.diffusion is not None:
-            raise NotImplementedError("free pools with diffusion are not implemented")
+        if phantom.diffusion is not None or phantom.motion is not None:
+            raise NotImplementedError("free pools with diffusion or motion are not implemented")
         if phantom.bound is not None and phantom.bound.model == "generalized":
             raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
         return _simulate_exchange(phantom, seq, coils, m_init, scanner)
@@ -453,8 +458,13 @@ def simulate(
             res = phantom.restriction.expand(n, pd)
             restr = (res, fields.pos, tau_max(res, D))
         walk = (fac, int(seed), idx, restr)
+    move = None
+    if phantom.motion is not None:
+        if fields.mode or (scanner is not None and scanner.nonlinearity is not None):
+            raise NotImplementedError("motion with gradient nonlinearity or concomitant fields is not implemented")
+        move = (phantom.motion, phantom.motion.per_segment(seq.dt), fields.pos)
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk)
+                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move)
     r = fields.pos if walk is not None else None
     if walk is not None and walk[3] is not None:  # walkers start uniformly inside their compartments
         r = fields.pos + start_offsets(walk[3][0], int(seed), walk[2], pd)

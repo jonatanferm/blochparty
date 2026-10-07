@@ -401,15 +401,27 @@ struct State {
 // V: 0 plain Bloch (no field model, no bound pool), 1 rate-model bound pool and/or field model,
 // 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
 // carry none of the others' per-thread state.
+struct Move {
+    bool diffuse = false, move = false;
+    float3 v = float3(0.0f), d = float3(0.0f);
+};
+
 template <int V, bool DIFF>
-inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread const Geom& gm, constant float* segs,
-                    constant int* flags, constant float* frf, uint s, uint mt, constant float* line,
-                    constant float* log_f, uint mode, constant int* nsub, constant float* modes, uint nj,
-                    constant int* wsub) {
+inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread const Geom& gm, thread const Move& mv,
+                    constant float* segs, constant int* flags, constant float* frf, uint s, uint mt,
+                    constant float* line, constant float* log_f, uint mode, constant int* nsub, constant float* modes,
+                    uint nj, constant int* wsub, constant float* mseg) {
     constant float* q = segs + 8 * s;
     if (DIFF) {  // a moving spin: its effective position for this segment; position-keyed caches are stale
-        const float3 eff = gm.kind ? walk_restricted(wk, s, q[0], uint(wsub[s]), gm.kind, gm.size, gm.ax, gm.c)
-                                   : walk_segment(wk, s, q[0]);
+        float3 eff = !mv.diffuse ? float3(wk.x, wk.y, wk.z)
+                     : gm.kind ? walk_restricted(wk, s, q[0], uint(wsub[s]), gm.kind, gm.size, gm.ax, gm.c)
+                               : walk_segment(wk, s, q[0]);
+        if (mv.move) {  // motion.positions: A (r + v t + d w) + b at the segment's mid-time
+            constant float* ms = mseg + 14 * s;
+            eff += mv.v * ms[0] + mv.d * ms[1];
+            eff = float3(ms[2] * eff.x + ms[3] * eff.y + ms[4] * eff.z, ms[5] * eff.x + ms[6] * eff.y + ms[7] * eff.z,
+                         ms[8] * eff.x + ms[9] * eff.y + ms[10] * eff.z) + float3(ms[11], ms[12], ms[13]);
+        }
         st.p.px = eff.x, st.p.py = eff.y, st.p.pz = eff.z;
         st.cache.dt = -1.0f, md.k_dt = -1.0f;
     }
@@ -507,14 +519,16 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                                 constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
                                 constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
                                 constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
-                                constant uint* prm         [[buffer(20)]],  // (12,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind
+                                constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
+                                constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
+                                constant uint* prm         [[buffer(22)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
                                 uint i    [[thread_position_in_grid]],
                                 uint lane [[thread_index_in_simdgroup]],
                                 uint sg   [[simdgroup_index_in_threadgroup]],
                                 uint nsg  [[simdgroups_per_threadgroup]],
                                 uint tid  [[thread_index_in_threadgroup]],
                                 uint ntg  [[threads_per_threadgroup]]) {
-    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11];
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13];
 
     // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
     // two barriers per block of samples instead of two per sample, and the final sums are spread
@@ -535,8 +549,16 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     Walk wk;
     if (@DIFF@) {
         wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
-        for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active && diffuse ? chol[c * n + j] : 0.0f;
         wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
+    Move mv;
+    if (@DIFF@) {
+        mv.diffuse = diffuse != 0, mv.move = move != 0;
+        if (mv.move && active) {
+            mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
+            mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
+        }
     }
     Geom gm;
     if (@DIFF@ && kind) {
@@ -554,7 +576,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub);
+        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
@@ -600,14 +622,16 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
                                     constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
                                     constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
-                                    constant uint* prm         [[buffer(20)]],  // (12,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind
+                                    constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
+                                    constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
+                                    constant uint* prm         [[buffer(22)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
                                     uint i    [[thread_position_in_grid]],
                                     uint lane [[thread_index_in_simdgroup]],
                                     uint sg   [[simdgroup_index_in_threadgroup]],
                                     uint nsg  [[simdgroups_per_threadgroup]],
                                     uint tid  [[thread_index_in_threadgroup]],
                                     uint ntg  [[threads_per_threadgroup]]) {
-    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11];
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13];
 
     threadgroup float buf[MAX_SG * MMA_REGION];
     threadgroup int rows[8];
@@ -627,8 +651,16 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     Walk wk;
     if (@DIFF@) {
         wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
-        for (uint c = 0; c < 6; ++c) wk.l[c] = active ? chol[c * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active && diffuse ? chol[c * n + j] : 0.0f;
         wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
+    Move mv;
+    if (@DIFF@) {
+        mv.diffuse = diffuse != 0, mv.move = move != 0;
+        if (mv.move && active) {
+            mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
+            mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
+        }
     }
     Geom gm;
     if (@DIFF@ && kind) {
@@ -645,7 +677,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub);
+        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx;
             mine[256 + 8 * lane + nb] = my;
@@ -782,6 +814,8 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     if gen_bufs is None:
         dz = torch.zeros(1, device=dev, dtype=f32)
         gen_bufs = [dz, dz, torch.zeros(1, device=dev, dtype=torch.int32), 0]
+    if phantom.motion is not None and (fields.mode or (scanner is not None and scanner.nonlinearity is not None)):
+        raise NotImplementedError("motion with gradient nonlinearity or concomitant fields is not implemented")
     if phantom.diffusion is not None:  # walkers start at the (encoding) positions; L L^T = D
         D = phantom.diffusion.detach().double().cpu()
         L = torch.diag_embed(torch.sqrt(D).unsqueeze(-1).expand(n, 3)) if D.dim() == 1 else torch.linalg.cholesky(D)
@@ -804,11 +838,25 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
             geom_bufs = [wsub.to(dev), geom, KINDS.index(res.kind) + 1]
         walk_bufs = [start.T.to(dev, f32).contiguous(), chol.to(dev, f32).contiguous(),
                      int(seed) & 0xFFFFFFFF, (int(seed) >> 32) & 0xFFFFFFFF, *geom_bufs]
-    else:
+    else:  # motion alone: the tissue-frame position stays r0
         dz = torch.zeros(1, device=dev, dtype=f32)
-        walk_bufs = [dz, dz, 0, 0, torch.zeros(1, device=dev, dtype=torch.int32), dz, 0]
+        walk_bufs = [fields.pos.detach().T.to(dev, f32).contiguous() if phantom.motion is not None else dz, dz, 0, 0,
+                     torch.zeros(1, device=dev, dtype=torch.int32), dz, 0]
+    move_bufs = [torch.zeros(1, device=dev, dtype=f32), torch.zeros(1, device=dev, dtype=f32)]
+    if phantom.motion is not None:
+        mo = phantom.motion
+        seg = mo.per_segment(seq.dt.detach().double().cpu())
+        S_ = len(seq)
+        w = seg["w"] if seg["w"] is not None else torch.zeros(S_, dtype=torch.float64)
+        A = seg["A"] if seg["A"] is not None else torch.eye(3, dtype=torch.float64).expand(S_, 3, 3)
+        b = seg["b"] if seg["b"] is not None else torch.zeros(S_, 3, dtype=torch.float64)
+        mseg = torch.cat([seg["t"][:, None], w[:, None], A.reshape(S_, 9), b], 1)
+        zero3 = torch.zeros(n, 3, dtype=torch.float64)
+        vel = mo.velocity.detach().double().cpu() if mo.velocity is not None else zero3
+        dsp = mo.displacement.detach().double().cpu() if mo.displacement is not None else zero3
+        move_bufs = [mseg.to(dev, f32).contiguous(), torch.cat([vel.T, dsp.T]).to(dev, f32).contiguous()]
     suffix = "_gen" if gen_bufs[3] else ("_full" if (mt_bufs[5] or conc_buf[1]) else "")
-    if phantom.diffusion is not None:
+    if phantom.diffusion is not None or phantom.motion is not None:
         suffix += "_diff"
     lib, S = _lib(), len(seq)
     # buffers 7-19 (MB pool frf line log_f | conc | U modes nsub | P chol | wsub geom) and the scalars
@@ -816,11 +864,11 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     conc_b, mode_flag = conc_buf
     U_b, modes_b, nsub_b, nj_v = gen_bufs
     P_b, chol_b, seed_lo, seed_hi, wsub_b, geom_b, kind_v = walk_bufs
-    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b)
+    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs)
 
     def prm(s0, n_tiles, n_pad):
         v = np.array([n, n_coils, s0, min(S, s0 + chunk), n_tiles, n_pad, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
-                      kind_v], dtype=np.uint32)
+                      kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None)], dtype=np.uint32)
         return torch.from_numpy(v.view(np.int32)).to(dev)
 
     for s0 in range(0, S, chunk):

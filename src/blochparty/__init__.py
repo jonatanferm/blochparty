@@ -8,6 +8,7 @@ from .chunked import simulate_chunked
 from .coils import add_noise, birdcage_b1, birdcage_sensitivities
 from .constants import GAMMA_BAR
 from .exchange import BoundPool, ExchangePool
+from .motion import Motion
 from .restriction import Restriction
 from .phantom import (Phantom, b0_cylinder, b0_shim, b0_sphere, grid_positions, phantom_from_maps, shepp_logan,
                       shepp_logan_maps)
@@ -16,7 +17,7 @@ from .sequence import (Sequence, SequenceBuilder, System, block_pulse, gradient_
                        trapezoid)
 
 __all__ = [
-    "GAMMA_BAR", "BoundPool", "ExchangePool", "Phantom", "Restriction", "Sequence", "SequenceBuilder", "SimResult", "System", "add_noise", "b0_cylinder",
+    "GAMMA_BAR", "BoundPool", "ExchangePool", "Motion", "Phantom", "Restriction", "Sequence", "SequenceBuilder", "SimResult", "System", "add_noise", "b0_cylinder",
     "b0_shim", "b0_sphere", "birdcage_b1", "birdcage_sensitivities", "block_pulse", "bssfp_2d",
     "cartesian_kspace", "cartesian_recon", "coil_combine", "design", "epg", "epi_2d", "exchange", "fused",
     "gradient_waveform", "gre_2d", "gre_3d", "gre_cartesian", "grid_positions", "ifft2c", "ifft3c", "ifftnc",
