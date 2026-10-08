@@ -48,10 +48,10 @@ last column; combinations of features are checked only engine against engine.
 | diffusion + exact concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | as above |
 | motion + gradient nonlinearity | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | = a static spin at each segment's position, segment by segment (`test_motion.py`) |
 | motion + concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | as above; the velocity phase of a Maxwell-compensated echo (`test_fields_concomitant.py`) |
-| free pools + generalized Bloch | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
-| free pools + diffusion | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
-| free pools + motion | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
-| free pools + FieldMaps | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c; for static spins, sample the maps into `Phantom.db0` / `b1` and the coils |
+| free pools + generalized Bloch | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | the modes as rows of the exact matrix: a hand-written ODE (`test_pools.py`); Metal open (ROADMAP M1c) |
+| free pools + diffusion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | inert pools = the single-pool path with the same walk (`test_pools.py`) |
+| free pools + motion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | constant shift = the moved phantom; inert pools = the single-pool path (`test_pools.py`) |
+| free pools + FieldMaps | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | = the same fields per spin (`test_pools.py`) |
 
 Not in the matrix because they produce ordinary inputs and so run on every engine: phantom
 builders (sub-voxel spins, T2′, 6-peak fat, susceptibility B0, anatomy), sequence builders and
@@ -92,11 +92,12 @@ direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 rel
 
 ## Limits that are not physics
 
-- Metal, free pools: at most five (`metal.MAX_POOLS`; one kernel per count), static spins only (as
-  the core). A segment costs Taylor sub-steps in proportion to |A| dt: an RF sample far off
-  resonance (a CEST M0 offset at −1500 ppm: ~80 per 100 µs) or fast exchange over a long free
-  segment (40 kHz over 5 ms: ~280). Spins are sorted by that cost before the dispatch, since a
-  simdgroup waits for its slowest lane (5× at 30k spins on benchmark 9), and returned in order.
+- Metal, free pools: at most five (`metal.MAX_POOLS`; one kernel per count, static and moving),
+  not with the generalized Bloch bound pool. A segment costs Taylor sub-steps in proportion to
+  |A| dt: an RF sample far off resonance (a CEST M0 offset at −1500 ppm: ~80 per 100 µs) or fast
+  exchange over a long free segment (40 kHz over 5 ms: ~280). Static spins are sorted by that cost
+  before the dispatch, since a simdgroup waits for its slowest lane (5× at 30k spins on benchmark
+  9), and returned in order; moving spins are not (their walks are keyed by spin index).
 - Metal: `mma=False` (one `simd_sum` per coil and sample) takes at most 32 coils; the default for
   two or more coils is the matrix-product reduction, which has no limit. Moving spins in mapped
   coils (`FieldMaps.coils` with motion or diffusion) always use the direct reduction, so at most

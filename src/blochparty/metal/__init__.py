@@ -1005,8 +1005,9 @@ def _lib():
         # state costs the plain kernels ~10-30 % in register pressure otherwise
         variants = [(suffix + dsuf, v, diff, "0") for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
                     for dsuf, diff in (("", "false"), ("_diff", "true"))]
-        # free pools, one kernel per pool count; static spins only, as in the core
-        variants += [(f"_bm{k}", "3", "false", str(k)) for k in range(1, MAX_POOLS + 1)]
+        # free pools, one kernel per pool count
+        variants += [(f"_bm{k}{dsuf}", "3", diff, str(k)) for k in range(1, MAX_POOLS + 1)
+                     for dsuf, diff in (("", "false"), ("_diff", "true"))]
         kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@DIFF@", diff)
                           .replace("@NP@", np_) for suffix, v, diff, np_ in variants)
         assert f"#define MAX_POOLS {MAX_POOLS} " in _SOURCE
@@ -1075,7 +1076,7 @@ def _field_model_buffer(scanner) -> Tensor:
 
 
 def _cost_order(phantom: Phantom, seq: Sequence) -> Tensor | None:
-    """Spins in order of their free-pool kernel cost: an RF segment takes sub-steps in proportion to
+    """Static spins in order of their free-pool kernel cost: an RF segment takes sub-steps in proportion to
     the spin's off-resonance there, and the lanes of a simdgroup wait for its slowest spin (a CEST
     spectrum's M0 offset at -1500 ppm is ~80 sub-steps per 100 us sample, the other offsets ~2)."""
     rf = torch.tensor(seq.is_rf)
@@ -1101,15 +1102,13 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
              ordered: bool = False) -> SimResult:
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as bloch.simulate
-        if phantom.diffusion is not None or phantom.motion is not None:
-            raise NotImplementedError("free pools with diffusion or motion are not implemented")
         if phantom.bound is not None and phantom.bound.model == "generalized":
             raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
-        if maps is not None:
-            raise NotImplementedError("free pools with FieldMaps are not implemented")
         if len(pools) > MAX_POOLS:
             raise NotImplementedError(f"at most {MAX_POOLS} free pools on the GPU, got {len(pools)}")
-        order = None if ordered else _cost_order(phantom, seq)
+        # moving spins keep their order: a walk's random numbers belong to the spin's index
+        moving = phantom.diffusion is not None or phantom.motion is not None
+        order = None if ordered or moving else _cost_order(phantom, seq)
         if order is not None:  # run the spins sorted by cost, return them in the caller's order
             inv = torch.argsort(order)
             r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],

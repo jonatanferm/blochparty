@@ -158,3 +158,157 @@ def test_fused_forward_and_adjoint(with_bound):
     g_out = _pool_grads(fused.simulate_fused, ph, seq, coils, checkpoint_every=5)
     errs = {k: rel(g_out[k], g_ref[k]) for k in g_ref}
     assert max(errs.values()) < 1e-10, errs
+
+
+# ---------------------------------------------------------------- with FieldMaps, motion, diffusion (ROADMAP M1c)
+
+
+def _maps_for(ph):
+    zz, yy, xx = torch.meshgrid(torch.linspace(-0.2, 0.2, 5, dtype=f64), torch.linspace(-0.3, 0.3, 7, dtype=f64),
+                                torch.linspace(-0.3, 0.3, 7, dtype=f64), indexing="ij")
+    coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.05) * torch.exp(1j * 2 * yy),
+                         torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.05) * torch.exp(-1j * xx)])
+    return bp.FieldMaps((-0.3, -0.3, -0.2), (0.1, 0.1, 0.1), b0=40 * xx**2 - 20 * yy + 10 * zz, b1=1 + 0.3 * xx,
+                        coils=coils)
+
+
+def test_pools_under_field_maps_equal_the_fields_per_spin():
+    from blochparty.maps import sample
+
+    ph, seq = pool_case(0, True)
+    seq = with_readout(seq)
+    maps = _maps_for(ph)
+    v = sample(maps.channels(), torch.as_tensor(maps.origin, dtype=f64), torch.as_tensor(maps.spacing, dtype=f64), ph.pos)
+    per_spin = replace(ph, db0=ph.db0 + v[:, 0], b1=v[:, 1] if ph.b1 is None else ph.b1 * v[:, 1])
+    a = simulate(ph, seq, maps=maps)
+    b = simulate(per_spin, seq, torch.complex(v[:, 2::2], v[:, 3::2]))
+    assert (a.signal - b.signal).abs().max() < 1e-14 and (a.m_pools - b.m_pools).abs().max() < 1e-14
+
+
+def test_constant_rigid_shift_of_pools_is_the_moved_phantom():
+    ph, seq = pool_case(1, True)
+    seq = with_readout(seq)
+    shift = np.array([0.02, -0.01, 0.015])
+    rig = bp.Motion(rigid=lambda t: (np.broadcast_to(np.eye(3), (len(t), 3, 3)), np.broadcast_to(shift, (len(t), 3))))
+    moving = simulate(replace(ph, motion=rig), seq)
+    moved = simulate(replace(ph, pos=ph.pos + torch.as_tensor(shift)), seq)
+    assert (moving.signal - moved.signal).abs().max() < 1e-13 and (moving.m_pools - moved.m_pools).abs().max() < 1e-13
+
+
+@pytest.mark.parametrize("kind", ["velocity", "diffusion"])
+def test_inert_pools_moving_match_the_split_core(kind):
+    # f -> 0: the exact engine with moving spins equals the single-pool path with the same motion / walk
+    ph, seq = bm_case(0, "lorentzian")
+    seq = with_readout(seq)
+    n = len(ph)
+    if kind == "velocity":
+        vel = (torch.rand(n, 3, dtype=f64, generator=torch.Generator().manual_seed(7)) - 0.5) * 0.4
+        ph = replace(ph, motion=bp.Motion(velocity=vel))
+    else:  # gradients 100x (to ~0.4 MHz/m): enough dephasing for the walk to show
+        ph = replace(ph, diffusion=torch.full((n,), 3e-9, dtype=f64))
+        seq = replace(seq, grad=seq.grad * 100)
+    inert = replace(ph, pools=(ExchangePool(f=0.0, k=0.0, t1=1.0, t2=0.1, dw=0.0),))
+    # both on the subdivided sequence: the walks are keyed by segment index (splitting error ~ (dt/8)^2)
+    fine = seq.subdivide_rf(8)
+    split, exact = simulate(ph, fine, seed=5), simulate(inert, fine, seed=5)
+    assert torch.allclose(exact.signal, split.signal, atol=2e-6) and torch.allclose(exact.m_bound, split.m_bound, atol=2e-6)
+    still = simulate(replace(inert, motion=None, diffusion=None), fine, seed=5)
+    assert (still.signal - exact.signal).abs().max() > 1e-3  # the motion matters
+
+
+# ---------------------------------------------------------------- with the generalized Bloch bound pool (M1c)
+
+
+def full_ode_generalized(ph: Phantom, seq):
+    """Water + free pools + the generalized bound pool, segment by segment with SciPy, written
+    independently of exchange._bm_matrix: the modes u_j complex, du_j/dt = -(p_j / T2b +
+    i 2 pi (bz + dw)) u_j + c_j (-wy + i wx) Mzb, dMzb/dt = wy Re S - wx Im S + R1b (f PD - Mzb)
+    + exchange, S = sum u_j (generalized_bloch.modes)."""
+    from blochparty.exchange import pool_modes
+
+    n = len(ph)
+    pools = [q.expand(n, ph.pd) for q in ph.pools]
+    bound = ph.bound.expand(n, ph.pd)
+    pj, cj = (t.numpy() for t in pool_modes(bound, ph.pd))
+    nj = len(pj)
+    out = []
+    for s_ in range(n):
+        pd, r1, r2 = float(ph.pd[s_]), 1 / float(ph.t1[s_]), 1 / float(ph.t2[s_])
+        P = [(pd, r1, r2, 0.0, 0.0, 0.0)] + [(float(q.f[s_]) * pd, 1 / float(q.t1[s_]), 1 / float(q.t2[s_]),
+                                              float(q.dw[s_]), float(q.k[s_]) * float(q.f[s_]), float(q.k[s_]))
+                                             for q in pools]
+        f, k, r1b, t2b, dwb = (float(getattr(bound, a)[s_]) for a in ("f", "k", "t1", "t2", "dw"))
+        r1b = 1 / r1b
+        b1 = float(ph.b1[s_]) if ph.b1 is not None else 1.0
+        nf = 3 * len(P)
+        m = np.concatenate([np.concatenate([[0, 0, p[0]] for p in P]), [f * pd], np.zeros(2 * nj)])
+        for s in range(len(seq)):
+            bx, by = (seq.rf[s].numpy() * b1) if seq.is_rf[s] else (0.0, 0.0)
+            bz = float(ph.pos[s_] @ seq.grad[s] + ph.db0[s_])
+            wx, wy = 2 * math.pi * bx, 2 * math.pi * by
+
+            def rhs(_, m):
+                dm = np.zeros_like(m)
+                for i, (m0, q1, q2, dw, k_out, k_in) in enumerate(P):
+                    v = m[3 * i:3 * i + 3]
+                    w = np.array([wx, wy, 2 * math.pi * (bz + dw)])
+                    dm[3 * i:3 * i + 3] += np.cross(v, w) - np.array([q2 * v[0], q2 * v[1], q1 * (v[2] - m0)])
+                    if i:
+                        dm[3 * i:3 * i + 3] += k_out * m[:3] - k_in * v
+                        dm[:3] += k_in * v - k_out * m[:3]
+                zb = m[nf]
+                u = m[nf + 1::2] + 1j * m[nf + 2::2]
+                S = u.sum()
+                du = -(pj / t2b + 2j * math.pi * (bz + dwb)) * u + cj * (-wy + 1j * wx) * zb
+                dm[nf] = wy * S.real - wx * S.imag + r1b * (f * pd - zb) + k * f * m[2] - k * zb
+                dm[2] += -k * f * m[2] + k * zb
+                dm[nf + 1::2], dm[nf + 2::2] = du.real, du.imag
+                return dm
+
+            m = solve_ivp(rhs, (0, float(seq.dt[s])), m, method="DOP853", rtol=1e-10, atol=1e-12).y[:, -1]
+            if seq.spoil[s]:
+                for i in range(len(P)):
+                    m[3 * i:3 * i + 2] = 0
+                m[nf + 1:] = 0
+        out.append(m[:nf + 1])
+    return np.array(out)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
+def test_generalized_bound_pool_with_free_pools_matches_ode(shape):
+    ph, seq = pool_case(0, True)
+    ph = replace(ph, bound=replace(ph.bound, model="generalized", lineshape=shape))
+    keep = slice(0, 2)  # two spins: the ODE carries 2 x 30 mode components for the super-Lorentzian
+    ph = replace(ph, pos=ph.pos[keep], pd=ph.pd[keep], t1=ph.t1[keep], t2=ph.t2[keep], db0=ph.db0[keep],
+                 bound=ph.bound[keep], pools=tuple(replace(q, **{a: getattr(q, a)[keep] for a in ("f", "k", "t1", "t2", "dw")})
+                                                     for q in ph.pools))
+    ref = full_ode_generalized(ph, seq)
+    out = simulate(ph, seq)
+    got = np.concatenate([out.m.numpy(), out.m_pools.numpy().reshape(2, -1), out.m_bound.numpy()[:, None]], 1)
+    assert np.abs(got - ref).max() < 2e-8
+
+
+def test_generalized_with_inert_pools_matches_the_split_core():
+    # f -> 0: the exact engine equals the generalized split engine (``_rf_segment_generalized``) to the
+    # split's own accuracy (sub-steps <= T2b / 2; for a super-Lorentzian ~1e-6 here)
+    ph, seq = bm_case(1, "superlorentzian")
+    ph = replace(ph, bound=replace(ph.bound, model="generalized"))
+    seq = with_readout(seq)
+    inert = replace(ph, pools=(ExchangePool(f=0.0, k=0.0, t1=1.0, t2=0.1, dw=0.0),))
+    exact, split = simulate(inert, seq), simulate(ph, seq)
+    assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(exact.m_bound, split.m_bound, atol=5e-6)
+
+
+@pytest.mark.parametrize("offset", [2e3, 5e3])
+def test_generalized_with_pools_approaches_the_rate_model_off_resonance(offset):
+    # long off-resonant CW saturation is the rate model's regime (as test_generalized_bloch, without pools);
+    # the exact engine takes the 0.5 s pulse as one segment
+    def z(model):
+        one = torch.ones(1, dtype=f64)
+        ph = Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=one, t1=one, t2=0.05 * one, db0=-offset * one,
+                     bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model),
+                     pools=(ExchangePool(f=0.01, k=500.0, t1=1.0, t2=0.01, dw=450.0),))
+        return float(simulate(ph, bp.SequenceBuilder().rf(0.5, amplitude=64.0, n_steps=1).build()).m[0, 2])
+
+    assert z("generalized") == pytest.approx(z("rate"), abs=2e-3)

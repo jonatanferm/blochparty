@@ -490,6 +490,7 @@ def directional_fd(feature: str, eps=1e-5) -> tuple[float, float]:
 MATRIX = read_matrix()
 CELLS = [(feature, eng, kind, mark) for feature, row in MATRIX.items() for (eng, kind), mark in row.items()
          if mark != "–"]
+SLOW = {("free pools + generalized Bloch", "core", "gradients")}  # 60-dimensional matrix exponentials, ~3 s
 
 
 def test_matrix_rows_are_the_cases():
@@ -502,7 +503,9 @@ def test_matrix_rows_are_the_cases():
                 assert row[(e, "gradients")] == "✗", (feature, e)
 
 
-@pytest.mark.parametrize("feature, eng, kind, mark", CELLS, ids=[f"{e}-{k}-{f}" for f, e, k, _ in CELLS])
+@pytest.mark.parametrize("feature, eng, kind, mark",
+                         [pytest.param(*c, marks=pytest.mark.slow) if c[:3] in SLOW else c for c in CELLS],
+                         ids=[f"{e}-{k}-{f}" for f, e, k, _ in CELLS])
 def test_cell(feature, eng, kind, mark):
     case = build(feature, grad=kind == "gradients")
     if mark == "✗":

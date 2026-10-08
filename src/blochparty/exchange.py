@@ -249,12 +249,17 @@ class ExchangePool:
         return ExchangePool(conv(self.f), conv(self.k), conv(self.t1), conv(self.t2), conv(self.dw))
 
 
-def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat):
+def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat, modes=None):
     """(N, d, d) augmented Bloch-McConnell matrix of one segment: state (Mx, My, Mz) of the water
-    and of every free pool, then Mzb of the bound pool (if any), then 1."""
+    and of every free pool, then Mzb of the bound pool (if any), then, for the generalized Bloch
+    bound pool, its modes' (Re u_j, Im u_j) (``modes``: (J,) complex poles [1 / T2b] and weights,
+    as ``pool_modes``), then 1. Generalized: no saturation rate; the RF rotates (S = sum u_j, Mzb)
+    like a Bloch pool, each mode taking c_j of dS/dt, and mode j decays and precesses as
+    exp(-(p_j / T2b + i 2 pi (bz + dw)) t) (bloch._rf_segment_generalized, without splitting)."""
     n, p = bz.shape[0], len(pools)
     nb = 1 if bound is not None else 0
-    d = 3 * (p + 1) + nb + 1
+    nj = 0 if modes is None else 2 * modes[0].shape[0]
+    d = 3 * (p + 1) + nb + nj + 1
     one = d - 1
     A = bz.new_zeros(n, d, d)
     two_pi = 2 * math.pi
@@ -288,6 +293,21 @@ def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat):
         A[:, zb, 2] += bound.k * bound.f
         A[:, zb, zb] -= 1 / bound.t1 + bound.k + (w_sat if w_sat is not None else 0)
         A[:, zb, one] += bound.f * spins.pd / bound.t1
+        if modes is not None:
+            pj, cj = modes
+            delta = two_pi * (bz + bound.dw)
+            for j in range(pj.shape[0]):
+                a, b = zb + 1 + 2 * j, zb + 2 + 2 * j
+                qr, qi = pj[j].real / bound.t2, pj[j].imag / bound.t2 + delta
+                cr, ci = cj[j].real, cj[j].imag
+                A[:, a, a] -= qr
+                A[:, a, b] += qi
+                A[:, b, b] -= qr
+                A[:, b, a] -= qi
+                A[:, a, zb] += -cr * wy - ci * wx  # c_j dS/dt, dS/dt = (-wy + i wx) Mzb
+                A[:, b, zb] += cr * wx - ci * wy
+                A[:, zb, a] += wy  # dMzb/dt = wy Re S - wx Im S
+                A[:, zb, b] -= wx
     return A
 
 

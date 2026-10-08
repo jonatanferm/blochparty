@@ -389,26 +389,22 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
     return mx, my, mz, mb, sig, r
 
 
-def _simulate_exchange(phantom: Phantom, seq: Sequence, coils, m_init, scanner) -> SimResult:
+def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> SimResult:
     """Water + free exchanging pools (+ bound pool): one exact matrix exponential per segment,
     with its RF (no splitting), as BMCTool. The signal is the sum of every free pool's
-    transverse magnetization; consecutive identical segments reuse their exponential."""
-    pd = phantom.pd
-    n = len(phantom)
-    seq = seq.to(dtype=pd.dtype, device=pd.device)
-    if coils is None:
-        sens_re, sens_im = torch.ones_like(pd)[:, None], torch.zeros_like(pd)[:, None]
-    else:
-        sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
-    fields = spin_fields(scanner, phantom.pos)
-    bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
-    pools = [q.expand(n, pd) for q in phantom.pools]
-    spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound)
-    f_rf = rf_frequency(seq) if bound is not None else None
+    transverse magnetization; consecutive identical segments of static spins reuse their
+    exponential. Moving spins (walks ``r``, motion) are placed per segment, with the fields there
+    (FieldMaps, the field model's encoding and coefficients), as in ``_run``."""
+    pd = spins.pd
+    n = pd.shape[0]
+    bound = spins.bound
+    gen = spins.modes is not None  # the generalized bound pool's modes are rows of the matrix too
+    f_rf = rf_frequency(seq) if bound is not None and not gen else None
     off_all = seq.b0_offset
+    moving = spins.walk is not None or spins.move is not None
     np_ = len(pools)
-    d = 3 * (np_ + 1) + (1 if bound is not None else 0) + 1
+    nj = 2 * spins.modes[0].shape[0] if gen else 0
+    d = 3 * (np_ + 1) + (1 if bound is not None else 0) + nj + 1
     # initial state: water from m_init (N, 3 or 4), pools and bound pool at equilibrium
     v = [pd.new_zeros(n), pd.new_zeros(n), pd]
     if m_init is not None:
@@ -417,39 +413,56 @@ def _simulate_exchange(phantom: Phantom, seq: Sequence, coils, m_init, scanner) 
         v += [pd.new_zeros(n), pd.new_zeros(n), q.f * pd]
     if bound is not None:
         v.append(m_init[:, 3] if m_init is not None and m_init.shape[-1] == 4 else bound.f * pd)
+    v += [pd.new_zeros(n)] * nj  # the modes at rest
     v.append(torch.ones_like(pd))
     v = torch.stack(v, -1)
-    transverse = torch.zeros(d, dtype=torch.bool, device=pd.device)
+    transverse = torch.zeros(d, dtype=torch.bool, device=pd.device)  # spoiled: every free pool's Mxy, the modes
     for i in range(np_ + 1):
         transverse[3 * i] = transverse[3 * i + 1] = True
+    transverse[d - 1 - nj:d - 1] = True
     keep = (~transverse).to(pd.dtype)
     samples, key, E = [], None, None
     for s in range(len(seq)):
         dt, rf, g = seq.dt[s], seq.rf[s], seq.grad[s]
         off = off_all[s] if off_all is not None else None
+        sp = spins
+        if moving:  # where every spin is during this segment, and the fields there
+            eff = None
+            if spins.walk is not None:
+                eff, r = _walk(r, seq.dt[s:s + 1], s, spins)
+            if spins.move is not None:
+                mot, seg, r0 = spins.move
+                eff = positions(r0 if eff is None else eff, mot, seg, s, s + 1)
+            if spins.maps is not None:
+                sp = _sample_maps(spins, eff[:, 0])
+            enc, conc_seg = eff, None
+            if spins.field is not None:
+                enc, conc_seg = _moving_fields(spins, eff)
+            sp = sp._replace(pos=enc[:, 0]) if conc_seg is None else sp._replace(pos=enc[:, 0], conc=conc_seg[:, 0])
         new_key = (float(dt.detach()), float(rf[0].detach()), float(rf[1].detach()), *map(float, g.detach()),
                    0.0 if off is None else float(off.detach()),
                    float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0)
-        if new_key != key or torch.is_grad_enabled():
-            bz = spins.pos @ g + spins.db0
+        if moving or new_key != key or torch.is_grad_enabled():
+            bz = sp.pos @ g + sp.db0
             if off is not None:
                 bz = bz + off
-            if spins.mode:
-                bz = bz + _concomitant(bz, g, spins)
+            if sp.mode:
+                bz = bz + _concomitant(bz, g, sp)
             rf_s = rf if seq.is_rf[s] else rf.new_zeros(2)
             w_sat = None
-            if bound is not None and seq.is_rf[s]:
-                w_sat = saturation_rate(bound, rf, spins.b1, f_rf[s] - bz - bound.dw)
-            E = torch.linalg.matrix_exp(_bm_matrix(rf_s, bz, spins.b1, spins, pools, bound, w_sat) * dt)
+            if bound is not None and seq.is_rf[s] and not gen:
+                w_sat = saturation_rate(bound, rf, sp.b1, f_rf[s] - bz - bound.dw)
+            A = _bm_matrix(rf_s, bz, sp.b1, sp, pools, bound, w_sat, sp.modes if gen else None)
+            E = torch.linalg.matrix_exp(A * dt)
             key = new_key
         v = (E @ v[..., None])[..., 0]
         if seq.adc[s]:
             mx = sum(v[:, 3 * i] for i in range(np_ + 1))
             my = sum(v[:, 3 * i + 1] for i in range(np_ + 1))
-            samples.append(_sample(mx, my, seq.adc_phase[s], spins)[None])
+            samples.append(_sample(mx, my, seq.adc_phase[s], sp)[None])
         if seq.spoil[s]:
             v = v * keep
-    sig = torch.cat(samples) if samples else pd.new_zeros(0, 2, sens_re.shape[1])
+    sig = torch.cat(samples) if samples else pd.new_zeros(0, 2, spins.sens_re.shape[1])
     m_pools = torch.stack([v[:, 3 * i:3 * i + 3] for i in range(1, np_ + 1)], 1) if np_ else None
     return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, v[:, :3], v[:, 3 * (np_ + 1)] if bound is not None else None,
                      m_pools)
@@ -486,16 +499,8 @@ def simulate(
 
     With ``Phantom.pools`` (free exchanging pools: CEST, myelin water) every segment is one
     exact matrix exponential of the Bloch-McConnell system instead (slower; checkpoint_every
-    and merge_free_runs do not apply).
+    and merge_free_runs do not apply), with everything above but the generalized bound pool.
     """
-    if phantom.pools:
-        if phantom.diffusion is not None or phantom.motion is not None:
-            raise NotImplementedError("free pools with diffusion or motion are not implemented")
-        if phantom.bound is not None and phantom.bound.model == "generalized":
-            raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
-        if maps is not None:  # static spins: fold the sampled maps into Phantom.db0 / b1 and the coils instead
-            raise NotImplementedError("free pools with FieldMaps are not implemented")
-        return _simulate_exchange(phantom, seq, coils, m_init, scanner)
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)
     n = len(phantom)
@@ -549,6 +554,8 @@ def simulate(
     r = start if walk is not None else None
     if walk is not None and walk[3] is not None:  # walkers start uniformly inside their compartments
         r = start + start_offsets(walk[3][0], int(seed), walk[2], pd)
+    if phantom.pools:  # the exact engine; checkpoint_every and merge_free_runs do not apply
+        return _simulate_exchange(seq, spins, [q.expand(n, pd) for q in phantom.pools], m_init, r)
     f_rf = rf_frequency(seq) if bound is not None and not gen else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset

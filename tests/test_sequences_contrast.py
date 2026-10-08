@@ -126,6 +126,7 @@ def test_bssfp_alpha_half_preparation_matches_epg():
     assert jitter(s) < 0.05 * jitter(no_prep)
 
 
+@pytest.mark.slow
 def test_bssfp_off_resonance_profile_closed_form():
     # steady state |M| at TE = TR/2 vs off-resonance (Xiang & Hoff, MRM 2014), 180 deg cycling
     t1, t2, flip = 0.4, 0.1, 40.0

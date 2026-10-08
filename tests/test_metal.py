@@ -283,7 +283,7 @@ def test_long_rf_trains_do_not_drift(model):
 
         ph = replace(ph, bound=bp.BoundPool(f=0.135 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-383.0 * one,
                                             model=model))
-    n_seg = 3000 if model == "generalized" else 10_000
+    n_seg = 2000 if model == "generalized" else 5000  # 3e-4 to 5e-4 of drift before the fix
     seq = bp.SequenceBuilder().rf(n_seg * 10e-6, amplitude=42.577 * 1.5, n_steps=n_seg).readout(4, 10e-6).build()
     ref, out = bp.simulate(ph, seq), metal.simulate_metal(ph, seq)
     assert float((out.m.double() - ref.m).abs().max()) < 1e-5
@@ -291,3 +291,26 @@ def test_long_rf_trains_do_not_drift(model):
     assert float((out.signal.to(ref.signal.dtype) - ref.signal).abs().max()) < 1e-5 * n
     if model is not None:
         assert float((out.m_bound.double() - ref.m_bound).abs().max()) < 1e-5
+
+
+@pytest.mark.parametrize("kind", ["motion", "diffusion", "maps", "moving maps"])
+def test_free_pools_moving_and_mapped(kind):
+    # free pools with what moves spins or maps the scanner's fields (ROADMAP M1c): the _bm*_diff kernels
+    from dataclasses import replace
+
+    from test_pools import _maps_for
+
+    ph, seq = _pools_case(2, True)
+    n = len(ph)
+    g = torch.Generator().manual_seed(1)
+    coils, maps = bp.birdcage_sensitivities(ph.pos, 4), None
+    if kind in ("motion", "moving maps"):
+        ph = replace(ph, motion=bp.Motion(velocity=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.4))
+    if kind == "diffusion":
+        ph = replace(ph, diffusion=torch.full((n,), 2e-9, dtype=torch.float64))
+    if kind in ("maps", "moving maps"):
+        coils, maps = None, _maps_for(ph)
+    ref = bp.simulate(ph, seq, coils, maps=maps, seed=2)
+    out = metal.simulate_metal(ph, seq, coils, maps=maps, seed=2)
+    assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
+    assert float((out.m_pools.double() - ref.m_pools).abs().max()) < 1e-5 * float(ref.m.abs().max())
