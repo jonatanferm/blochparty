@@ -312,6 +312,43 @@ asymmetry of the slice pair gives: geometry, not eddy currents.
 and 0.973. The excited profile is wider than nominal (1.7 mm as a rectangle, 1.14 mm FWHM as a
 Gaussian; neither fits both), consistent with a sinc pulse's tails. The pulse is not published.
 
+## Benchmark 8 (consistency): Pulseq-CEST APTw Z-spectra of an L-arginine phantom (`magma.py`)
+
+Data: Pulseq-CEST Library MAGMA 2025 phantom ([Zenodo 15053086](https://zenodo.org/records/15053086);
+3 T Prisma fit, 123.2 MHz), magnitude DICOMs after the library's `APTw_3T_001` preparation (36
+sinc-Gauss pulses of 50 ms, B1rms 2 uT, 33 offsets +-4 ppm) and its WASABI. Five tubes (Schuenke
+et al., MAGMA 2025, Table 1): 1 mM Gadovist, L-arginine 20 / 27 mM without and 40 / 60 / 70 mM with
+2 % agarose, pH ~4. Tubes found by matching the wall annulus (slice 5); tube 1 contains the
+authors' ROI (their V[row, col, slice, offset]); plain vs agarose from the direct-saturation width;
+40 / 60 / 70 mM assigned by the measured MTRasym ranking (assumption).
+
+**Engine.** blochparty on the APTw `.seq` equals BMCTool 1.0.3 on the same file and models to
+<= 8e-4 in Z (20 and 70 mM models). Each offset is simulated in the frame of its RF (exact change
+of frame; the .seq's pulses then step at 100 us): equal to the scanner frame at 10 us within 2e-5
+at 0.5 / 1.5 / 3 ppm, 7-8x faster.
+
+**Fields.** WASABI (analytic model, fit per voxel): rB1 1.00-1.03, dB0 -8 to -10 Hz per tube.
+
+**Models vs measurement** (the library's tube YAMLs, unchanged; voxel fields as a 3 x 3 quantile
+grid; |Z| since the images are magnitudes):
+
+| Tube | rms over 33 offsets | max abs dZ | MTRasym(3 ppm) measured / simulated |
+|---|---|---|---|
+| 20 mM | 0.053 | 0.15 at +1 ppm | +0.025 / +0.057 |
+| 27 mM | 0.058 | 0.17 at +1 ppm | +0.030 / +0.074 |
+| 40 mM (agarose) | 0.109 | 0.16 at +4 ppm | +0.015 / +0.021 |
+| 60 mM (agarose) | 0.124 | 0.17 at +3.5 ppm | +0.016 / +0.034 |
+| 70 mM (agarose) | 0.085 | 0.12 at +4 ppm | +0.020 / +0.039 |
+
+![MAGMA Z-spectra](magma_zspectra.png)
+
+The library's models do not reproduce these measurements: the agarose tubes are over-saturated
+(Z 0.47 vs 0.62 at +-4 ppm: MT pool or water T2 = 50 ms off) and the CEST asymmetry is 1.4-2.5x
+too large; playing the 3.5 s recovery from a saturated readout instead of the library's reset
+changes the rms by <= 0.005. As the engine matches BMCTool on the same .seq, this is a statement
+about the models (described in their files as simplified, partly tuned), not the simulator. A
+predictive CEST test needs held-out conditions: benchmark 9.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex

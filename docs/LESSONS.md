@@ -369,6 +369,20 @@ says where it came from so it can be re-checked.
   a B0 transfer function measured in Hz per (mT/m) must be divided by gamma_bar (here that slip
   inflated the B0 term by 4e4 before it was caught).
 
+- **Pulseq-CEST trains reset the RF phase per pulse** (2026-10-08, benchmarks 8-9): each pulse's
+  phase advances by 2 pi f t_p (only while RF is on), so in the frame of the offset f, pulse k
+  carries -2 pi f k t_d and, with no spoiling between pulses, that matters near water. Simulate
+  each offset in its RF frame (rf * exp(+i 2 pi f t), spins at dB0 - f): exact, slow envelopes,
+  100 us steps instead of 1 us. To batch all offsets as spins, move the per-pulse phase step into
+  the gaps as a rotation (a gap gradient with spin positions x = dpsi / (2 pi G t_gap)): exact to
+  1e-5, 58 offsets in 15 s.
+- **Library phantom models are not ground truth**: the Pulseq-CEST L-arginine YAMLs (comments:
+  "simplified", MT size "from comparison with measurement") miss their own phantom by rms
+  0.05-0.12; the engine meanwhile matches BMCTool to 8e-4. Separate engine checks from model checks.
+- **A .seq's ppm scale is its own**: definitions say B0 3 T while the Prisma fit / Vida run at
+  2.894 T; offsets are played in Hz (ppm x 127.73), pool shifts must be placed in Hz at the real
+  frequency (raw header lFrequency).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
