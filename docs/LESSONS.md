@@ -7,6 +7,17 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **The generalized Bloch split engine is ~1e-4 accurate, whatever the segmentation.** Its RF
+  segments are sub-stepped to h ≤ T2b / 2 and Strang-split there, so `subdivide_rf(k)` barely
+  helps (error falling 1.5x per halving of the segments, not 4x): on a Lorentzian random case its
+  Mzb was 1.8e-4 off a SciPy ODE of the equivalent Bloch pool, the exact engine (modes as matrix
+  rows) 2.6e-13. Adding an inert free pool (f = 0) routes a phantom through the exact engine.
+  Source: M1c, 2026-10-08.
+- **Subdividing a sequence changes its diffusion walks.** Philox draws are keyed by segment
+  index, so `seq.subdivide_rf(8)` renumbers the segments and gives every spin a new path: two runs
+  differed by 1e-4 (Monte Carlo), the same subdivided sequence on both sides 2.6e-7. Compare
+  engines on one segmentation. Source: M1c, `test_pools.py`, 2026-10-08.
+
 - **Mid-segment positions are exact for G·r, not for the concomitant field.** Moving spins see each
   segment at their mid-time position: exact for terms linear in t, but f_c is quadratic in r, so a
   constant velocity leaves C dt³/12 per segment (6e-3 rad for 5 ms lobes at 2 m/s, 32 mT/m, 0.55 T).
@@ -565,6 +576,10 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **`SequenceBuilder.rf(duration, ...)` splits a long pulse into raster steps by default.** A
+  "single 0.5 s CW segment" made with `rf(0.5, amplitude=...)` was thousands of segments (30 s in
+  the exact engine); pass `n_steps=1` for one segment. Source: M1c, 2026-10-08.
 
 - **A finite difference can be noise-limited before it is truncation-limited.** On spins 10 cm out
   under a gradient nonlinearity, a central difference with a 1e-6 relative step agreed with

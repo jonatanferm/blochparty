@@ -25,8 +25,9 @@ hardware come when other machines exist (M8).
 Three conditions, each testable. The core is done when all three hold.
 
 1. **Parity.** The Metal kernel runs everything the PyTorch core runs (since M1a, free pools
-   too; since M1b, moving spins under the field model). Both engines refuse only free pools with
-   the generalized bound pool, diffusion, motion or `FieldMaps` (`docs/ENGINES.md`, M1c).
+   too; since M1b, moving spins under the field model; since M1c, free pools with motion,
+   diffusion and `FieldMaps`), with one exception: free pools together with the generalized
+   Bloch bound pool, which only the core runs (`docs/ENGINES.md`, M1c).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
    design need (M2). Without it, "differentiable" holds only for the CPU reference and the
    frozen fused kernel.
@@ -184,16 +185,25 @@ at each segment's position (sequence of one-segment simulations with `m_init`) t
 and 1e-5 (Metal); a Maxwell-compensated spin echo stays compensated for a static spin and
 acquires Bernstein's velocity-dependent phase for a moving one.
 
-### M1c. Leftovers
+### M1c. Leftovers — done 2026-10-08 but for one Metal item
 
-- [ ] Free pools with the generalized Bloch bound pool (core and Metal raise): the pool's
-      modes are already a column block; add them to the augmented matrix or run them alongside.
-      Verify against the core's two separate paths in their respective limits.
-- [ ] Free pools with diffusion or motion (core raises): compose the walk with the matrix
-      step; verify against the single-pool path with f → 0.
-- [ ] Free pools with `FieldMaps` (core raises since M0; it used to ignore `maps`): for static
-      spins, sample the maps once into db0, b1 and the coils, as the single-pool path does;
-      verify against the same fields given per spin.
+- [x] Free pools with the generalized Bloch bound pool, **core** (2026-10-08): the modes are
+      2J rows of the exact matrix; equal to a hand-written SciPy ODE of the mode equations to
+      2e-8 (Lorentzian and super-Lorentzian, with two free pools and the field model off), to the
+      generalized split engine with inert pools within the split's accuracy, and to the rate
+      model under long off-resonant CW (2e-3). Found: the split engine itself is ~2e-4 off in
+      Mzb on a Lorentzian random case (sub-steps ≤ T2b / 2 whatever the segment length); the
+      exact engine matches the ODE to 1e-13 there.
+- [ ] The same on **Metal** (raises): 2J ≈ 60 extra components per Taylor vector (super-Lorentzian
+      J = 30) is beyond the register budget of the `_bm` kernels; either keep the modes in
+      thread memory as the `_gen` variant does (slow, but this combination is rare), or decide it
+      is not needed. Until then the parity condition has this one exception.
+- [x] Free pools with diffusion or motion (2026-10-08): positions, walks and the field model per
+      segment in the exact engine, core and Metal (`_bm*_diff` kernels; spins not cost-sorted
+      when moving: walks are keyed by spin index). Inert pools equal the single-pool path with the
+      same motion or walk to 3e-7; a constant rigid shift equals the moved phantom to 1e-13.
+- [x] Free pools with `FieldMaps` (2026-10-08), static and moving, core and Metal: equal to the
+      same fields given per spin to 1e-14.
 
 ## M2. Metal adjoint (5 to 7 days)
 
