@@ -233,6 +233,27 @@ def test_crb_matches_closed_form(fused):
         assert abs(got / expected - 1) < 1e-7, (method, got, expected)
 
 
+def test_finite_difference_jacobians_converge_at_their_order():
+    f = lambda th: torch.stack([torch.sin(th[0]) * torch.exp(th[1]), th[0] ** 3 / th[1]])
+    theta = f64([0.7, 0.3])
+    exact = torch.autograd.functional.jacobian(f, theta)
+    for method, order in (("fd", 2), ("fd4", 4)):
+        e1, e2 = (float((d.jacobian(f, theta, method=method, rel_step=h) - exact).abs().max()) for h in (1e-2, 5e-3))
+        assert abs(math.log2(e1 / e2) - order) < 0.1, (method, e1, e2)
+
+
+def test_despot1_optimum_through_the_metal_adjoint():
+    # float32: fourth-order differences for the bound's Jacobian; the bound is flat along a2, so the pair
+    # moves by up to 0.03 deg with the step while its closed-form bound stays within 3e-6 of the optimum
+    metal = pytest.importorskip("blochparty.metal")
+    if not metal.available():
+        pytest.skip("no Apple GPU (MPS)")
+    res = despot1.optimize(simulate=metal.simulate_metal, rel_step=despot1.METAL_STEP, method="fd4")
+    (g1, g2), gcov = despot1.grid_optimum()
+    assert abs(res["flips"][0] - g1) < 0.05 and abs(res["flips"][1] - g2) < 0.05, (res, g1, g2)
+    assert float(despot1.closed_form_cov(*torch.deg2rad(f64(res["flips"])))) / gcov - 1 < 1e-5
+
+
 def test_crb_gradient_fused_equals_simulate(fused):
     # d CRB / d flips: fused (central differences in T1, adjoint for the flips) vs simulate
     # with the same differences, and vs simulate with an exact autograd Jacobian (double backward)

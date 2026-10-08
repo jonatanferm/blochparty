@@ -7,7 +7,7 @@ kernel moves the two flip angles to minimise it. Known result (Deoni, Rutt & Pet
 49:515, 2003): at the optimum both signals are ≈ 71 % of the Ernst-angle maximum. Checked
 here against a brute-force grid search over the closed-form signal and its exact derivative.
 
-    uv run python examples/design_despot1.py
+    uv run python examples/design_despot1.py [--metal]
 """
 
 import math
@@ -23,6 +23,7 @@ RF_DUR, DWELL = 100e-6, 2e-6  # one segment per pulse: the instantaneous rotatio
 # dummy pulses until (E1 cos a)^n < 1e-12 for any flip angle: the simulated signal is the steady state
 N_DUMMY = math.ceil(math.log(1e-12) / (-TR / T1))
 f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
+METAL_STEP = 5e-2  # fd4 step for float32 simulators: 2e-2 to 1e-1 give the pair to <= 0.03 deg
 
 
 def spgr_sequence(flip_deg, n_dummy=N_DUMMY):
@@ -52,19 +53,20 @@ def t1_crb(flips, simulate, *, method="fd", n_dummy=N_DUMMY, rel_step=1e-4):
     unit noise), both flip angles in one tensor (degrees). ``rel_step``: the finite-difference
     step of the Jacobian (float32 simulators need ~1e-2: their signals carry ~1e-6 of rounding)."""
     seqs = [spgr_sequence(a, n_dummy) for a in flips.unbind()]
-    kw = {"rel_step": rel_step} if method == "fd" else {}
+    kw = {"rel_step": rel_step} if method in ("fd", "fd4") else {}
     var = crb(signal_fn(seqs, simulate), f64([1.0, T1]), method=method, **kw)
     return torch.sqrt(var[1]) / T1
 
 
-def optimize(start=(10.0, 40.0), simulate=None, rel_step=1e-4):
+def optimize(start=(10.0, 40.0), simulate=None, rel_step=1e-4, method="fd"):
     if simulate is None:
         from blochparty.fused import simulate_fused as simulate
     flips = f64(start).clone().requires_grad_(True)
     t0 = time.perf_counter()
-    info = minimize([flips], lambda: t1_crb(flips, simulate, rel_step=rel_step))
+    info = minimize([flips], lambda: t1_crb(flips, simulate, method=method, rel_step=rel_step))
     found = sorted(abs(a) for a in flips.tolist())
-    return {"flips": found, "cov": float(t1_crb(f64(found), simulate, rel_step=rel_step)), "n_evals": info["n_evals"],
+    cov = float(t1_crb(f64(found), simulate, method=method, rel_step=rel_step))
+    return {"flips": found, "cov": cov, "n_evals": info["n_evals"],
             "seconds": time.perf_counter() - t0}
 
 
@@ -111,15 +113,29 @@ def ernst_fraction(flip_deg):
 
 
 def main():
-    res = optimize()
+    import argparse
+
+    p = argparse.ArgumentParser()
+    p.add_argument("--metal", action="store_true", help="through the GPU adjoint (float32) instead of the fused kernel")
+    args = p.parse_args()
+    if args.metal:  # float32: fourth-order differences with a step large against the signals' rounding
+        from blochparty.metal import simulate_metal
+
+        res, engine = optimize(simulate=simulate_metal, rel_step=METAL_STEP, method="fd4"), "Metal adjoint"
+    else:
+        res, engine = optimize(), "fused kernel"
     print(f"T1 {T1} s, TR {TR * 1e3:g} ms, Ernst angle {math.degrees(math.acos(math.exp(-TR / T1))):.3f} deg")
-    print(f"gradient descent (fused kernel): flips {res['flips'][0]:.3f}, {res['flips'][1]:.3f} deg, "
+    print(f"gradient descent ({engine}): flips {res['flips'][0]:.3f}, {res['flips'][1]:.3f} deg, "
           f"CoV(T1)·SNR0 {res['cov']:.4f} ({res['n_evals']} evaluations, {res['seconds']:.1f} s)")
     (g1, g2), gcov = grid_optimum()
     print(f"closed-form grid:                flips {g1:.3f}, {g2:.3f} deg, CoV(T1)·SNR0 {gcov:.4f}")
+    excess = float(closed_form_cov(*torch.deg2rad(f64(res["flips"])))) / gcov - 1
+    print(f"closed-form CoV at the found flips: {excess:.1e} above the optimum")
     fr = [ernst_fraction(a) for a in res["flips"]]
     print(f"signals at {100 * fr[0]:.2f} % and {100 * fr[1]:.2f} % of the Ernst maximum (Deoni 2003: ≈ 71 %)")
-    assert max(abs(res["flips"][0] - g1), abs(res["flips"][1] - g2)) < 0.01
+    # the bound is flat along a2: float32 rounding moves the found pair by up to 0.03 deg, at < 1e-5 of the bound
+    assert max(abs(res["flips"][0] - g1), abs(res["flips"][1] - g2)) < (0.05 if args.metal else 0.01)
+    assert excess < 1e-5
     assert all(abs(f - 0.71) < 0.01 for f in fr)
 
 
