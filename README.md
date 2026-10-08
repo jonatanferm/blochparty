@@ -46,7 +46,8 @@ cell by `tests/test_engines.py`.
   by autograd. Every new effect lands here first.
 - `blochparty.metal.simulate_metal`: the engine for imaging-scale work, on the Apple GPU. Float32,
   forward only for now (it raises if an input requires grad). Runs everything the core runs, free
-  exchanging pools (CEST) included, up to five free pools.
+  exchanging pools (CEST, up to five) included, except free pools together with the generalized
+  Bloch bound pool.
 - `blochparty.fused.simulate_fused`: a CPU kernel with a hand-written adjoint, float32 or float64;
   the fast way to gradients until the Metal kernel has an adjoint (ROADMAP M2). Frozen: no
   diffusion, motion or `FieldMaps`.
