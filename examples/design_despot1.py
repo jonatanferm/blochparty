@@ -47,22 +47,24 @@ def signal_fn(seqs, simulate):
     return f
 
 
-def t1_crb(flips, simulate, *, method="fd", n_dummy=N_DUMMY):
+def t1_crb(flips, simulate, *, method="fd", n_dummy=N_DUMMY, rel_step=1e-4):
     """sqrt(CRB) of T1 / T1 for unit noise and M0 = 1 (the T1 coefficient of variation per
-    unit noise), both flip angles in one tensor (degrees)."""
+    unit noise), both flip angles in one tensor (degrees). ``rel_step``: the finite-difference
+    step of the Jacobian (float32 simulators need ~1e-2: their signals carry ~1e-6 of rounding)."""
     seqs = [spgr_sequence(a, n_dummy) for a in flips.unbind()]
-    var = crb(signal_fn(seqs, simulate), f64([1.0, T1]), method=method)
+    kw = {"rel_step": rel_step} if method == "fd" else {}
+    var = crb(signal_fn(seqs, simulate), f64([1.0, T1]), method=method, **kw)
     return torch.sqrt(var[1]) / T1
 
 
-def optimize(start=(10.0, 40.0), simulate=None):
+def optimize(start=(10.0, 40.0), simulate=None, rel_step=1e-4):
     if simulate is None:
         from blochparty.fused import simulate_fused as simulate
     flips = f64(start).clone().requires_grad_(True)
     t0 = time.perf_counter()
-    info = minimize([flips], lambda: t1_crb(flips, simulate))
+    info = minimize([flips], lambda: t1_crb(flips, simulate, rel_step=rel_step))
     found = sorted(abs(a) for a in flips.tolist())
-    return {"flips": found, "cov": float(t1_crb(f64(found), simulate)), "n_evals": info["n_evals"],
+    return {"flips": found, "cov": float(t1_crb(f64(found), simulate, rel_step=rel_step)), "n_evals": info["n_evals"],
             "seconds": time.perf_counter() - t0}
 
 

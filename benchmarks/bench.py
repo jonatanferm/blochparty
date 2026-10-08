@@ -5,7 +5,7 @@
     uv run python benchmarks/bench.py --record         # also append to history.jsonl
     uv run python benchmarks/bench.py --backend fused  # C++ kernel (blochparty.fused)
     uv run python benchmarks/bench.py --grad --backend fused  # forward + backward instead
-    uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal), forward only
+    uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal); --grad: its adjoint
     uv run python benchmarks/bench.py --repeat 3       # fastest of 3 runs per case (GPU timings vary ~10 %)
 
 Throughput is reported as spin-segments/s (work the simulator does) and as
@@ -122,7 +122,7 @@ def main(argv=None):
     p.add_argument("--device", default="cpu")
     p.add_argument("--backend", default="torch", choices=["torch", "fused", "chunked", "metal"])
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
-    p.add_argument("--checkpoint-every", type=int, default=None, help="fused --grad: checkpoint interval")
+    p.add_argument("--checkpoint-every", type=int, default=None, help="fused / metal --grad: checkpoint interval")
     p.add_argument("--threads", type=int, default=None, help="fused: worker threads (default: all CPUs)")
     p.add_argument("--block", type=int, default=None, help="fused: spins per block (default: auto)")
     p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
@@ -144,14 +144,15 @@ def main(argv=None):
     elif args.backend == "metal":
         from blochparty import metal
 
-        if args.grad or args.dtype != "float32":
-            p.error("--backend metal is forward-only and float32")
+        if args.dtype != "float32":
+            p.error("--backend metal is float32")
         metal._lib()  # compile the shader outside the timed region
         # and the first dispatch (~80 ms of pipeline setup, otherwise charged to the first case)
         warm = bp.shepp_logan(8, dtype=torch.float32)
         metal.simulate_metal(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
                              bp.birdcage_sensitivities(warm.pos, n_coils=8))
-        simulate, threads, backend = metal.simulate_metal, "GPU", "metal (Apple GPU)"
+        simulate = functools.partial(metal.simulate_metal, checkpoint_every=args.checkpoint_every)
+        threads, backend = "GPU", "metal (Apple GPU)"
     if args.grad:
         if args.record:
             p.error("--record tracks forward runs only")
