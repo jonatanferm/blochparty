@@ -346,6 +346,17 @@ says where it came from so it can be re-checked.
   its source's voxel size and echo times: the macroscopic part it contains depends on them, and a
   longer echo train (3-66 vs 5-40 ms) clips R2' at gradients half as large.
 
+- **The antiparallel-spoke delay estimator is biased by unequal axis delays** (2026-10-08,
+  benchmark 6): the partner at theta + pi is shifted along the spoke by the same d(theta) but
+  sideways by the opposite amount ((dx - dy) sin cos), so the pair samples two parallel lines; an
+  off-centre object then adds a phase tilt to their cross-power. Exact for dx = dy or a centred
+  symmetric object; 0.4 us off at |dx - dy| = 5 us for an ellipse 2 cm off centre. Check an
+  estimator on simulated data of an object like the measured one before trusting it, and vary
+  the object (rotating it flipped the sign of the bias).
+- **Modern vendor delay compensation leaves sub-microsecond residuals** (Cima.X: 0.2 / 0.65 us,
+  < 0.07 samples at 10 us): a "gradient delay" benchmark on such data checks the timing model and
+  the estimator, not a visible artefact.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

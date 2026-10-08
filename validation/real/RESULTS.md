@@ -226,6 +226,45 @@ Ruled out as the < 1 %-per-echo remainder (beyond B0 ±40 Hz, B1, T1 and the ref
 Left: hardware the data cannot show (eddy-current phase errors, RF amplitude/phase fidelity —
 needs this scanner's GIRF or field-probe data) or non-mono-exponential T2 of the gel.
 
+## Benchmark 6: gradient timing of a Pulseq radial scan, Siemens Cima.X (`radial.py`)
+
+Data: [Zenodo 14228459](https://zenodo.org/records/14228459) (PTB, MAGNETOM Cima.X, 2.89 T,
+8-channel head/neck coil): golden-angle radial GRE, 5 slices of 8 mm (z = -16 .. 16 mm), 402
+spokes each, 256 samples at 10 us with no oversampling, FOV 256 mm, TR 5.64 ms; the `.seq` and the
+acquired ISMRMRD file with the nominal trajectory. The phantom is a round object ~19 cm across,
+centred within 3 / 5 mm (projection centroids).
+
+**Trajectory.** k at every ADC sample of blochparty's import of the `.seq` (sample i at
+(i + 1/2) dwell) equals the file's trajectory to 7.3e-4 / FOV (float32 storage), axes unchanged.
+
+**Measured delays.** Echo shift of each spoke against its antiparallel partner (within 0.3 deg:
+250 pairs), fitted by d(theta) = dx cos^2 + dy sin^2 + 2 dxy sin cos: **dx +0.20, dy +0.65,
+dxy +0.05 us** (effective gradient-to-ADC delays), scatter 0.05 us. Fitted on slices 0/2/4 it
+predicts slices 1/3 to 0.040-0.048 us rms (0.43-0.45 us without delays); fitted on 1/3, slices
+0/2/4 to 0.042-0.071 us. The vendor's delay compensation leaves well under a microsecond
+(0.065 samples): blochparty's default (ideal timing) is within that of this scanner.
+
+**Engine and estimator** (the same estimator on blochparty simulations of the `.seq` with
+`GIRF.identity` delays; 3.45 M segments, 20-60 s each on the M4 GPU):
+
+| Object | Coils | Imposed (dx, dy) us | Estimated (dx, dy), dxy us |
+|---|---|---|---|
+| off-centre ellipse | 1 | (0, 0) | (+0.001, -0.001), -0.002 |
+| off-centre ellipse | 1 | (3, 3) | (+3.002, +2.999), -0.002 |
+| off-centre ellipse | 1 | (3, -2) | (+3.375, -1.533), +0.115 |
+| off-centre ellipse | 1 | (0.2, 0.65) | (+0.167, +0.607), -0.013 |
+| 19 cm disc, (-3, +5) mm | 8 loops | (0.2, 0.65) | (+0.203, +0.649), -0.004 |
+| 19 cm disc, (-3, +5) mm | 8 loops | (3, -2) | (+3.012, -1.994), -0.007 |
+
+The engine turns delays into the echo shifts they should give (exact for equal delays, where
+the estimator is unbiased). With unequal delays the partners are also shifted sideways, in
+opposite directions, so they sample two lines and an off-centre object tilts their cross-phase:
+the estimator is biased by up to 0.4 us for the asymmetric ellipse at |dx - dy| = 5 us, but by
+<= 0.005 us for an object like the measured one. The measured delays stand.
+
+Not tested here: GIRF shape (eddy currents beyond a delay) and B0 terms. This scanner has no
+published GIRF; the GIRF dataset (Zenodo 6376737) comes from a different site.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
