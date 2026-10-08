@@ -6,6 +6,7 @@
     uv run python benchmarks/bench.py --backend fused  # C++ kernel (blochparty.fused)
     uv run python benchmarks/bench.py --grad --backend fused  # forward + backward instead
     uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal), forward only
+    uv run python benchmarks/bench.py --repeat 3       # fastest of 3 runs per case (GPU timings vary ~10 %)
 
 Throughput is reported as spin-segments/s (work the simulator does) and as
 spin-samples/s (the irreducible spins x ADC-samples cost of any Bloch simulator).
@@ -124,6 +125,7 @@ def main(argv=None):
     p.add_argument("--checkpoint-every", type=int, default=None, help="fused --grad: checkpoint interval")
     p.add_argument("--threads", type=int, default=None, help="fused: worker threads (default: all CPUs)")
     p.add_argument("--block", type=int, default=None, help="fused: spins per block (default: auto)")
+    p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
     p.add_argument("--record", action="store_true", help="append results to history.jsonl")
     args = p.parse_args(argv)
     dtype = getattr(torch, args.dtype)
@@ -145,6 +147,10 @@ def main(argv=None):
         if args.grad or args.dtype != "float32":
             p.error("--backend metal is forward-only and float32")
         metal._lib()  # compile the shader outside the timed region
+        # and the first dispatch (~80 ms of pipeline setup, otherwise charged to the first case)
+        warm = bp.shepp_logan(8, dtype=torch.float32)
+        metal.simulate_metal(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
+                             bp.birdcage_sensitivities(warm.pos, n_coils=8))
         simulate, threads, backend = metal.simulate_metal, "GPU", "metal (Apple GPU)"
     if args.grad:
         if args.record:
@@ -156,7 +162,8 @@ def main(argv=None):
           + (f" {'fwd [s]':>8}" if args.grad else ""))
     results = []
     for name in args.cases:
-        r = (run_grad_case if args.grad else run_case)(name, dtype, args.device, simulate)
+        run = run_grad_case if args.grad else run_case
+        r = min((run(name, dtype, args.device, simulate) for _ in range(args.repeat)), key=lambda r: r["seconds"])
         results.append(r)
         print(f"{r['case']:>7} {r['spins']:>9} {r['segments']:>9} {r['seconds']:>9.2f}"
               f" {r['spin_segments_per_s']:>11.2e} {r['spin_samples_per_s']:>11.2e}"
@@ -173,6 +180,8 @@ def main(argv=None):
                  "projected_128_min": round(proj / 60, 1), "results": results}
         if args.backend != "torch":
             entry.update(backend=args.backend, block=args.block)
+        if args.repeat > 1:
+            entry.update(repeat=args.repeat)
         with HISTORY.open("a") as f:
             f.write(json.dumps(entry) + "\n")
         print(f"recorded to {HISTORY.name}")
