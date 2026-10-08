@@ -3,9 +3,12 @@
 Radial stack-of-stars after one inversion (Huemer et al.; prepared k-space of the archive,
 ``data/prepared/phantom/meas_MID00123_FID56962_IR_LL_SOS.h5``: 266 time points x 16 coils x 3
 slices x 256 samples (2x oversampled), golden angle; ``Seq_04_IR_LL_FOV_192_SOS3.seq``: 6 deg
-every 5 ms over the slab, one spoke per slice every 15 ms). Subspace reconstruction (K = 4 SVD
+every 5 ms over the slab, one spoke per slice every 15 ms). Subspace reconstruction (K = 6 SVD
 basis of a Look-Locker dictionary 1 - (1 + kappa) exp(-t / T1*)), tube ROIs from the CEST images,
-per-tube fit S = A - B exp(-t R1*), and R1 = R1* + ln(cos(B1 6 deg)) / 5 ms.
+per-tube fit S = A - B exp(-t R1*) for t >= 0.15 s (the first spokes after the inversion carry a
+transient the model lacks), and R1 = R1* + ln(cos(B1 6 deg)) / 5.01 ms. K = 4 left fit residuals of
+4-13 % of the amplitude and T1 depending on the start time; K = 6: 0.4-1.4 %, T1 within 6 % for a
+start at 0.15 or 0.3 s.
 
 numpy + finufft only (finufft and torch cannot share a process on macOS).
 
@@ -29,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import iohexol as I  # noqa: E402  (numpy-only parts)
 
 H5 = I.DATA / "meas_MID00123_FID56962_IR_LL_SOS.h5"
-N, FLIP, TR = 128, 6.0, 5e-3
+N, FLIP, TR, T_START = 128, 6.0, 5.01e-3, 0.15
 
 
 def load():
@@ -40,7 +43,7 @@ def load():
     return d[:, :, :, 0], traj[:, 0], t
 
 
-def basis(t, k=4):
+def basis(t, k=6):
     t1s = np.geomspace(0.05, 4.0, 200)
     kap = np.linspace(0.5, 1.0, 11)
     dic = np.array([1 - (1 + a) * np.exp(-t / x) for x in t1s for a in kap])
@@ -48,7 +51,7 @@ def basis(t, k=4):
     return vt[:k], s[:k] / s[0]
 
 
-def recon(dat, traj, phi, iters=60, lam=1e-3):
+def recon(dat, traj, phi, iters=80, lam=1e-3):
     """(K, N, N) subspace coefficients of one slice (dat (T, C, S))."""
     nt, nc, ns = dat.shape
     x = (math.pi * traj[..., 0]).ravel()
@@ -136,7 +139,8 @@ def main():
     for i, r in enumerate(rois):
         curve = phi.T @ X[:, r].mean(1)  # (T,) complex
         curve = (curve * np.exp(-1j * np.angle(curve[-20:].mean()))).real
-        fun = lambda p: p[0] - p[1] * np.exp(-t * p[2]) - curve  # noqa: E731
+        m = t >= T_START
+        fun = lambda p, m=m: p[0] - p[1] * np.exp(-t[m] * p[2]) - curve[m]  # noqa: E731
         fit = least_squares(fun, (curve[-1], 2 * curve[-1], 1.5))
         a, bb, r1s = fit.x
         bl = float(np.median(b1[r]))

@@ -399,14 +399,43 @@ correlates 0.75 with the measured one over all tubes and offsets, but the CEST b
 4 s is under-predicted 1.3-6x at 4.3 ppm. From one saturation time, T1 trades against the pool
 sizes; a T1 that is too short reaches the steady state too early, which is this pattern.
 
-**Independent T1 (in progress, `iohexol_t1.py`).** IR Look-Locker (3D stack-of-stars, 798 x 6 deg
-every 5.01 ms after one inversion; subspace NUFFT reconstruction, central slice; the edge slices
-see a lower flip and gave T1* above the 6 deg bound). T1 per tube from the flip angle (with B1):
-1.02 / 1.44 / 1.67 / 0.64 / 0.52 / 0.75 / 1.08 / 1.71 s; Deichmann 1.17 / 1.77 / 1.83 / 0.78 / 0.60 /
-0.94 / 1.23 / 2.14 s. The CEST calibration's T1 (0.47 / 0.90 / 0.73 / 0.39 / 0.42 / 0.67 / 0.54 /
-0.88 s) is 1.1-2.3x shorter in every tube, supporting the diagnosis. Not yet trusted: the
-Look-Locker fit residuals are 4-13 % of the amplitude (curves not inspected). Next: check the
-curves, refit at 1.5 s with T1 fixed to these values, predict 4 s again.
+**Independent T1 (`iohexol_t1.py`).** IR Look-Locker of the same phantom (3D stack-of-stars, 798 x 6
+deg every 5.01 ms after one inversion; subspace NUFFT reconstruction with a K = 6 Look-Locker basis,
+central slice: the edge slices see less than the nominal flip and gave T1* above the bound that 6
+deg every 5 ms sets). Per-tube fit A - B exp(-t R1*) for t >= 0.15 s (an early transient), fit
+residuals 0.4-1.4 % of the amplitude (K = 4: 4-13 %, T1 shifting with the start time), T1 within
+6 % for a start at 0.15 or 0.3 s. T1 = 1 / (R1* + ln cos(6 deg B1) / TR):
+
+| Tube | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+|---|---|---|---|---|---|---|---|---|
+| T1 IR-LL [s] | 0.875 | 1.228 | 1.420 | 0.595 | 0.482 | 0.676 | 0.982 | 1.461 |
+| T1 fitted from the 1.5 s CEST data [s] | 0.468 | 0.904 | 0.727 | 0.388 | 0.420 | 0.673 | 0.539 | 0.882 |
+
+The single-Tsat calibration underestimated T1 in six of eight tubes (by up to 2x) and agreed in two
+(5, 6).
+
+**Prediction with T1 fixed to the IR-LL values** (`iohexol.py fit_t1`, `predict_t1`; the other six
+parameters recalibrated at 1.5 s, rms 0.008-0.027):
+
+| Tube | rms fit 1.5 s | rms predicted 4 s | rms "no change" | change at 4.3 ppm measured / predicted |
+|---|---|---|---|---|
+| 1 | 0.017 | 0.016 | 0.042 | -0.031 / -0.019 |
+| 2 | 0.015 | 0.020 | 0.043 | -0.042 / -0.034 |
+| 3 | 0.016 | 0.021 | 0.035 | -0.030 / -0.032 |
+| 4 | 0.010 | 0.012 | 0.020 | -0.014 / -0.008 |
+| 5 | 0.009 | 0.011 | 0.015 | -0.008 / -0.005 |
+| 6 | 0.008 | 0.013 | 0.024 | -0.023 / -0.013 |
+| 7 | 0.027 | 0.026 | 0.029 | -0.023 / -0.021 |
+| 8 | 0.024 | 0.021 | 0.048 | -0.028 / -0.033 |
+
+![iohexol prediction, IR-LL T1](iohexol_prediction_t1irll.png)
+
+Median prediction rms 0.018 (T1 fitted: 0.022; no change: 0.032); the predicted 1.5 -> 4 s change
+correlates 0.81 with the measured one (0.75); at 4.3 ppm the predicted build-up is 0.5-1.2x the
+measured (0.16-0.79x before), within 0.8-1.2x in tubes 2, 3, 7, 8. Remaining: tubes 1, 4, 5, 6
+still about half; candidates are the single hydroxyl pool (at bounds in 5 tubes), the amide pool's
+T2 (fixed 10 ms) and the Look-Locker T1's flip-angle dependence (Deichmann's estimate is 30-50 %
+longer).
 
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 

@@ -275,23 +275,30 @@ def _clip(theta):
     return theta
 
 
-def fit(z_meas: np.ndarray, db0_hz, b1, n_pulses: int = 15, iters: int = 10, h: float = 1e-3, step: float = 200e-6):
+def fit(z_meas: np.ndarray, db0_hz, b1, n_pulses: int = 15, iters: int = 10, h: float = 1e-3, step: float = 200e-6,
+        fixed: dict | None = None):
     """Levenberg-Marquardt per tube on (n_tubes, 57) measured Z; the Jacobian by forward differences
     of all parameters at once (each tube's 1 + 7 parameter sets are spins of one simulation). The
     offsets' coupling (readout + Trec) is carried between iterations: one pass each after the first
-    (the start states change little with the parameters). 200 us RF steps (3e-4 from 100 us)."""
+    (the start states change little with the parameters). 200 us RF steps (3e-4 from 100 us).
+    ``fixed``: {name: (n_tubes,) values} held at those values (e.g. T1 from the IR Look-Locker scan)."""
+    fixed = fixed or {}
     nt, npar = len(db0_hz), len(NAMES)
     theta = _clip(np.array([[np.log(START[n]) if n in LOG else START[n] for n in NAMES]] * nt, dtype=float))
+    for n, v in fixed.items():
+        theta[:, NAMES.index(n)] = np.log(v) if n in LOG else v
+    free = [j for j, n in enumerate(NAMES) if n not in fixed]
     lam = np.full(nt, 1e-2)
     best, start = None, None
     for it in range(iters):
-        sets = np.repeat(theta[:, None, :], npar + 1, 1)
-        for j in range(npar):
-            sets[:, j + 1, j] += h
-        zs, _, st = spectra(_to_par(sets.reshape(-1, npar)), np.repeat(db0_hz, npar + 1), np.repeat(b1, npar + 1),
+        nf = len(free)
+        sets = np.repeat(theta[:, None, :], nf + 1, 1)
+        for q, j in enumerate(free):
+            sets[:, q + 1, j] += h
+        zs, _, st = spectra(_to_par(sets.reshape(-1, npar)), np.repeat(db0_hz, nf + 1), np.repeat(b1, nf + 1),
                             n_pulses, passes=2 if start is None else 1, step=step, start=start)
-        start = st.reshape(nt, npar + 1, -1)[:, :1].expand(nt, npar + 1, -1).reshape(-1)
-        zs = zs.numpy().reshape(nt, npar + 1, -1)
+        start = st.reshape(nt, nf + 1, -1)[:, :1].expand(nt, nf + 1, -1).reshape(-1)
+        zs = zs.numpy().reshape(nt, nf + 1, -1)
         r = zs[:, 0] - z_meas
         jac = (zs[:, 1:] - zs[:, :1]) / h  # (nt, npar, 57)
         cost = (r**2).sum(1)
@@ -308,7 +315,9 @@ def fit(z_meas: np.ndarray, db0_hz, b1, n_pulses: int = 15, iters: int = 10, h: 
         for i in range(nt):
             a = jac[i] @ jac[i].T
             delta.append(np.linalg.solve(a + lam[i] * np.diag(np.diag(a) + 1e-12), -jac[i] @ r[i]))
-        theta = _clip(theta + np.array(delta))
+        theta = theta.copy()
+        theta[:, free] += np.array(delta)
+        theta = _clip(theta)
     return best[0], best[1]
 
 
@@ -324,15 +333,19 @@ def main(argv):
             zz = np.median(z[:, core], axis=1)
             print(f"Tsat {tsat} s: images {mag.shape}; median Z over the bright region: min {zz.min():.3f} at "
                   f"{w[1:][np.argmin(zz)]:+.2f} ppm, Z(-5) {zz[0]:.3f}, Z(+6) {zz[-1]:.3f}, Z(4.2) {zz[np.argmin(abs(w[1:] - 4.2))]:.3f}")
-    if what == "fit":
+    if what in ("fit", "fit_t1"):
         import json
 
         _, z, db0, b1, drift, _ = measured()
-        theta, cost = fit(z[1.5], db0 + drift[1.5], b1)
+        fixed, name = None, "fit_tsat1.5.json"
+        if what == "fit_t1":  # T1 from the IR Look-Locker scan (iohexol_t1.py)
+            t1 = json.loads((DATA / "t1_irll.json").read_text())["tubes"]
+            fixed, name = {"t1": np.array([t1[str(i + 1)]["T1"] for i in range(len(db0))])}, "fit_tsat1.5_t1irll.json"
+        theta, cost = fit(z[1.5], db0 + drift[1.5], b1, fixed=fixed)
         par = {n: v.tolist() for n, v in _to_par(theta).items()}
-        (DATA / "fit_tsat1.5.json").write_text(json.dumps({"par": par, "rms": np.sqrt(cost / 57).tolist()}, indent=1))
+        (DATA / name).write_text(json.dumps({"par": par, "rms": np.sqrt(cost / 57).tolist()}, indent=1))
         print(json.dumps(par, indent=1))
-    if what == "predict":
+    if what in ("predict", "predict_t1"):
         import json
 
         import matplotlib
@@ -341,7 +354,8 @@ def main(argv):
         import matplotlib.pyplot as plt
 
         _, z, db0, b1, drift, _ = measured()
-        par = {k: np.array(v) for k, v in json.loads((DATA / "fit_tsat1.5.json").read_text())["par"].items()}
+        name = "fit_tsat1.5.json" if what == "predict" else "fit_tsat1.5_t1irll.json"
+        par = {k: np.array(v) for k, v in json.loads((DATA / name).read_text())["par"].items()}
         theta = np.stack([np.log(par[n]) if n in LOG else par[n] for n in NAMES], 1)
         w = offsets_ppm()[1:]
         sim = {}
@@ -371,7 +385,7 @@ def main(argv):
             a.set_title(f"tube {i + 1}: rms fit {fit_rms[i]:.3f}, prediction {pred_rms[i]:.3f}", fontsize=9)
         ax[0, 0].legend(fontsize=7)
         plt.tight_layout()
-        plt.savefig(Path(__file__).with_name("iohexol_prediction.png"), dpi=60)
+        plt.savefig(Path(__file__).with_name("iohexol_prediction.png" if what == "predict" else "iohexol_prediction_t1irll.png"), dpi=60)
     if what in ("recon", "tubes"):
         w = offsets_ppm()[1:]
         mags = {t: np.load(DATA / f"ref_tsat{t}.npy") for t in RAW}

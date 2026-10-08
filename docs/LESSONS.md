@@ -71,7 +71,9 @@ says where it came from so it can be re-checked.
   E|s + n| ≈ |s| + σ²/2|s|. A water fill simulated at sphere-level density (64 spins/pixel)
   made short-T2 spheres' late echoes 2–4× too high (benchmark 2: 2.6 % → 5.8 %); the scanner's
   tails matched the simulation *without* water. Fixes: more spins, independent seeds with the
-  bias σ² removed (`nist.mc_magnitude`), lower-discrepancy placement (`nist.*_qmc`). Ideal
+  power bias removed before a clipped square root (`nist.mc_magnitude`), lower-discrepancy
+  placement (`nist.*_qmc`). This does not make magnitude unbiased; see the 2026-10-08
+  estimator audit below. Ideal
   spoiling at TR end changed nothing (coherence across TRs was not the cause).
 - **Multi-echo shapes constrain |B1⁺ − 1|, not its sign.** Refocusing at 180°·(1 ± δ) gives
   nearly the same echo train, and the 90°'s scaling is absorbed by any per-sphere scale. On
@@ -396,6 +398,12 @@ says where it came from so it can be re-checked.
   one simulation if every perturbed parameter set is a spin (here 8 tubes x 8 sets x 58 offsets);
   ~7 min per iteration on the CPU core with exchange pools.
 
+- **Look-Locker subspace bases need more components than their singular values suggest**
+  (2026-10-08): K = 4 (4th singular value 3 % of the 1st) left per-tube curve fits off by 4-13 %
+  and T1 moving with the fit's start time; K = 6 gave 0.4-1.4 % and stable T1. Check a subspace
+  reconstruction by the fit residual of the curves it produces, not by the spectrum alone. In a
+  3D slab, use the central partition for flip-angle-corrected T1 (the edges see less flip).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -577,3 +585,32 @@ says where it came from so it can be re-checked.
   Relative PD must not be presented as calibrated absolute M0; zero QSM does not
   identify air. BigBrain-MR's TE=0 GRE magnitude also retains TR/flip-angle weighting
   and is not M0. Actual inventories and checks: `validation/anatomy/ALTERNATIVE_SOURCES.md`.
+
+## Monte Carlo estimator audit — 2026-10-08
+
+- **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts
+  estimated variance from squared complex-mean amplitude, then clips and takes a square root.
+  The latter operations introduce bias. In 200,000 four-seed Gaussian experiments with
+  mean-component SD 1, a true zero becomes 0.524 on average; true amplitude 2 becomes 1.696.
+  Retain complex means and unclipped power and calibrate the downstream estimator at nulls.
+  Derivation and reproduction: [MONTE_CARLO_REVIEW.md](MONTE_CARLO_REVIEW.md),
+  `validation/monte_carlo_audit.py`.
+- **Jackknife the statistic that is reported.** Both NIST drivers combine marginal sphere
+  SEs as though their reconstructed errors were independent. Shared water and reconstruction
+  can correlate ROIs. Jackknife the mean sphere error directly, and pair seeds for model
+  differences. A perfectly correlated ten-output check exposes a sqrt(10) underestimate;
+  the correction for the actual scanner benchmarks has not been measured.
+- **Repeated seeds cannot detect deterministic quantile bias.** For a uniform T2′ voxel,
+  permutations preserve the same frequency set. At 256 spins over 0–3 T2′, the audit found
+  maximum FID error 0.03818 with seed SD only 2.08e-16. Increase quadrature density separately
+  or randomize within frequency-CDF strata when replicate-based error estimates are needed.
+- **A real-valued shift is not a Sobol digital shift.** Modulo-one shifts preserve uniform
+  marginals but lose exact binary-cell balance. In analytic cube/ball Fourier checks, removing
+  the extra shift helped one integrand and slightly hurt the other. Benchmark alternative
+  randomizations; do not infer an end-to-end gain from discrepancy alone.
+- **Free-bridge phase can be averaged analytically.** Conditional on a free Brownian endpoint,
+  its independent constant-gradient bridge multiplies transverse signal by
+  exp(-(2*pi)^2 h^3 g^T D g / 12), with g in Hz/m. A single-segment Philox experiment confirmed
+  1.35–2.81x lower complex variance over three phase variances. This is an estimator proposal,
+  not an implemented engine optimization; RF, reflecting walls and nonlinear spatial fields
+  require separate treatment.
