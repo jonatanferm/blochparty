@@ -22,6 +22,9 @@ Goal: the most physically realistic simulator, judged against real scanners
 - **Record what you learn in `docs/LESSONS.md`**: anything that took more than a few minutes
   to figure out (physics, numerics, data/format quirks, tool behaviour, process), with where
   it came from.
+- **Commit without asking.** Commit finished, verified work directly on `main`, split into
+  logical commits (what and why, with numbers), and put the hashes in the journal. Push only
+  when asked.
 - **Keep `docs/JOURNAL.md` current**: after each milestone or work session, append a dated
   entry — what was done and why, results with numbers, dead ends and corrections, commit
   hashes — so the project can be written up later.
