@@ -43,11 +43,11 @@ last column; combinations of features are checked only engine against engine.
 | free pools + scanner field model | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | combination |
 | bound pool + diffusion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination |
 | generalized Bloch + diffusion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination |
-| diffusion + leading-order concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination (coefficients at the start position) |
-| diffusion + gradient nonlinearity | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination (walks in encoding coordinates) |
-| diffusion + exact concomitant fields | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | |
-| motion + gradient nonlinearity | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1b |
-| motion + concomitant fields | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1b |
+| diffusion + leading-order concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | walks in true coordinates, coefficients per segment where the spin is |
+| diffusion + gradient nonlinearity | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | walks in true coordinates, encoded per segment |
+| diffusion + exact concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | as above |
+| motion + gradient nonlinearity | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | = a static spin at each segment's position, segment by segment (`test_motion.py`) |
+| motion + concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | as above; the velocity phase of a Maxwell-compensated echo (`test_fields_concomitant.py`) |
 | free pools + generalized Bloch | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
 | free pools + diffusion | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
 | free pools + motion | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ROADMAP M1c |
@@ -83,8 +83,12 @@ Long sequences (`tests/test_metal.py`): 1e4 CW RF segments agree to 1e-6 and a C
 that (until M1a) Metal drifted from the core by 1e-3 per 1e4 RF segments. Free segments are not
 compensated: a free run of 1e5 segments drifts by ~1.5e-5 in Mz.
 
-The core's own gradients match central differences (step 1e-6 relative to each input, the case
-rebuilt at both points) to 1e-6 relative.
+Phase resolution: Metal computes each segment's phase increment in float32, so a segment of
+|φ| rad carries ~|φ| 2⁻²⁴ (a 5 ms lobe of 32 mT/m seen from 15 cm, ~6400 rad: 4e-4 rad). Imaging
+segments are far smaller; long strong lobes on spins far off centre are where it shows.
+
+The core's own gradients match central differences (relative steps of 1e-5 and 2e-5 along a random
+direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 relative.
 
 ## Limits that are not physics
 

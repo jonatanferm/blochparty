@@ -34,7 +34,8 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
-from .fields import Scanner, exact_excess, gradient_monomials, spin_fields
+from .fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, spin_fields,
+                     transverse_coefficients)
 from .maps import FieldMaps, sample
 from .motion import positions
 from .restriction import n_sub, start_offsets, tau_max, walk_segment
@@ -61,6 +62,9 @@ class _Spins(NamedTuple):
     walk: tuple | None = None  # diffusion: (sqrt(D) (N,) or Cholesky (N, 3, 3), seed, spin indices, restriction)
     move: tuple | None = None  # motion: (Motion, per-segment terms, r0 (N, 3))
     maps: tuple | None = None  # moving spins in FieldMaps: (channels, origin, spacing, tissue db0, tissue b1, coils?)
+    # moving spins under the field model: (nonlinearity or None, f0, z_asymmetry); positions are then true
+    # positions, mapped to encoding positions and concomitant coefficients per segment (_moving_fields)
+    field: tuple | None = None
 
 
 @dataclass
@@ -188,23 +192,55 @@ def _sample(mx, my, psi, spins: _Spins):
     return torch.stack([re * c + im * s, im * c - re * s])
 
 
-def _extra_phase(dt, g, off, spins: _Spins):
+def _extra_phase(dt, g, off, spins: _Spins, pos=None, conc_seg=None):
     """Cumulative phase [cycles] of the uniform offset and the concomitant field over a
     free run, (N, n) or (n,) (or None if both are absent): the moments of b0_offset and
-    of G_i G_j at leading order, the per-segment |B| in exact mode."""
+    of G_i G_j at leading order, the per-segment |B| in exact mode. Moving spins under the
+    field model pass their per-segment encoding positions ``pos`` and coefficients ``conc_seg``
+    (N, n, 3) and (N, n, 6 or 7)."""
     out = None if off is None else torch.cumsum(off * dt, 0)  # (n,)
     if spins.mode == 1:
-        q = torch.cumsum(gradient_monomials(g) * dt[:, None], 0)  # (n, 6)
-        conc = spins.conc @ q.T
+        if conc_seg is None:
+            q = torch.cumsum(gradient_monomials(g) * dt[:, None], 0)  # (n, 6)
+            conc = spins.conc @ q.T
+        else:
+            conc = torch.cumsum((conc_seg * gradient_monomials(g)[None]).sum(-1) * dt, 1)
         out = conc if out is None else conc + out
     elif spins.mode == 2:
-        lin = spins.pos @ g.T + spins.db0[:, None]  # (N, n)
-        if off is not None:
-            lin = lin + off
-        c = spins.conc
-        conc = torch.cumsum(exact_excess(lin, c[:, :3] @ g.T, c[:, 3:6] @ g.T, c[:, 6:]) * dt, 1)
+        if conc_seg is None:
+            lin = spins.pos @ g.T + spins.db0[:, None]  # (N, n)
+            if off is not None:
+                lin = lin + off
+            c = spins.conc
+            conc = torch.cumsum(exact_excess(lin, c[:, :3] @ g.T, c[:, 3:6] @ g.T, c[:, 6:]) * dt, 1)
+        else:
+            lin = (pos * g[None]).sum(-1) + spins.db0[:, None]
+            if off is not None:
+                lin = lin + off
+            tx, ty = (conc_seg[..., :3] * g[None]).sum(-1), (conc_seg[..., 3:6] * g[None]).sum(-1)
+            conc = torch.cumsum(exact_excess(lin, tx, ty, conc_seg[..., 6]) * dt, 1)
         out = conc if out is None else conc + out
     return out
+
+
+_ENCODE_BLOCK = 1 << 16  # positions per solid-harmonic evaluation; bounds its temporaries
+
+
+def _moving_fields(spins: _Spins, eff: Tensor) -> tuple[Tensor, Tensor | None]:
+    """Encoding positions (N, n, 3) and concomitant coefficients (N, n, 6 or 7, or None) of moving
+    spins at their true effective positions ``eff`` (N, n, 3): the static spin_fields, per segment."""
+    nl, f0, a = spins.field
+    flat = eff.reshape(-1, 3)
+    enc = eff
+    if nl is not None:
+        enc = torch.cat([nl.encoding_positions(flat[i:i + _ENCODE_BLOCK])
+                         for i in range(0, flat.shape[0], _ENCODE_BLOCK)]).reshape(eff.shape)
+    conc = None
+    if spins.mode == 1:
+        conc = concomitant_coefficients(flat, f0, a)
+    elif spins.mode == 2:
+        conc = torch.cat([transverse_coefficients(flat, a), f0.expand(flat.shape[0], 1)], dim=-1)
+    return enc, None if conc is None else conc.reshape(*eff.shape[:2], -1)
 
 
 def _walk(r, dt, s0: int, spins: _Spins):
@@ -233,7 +269,7 @@ def _walk(r, dt, s0: int, spins: _Spins):
     return torch.stack(eff, 1), r
 
 
-def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins, walk=None):
+def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins, walk=None, conc_seg=None):
     """A stretch of RF-free segments in closed form.
 
     With t and k the cumulative time and gradient moment from the run's start,
@@ -244,7 +280,7 @@ def _free_run(mx, my, mz, mb, dt, g, off, psi, adc_idx, spins: _Spins, walk=None
     """
     t = torch.cumsum(dt, 0)
     k = torch.cumsum(g * dt[:, None], 0)
-    extra = _extra_phase(dt, g, off, spins)
+    extra = _extra_phase(dt, g, off, spins, walk, conc_seg)
     # moving spins: their own cumulative gradient phase, cycles (N, n), in place of pos . k
     wcyc = None if walk is None else torch.cumsum((walk * g[None]).sum(-1) * dt[None], 1)
     if extra is not None and extra.dim() == 1:
@@ -325,9 +361,14 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
         step_spins = spins
         if spins.maps is not None and eff is not None:  # one segment (no merging): the fields where it is
             step_spins = _sample_maps(spins, eff[:, 0])
+        enc, conc_seg = eff, None
+        if spins.field is not None and eff is not None:  # true positions -> encoding positions, coefficients
+            enc, conc_seg = _moving_fields(spins, eff)
         if seq.is_rf[a]:
             off = seq.b0_offset[a] if use_off else None
-            sp = step_spins if eff is None else step_spins._replace(pos=eff[:, 0])
+            sp = step_spins if eff is None else step_spins._replace(pos=enc[:, 0])
+            if conc_seg is not None:
+                sp = sp._replace(conc=conc_seg[:, 0])
             mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
                                          None if f_rf is None else f_rf[a])
             if seq.adc[a]:
@@ -336,7 +377,7 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None
             mx, my, mz, mb, sig = _free_run(mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off,
-                                            seq.adc_phase[a:b], adc_idx, step_spins, eff)
+                                            seq.adc_phase[a:b], adc_idx, step_spins, enc, conc_seg)
             if sig is not None:
                 samples.append(sig)
         if seq.spoil[b - 1]:
@@ -465,10 +506,16 @@ def simulate(
     fields = spin_fields(scanner, phantom.pos)
     bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
     gen = bound is not None and bound.model == "generalized"
+    # moving spins under the field model walk and move in true coordinates; every segment maps them to
+    # encoding positions and concomitant coefficients (_moving_fields). Static spins: spin_fields once.
+    field = None
+    if (phantom.diffusion is not None or phantom.motion is not None) and scanner is not None and (
+            fields.mode or scanner.nonlinearity is not None):
+        f0 = None if not fields.mode else torch.as_tensor(scanner.larmor, dtype=pd.dtype, device=pd.device)
+        field = (scanner.nonlinearity, f0, scanner.z_asymmetry)
+    start = phantom.pos if field is not None else fields.pos
     walk = None
-    if phantom.diffusion is not None:  # spins walk from their (encoding) positions
-        if fields.mode == 2:
-            raise NotImplementedError("diffusion with exact concomitant fields is not implemented")
+    if phantom.diffusion is not None:  # spins walk from their positions (encoding ones without a moving field model)
         D = phantom.diffusion.to(pd.dtype)
         fac = torch.sqrt(D) if D.dim() == 1 else torch.linalg.cholesky(D)
         idx = np.arange(n, dtype=np.uint64)
@@ -477,15 +524,13 @@ def simulate(
             if D.dim() != 1:
                 raise ValueError("restricted diffusion needs an isotropic diffusivity (N,)")
             res = phantom.restriction.expand(n, pd)
-            restr = (res, fields.pos, tau_max(res, D))
+            restr = (res, start, tau_max(res, D))
         walk = (fac, int(seed), idx, restr)
     move = None
     if phantom.motion is not None:
-        if fields.mode or (scanner is not None and scanner.nonlinearity is not None):
-            raise NotImplementedError("motion with gradient nonlinearity or concomitant fields is not implemented")
-        move = (phantom.motion, phantom.motion.per_segment(seq.dt), fields.pos)
+        move = (phantom.motion, phantom.motion.per_segment(seq.dt), start)
     spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move)
+                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move, field=field)
     moving = walk is not None or move is not None
     if maps is not None:
         if maps.coils is not None and coils is not None:
@@ -497,13 +542,13 @@ def simulate(
         if maps.coils is not None:  # placeholders of the mapped coil count until sampled
             n_c = maps.coils.shape[0]
             spins = spins._replace(sens_re=pd.new_zeros(n, n_c), sens_im=pd.new_zeros(n, n_c))
-        if not moving:  # static: sample once, keep the merged free runs
-            spins = _sample_maps(spins, fields.pos)._replace(maps=None)
+        if not moving:  # static: sample once (at the true positions), keep the merged free runs
+            spins = _sample_maps(spins, phantom.pos)._replace(maps=None)
         else:
             merge_free_runs = False
-    r = fields.pos if walk is not None else None
+    r = start if walk is not None else None
     if walk is not None and walk[3] is not None:  # walkers start uniformly inside their compartments
-        r = fields.pos + start_offsets(walk[3][0], int(seed), walk[2], pd)
+        r = start + start_offsets(walk[3][0], int(seed), walk[2], pd)
     f_rf = rf_frequency(seq) if bound is not None and not gen else None
     # a zero uniform offset is skipped, so that results without one are unchanged bit for bit
     off = seq.b0_offset

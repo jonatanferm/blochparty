@@ -133,3 +133,83 @@ def test_gpu_matches_core_with_all_motion():
         for mma in (False, True):
             out = metal.simulate_metal(p, seq, coils, seed=3, mma=mma)
             assert float((out.signal.to(ref.signal.dtype) - ref.signal).abs().max() / ref.signal.abs().max()) < 1e-4
+
+
+def _field_chain_case():
+    """Five spins at constant velocity, a random RF / gradient / off-resonance sequence with
+    gradients 20x stronger (concomitant fields of tens of Hz at 0.55 T), four coils."""
+    from test_bloch_vs_ode import random_case
+    from test_fused import with_readout
+
+    g = torch.Generator().manual_seed(0)
+    n = 5
+    pos = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.2
+    vel = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.5
+    one = torch.ones(n, dtype=f64)
+    ph = bp.Phantom(pos, one, 0.8 * one, 0.1 * one, torch.linspace(-30, 30, n, dtype=f64), motion=bp.Motion(velocity=vel))
+    _, seq = random_case(0)
+    seq = with_readout(seq)
+    return ph, replace(seq, grad=seq.grad * 20), bp.birdcage_sensitivities(pos, 4)
+
+
+def _scanners():
+    from test_fields_nonlinearity import distortion
+
+    from blochparty.fields import Scanner
+
+    return {"nonlinearity": Scanner(nonlinearity=distortion()), "leading": Scanner(field_strength=0.55),
+            "exact + nonlinearity": Scanner(field_strength=0.55, concomitant="exact", nonlinearity=distortion())}
+
+
+def _static_chain(ph, seq, coils, scanner):
+    """Segment by segment, a static spin at the moving spin's mid-segment position (m_init chained)."""
+    t = torch.cumsum(seq.dt, 0) - 0.5 * seq.dt
+    m, sig = None, []
+    for s in range(len(seq)):
+        one = slice(s, s + 1)
+        part = replace(seq, dt=seq.dt[one], rf=seq.rf[one], grad=seq.grad[one], adc_phase=seq.adc_phase[one],
+                       is_rf=seq.is_rf[one], adc=seq.adc[one], spoil=seq.spoil[one], meta={})
+        static = replace(ph, pos=ph.pos + ph.motion.velocity * t[s], motion=None)
+        r = bp.simulate(static, part, coils, m_init=m, scanner=scanner)
+        m = r.m
+        sig.append(r.signal)
+    return torch.cat(sig, 1), m
+
+
+@pytest.mark.parametrize("which", ["nonlinearity", "leading", "exact + nonlinearity"])
+def test_moving_under_field_model_equals_static_chain(which):
+    # moving spins live in true coordinates; every segment encodes them through the nonlinearity and
+    # re-evaluates their concomitant coefficients where they are (ROADMAP M1b)
+    ph, seq, coils = _field_chain_case()
+    scanner = _scanners()[which]
+    ref_sig, ref_m = _static_chain(ph, seq, coils, scanner)
+    out = bp.simulate(ph, seq, coils, scanner=scanner)
+    assert float((out.m - ref_m).abs().max()) < 1e-10
+    assert float((out.signal - ref_sig).abs().max() / ref_sig.abs().max()) < 1e-10
+    moved = bp.simulate(ph, seq, coils, scanner=None)
+    assert float((moved.signal - ref_sig).abs().max() / ref_sig.abs().max()) > 1e-3  # the field model matters
+    metal = pytest.importorskip("blochparty.metal")
+    if metal.available():
+        for mma in (False, True):  # per spin (the five dephase strongly: |signal| ~ 0.3 of their sum)
+            gpu = metal.simulate_metal(ph, seq, coils, scanner=scanner, mma=mma)
+            assert float((gpu.signal.to(ref_sig.dtype) - ref_sig).abs().max()) < 1e-5 * len(ph)
+            assert float((gpu.m.double() - ref_m).abs().max()) < 1e-5
+
+
+def test_gpu_diffusion_under_field_model():
+    # walkers in true coordinates, encoded per segment; the same Philox walk in both engines
+    metal = pytest.importorskip("blochparty.metal")
+    if not metal.available():
+        pytest.skip("no Apple GPU")
+    ph, seq, coils = _field_chain_case()
+    g = torch.Generator().manual_seed(5)
+    n = 300
+    pos = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.2
+    one = torch.ones(n, dtype=f64)
+    ph = bp.Phantom(pos, one, 0.8 * one, 0.1 * one, torch.linspace(-30, 30, n, dtype=f64), diffusion=2e-9 * one)
+    coils = bp.birdcage_sensitivities(pos, 4)
+    for scanner in _scanners().values():
+        ref = bp.simulate(ph, seq, coils, scanner=scanner, seed=3)
+        out = metal.simulate_metal(ph, seq, coils, scanner=scanner, seed=3)
+        assert float((out.signal.to(ref.signal.dtype) - ref.signal).abs().max() / ref.signal.abs().max()) < 2e-4
+        assert float((out.m.double() - ref.m).abs().max() / ref.m.abs().max()) < 3e-3

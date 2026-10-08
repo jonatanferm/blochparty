@@ -7,8 +7,8 @@ The matrix is parsed from the document. For every feature row there is a small c
   signal and final magnetization (bound pool and free pools included), to the engine's tolerance
   (``TOL``). For the core itself the cell says it runs; its references are the other test files
   named in the document.
-* ``✓`` gradients: core: autograd matches a central finite difference of the same loss along a
-  random direction; fused and chunked: their gradients match the core's autograd.
+* ``✓`` gradients: core: autograd matches a (Richardson-extrapolated) central difference of the
+  same loss along a random direction; fused and chunked: their gradients match the core's autograd.
 * ``✗``: the engine raises ``NotImplementedError`` (forward: on the plain case; gradients: on the
   case with its tensors requiring grad, grad mode on).
 * ``–``: not applicable, not checked.
@@ -467,9 +467,11 @@ def loss(r: bp.SimResult) -> torch.Tensor:
     return total
 
 
-def directional_fd(feature: str, eps=1e-6) -> tuple[float, float]:
-    """The core's (autograd, central difference) derivative of the loss along leaves * u
-    (relative steps, u ~ N(0, 1)); the difference rebuilds the case at both points."""
+def directional_fd(feature: str, eps=1e-5) -> tuple[float, float]:
+    """The core's (autograd, finite difference) derivative of the loss along leaves * u (relative
+    steps, u ~ N(0, 1)); the difference rebuilds the case at every point. Central differences at
+    eps and 2 eps, Richardson-extrapolated (error O(eps^4)): at a plain 1e-6 step the rounding of
+    the loss alone was ~1e-6 relative on spins 10 cm out under a gradient nonlinearity."""
     case = build(feature, grad=True)
     grads = torch.autograd.grad(loss(run("core", case)), case.leaves, allow_unused=True)
     dirs = []
@@ -478,8 +480,9 @@ def directional_fd(feature: str, eps=1e-6) -> tuple[float, float]:
         dirs.append((u * t.detach().abs()).to(t.dtype))
     ad = sum(float((g.conj() * d).real.sum()) for g, d in zip(grads, dirs) if g is not None)
     with torch.no_grad():
-        up, down = (float(loss(run("core", build(feature, False, [s * d for d in dirs])))) for s in (eps, -eps))
-    return ad, (up - down) / (2 * eps)
+        val = lambda h: float(loss(run("core", build(feature, False, [h * d for d in dirs]))))
+        d1, d2 = ((val(h) - val(-h)) / (2 * h) for h in (eps, 2 * eps))
+    return ad, (4 * d1 - d2) / 3
 
 
 # ---------------------------------------------------------------- the tests

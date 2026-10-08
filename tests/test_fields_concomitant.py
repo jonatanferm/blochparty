@@ -181,6 +181,63 @@ def test_maxwell_compensated_echo(sim):
     assert (plain - 1).abs().max() > 0.1
 
 
+@pytest.mark.parametrize("engine", ["core", "metal"])
+def test_moving_spin_in_a_compensated_echo(engine):
+    # Maxwell compensation cancels int f_c dt for a static spin only: a spin moving at v sees
+    # f_c(r0 + v t), quadratic in t, and keeps -2 pi (int_after - int_before) f_c dt, integrated here
+    # exactly per gradient segment (3-point Gauss-Legendre) along the path; the ratio to the ideal
+    # scanner removes the G.r (velocity-encoding) phase, the same in both. The simulators take each
+    # segment's position at its mid-time, exact for terms linear in t: the v^2 t^2 term leaves
+    # C dt^3 / 12 per segment, so the lobes are cut into k pieces and the error falls as k^-2.
+    from blochparty import Motion
+
+    if engine == "metal":
+        metal = pytest.importorskip("blochparty.metal")
+        if not metal.available():
+            pytest.skip("no Apple GPU")
+        sim = metal.simulate_metal
+    else:
+        sim = simulate
+    f0, G, delta = GAMMA_BAR * 0.55, 0.8 * G_MAX, 5e-3
+    r0 = points(20, seed=3, extent=0.15)
+    v = (torch.rand(20, 3, dtype=torch.float64, generator=torch.Generator().manual_seed(4)) - 0.5) * 4.0  # <= 2 m/s
+    tau = 0.8 * delta
+    s_, p_ = G * delta / tau, G * G * delta / tau
+    root = math.sqrt(2 * p_ - s_ * s_)
+    ph, coils = spins(r0)
+    moving = replace(ph, motion=Motion(velocity=v))
+    scanner = Scanner(field_strength=0.55)
+    nodes = torch.tensor([-math.sqrt(0.6), 0.0, math.sqrt(0.6)], dtype=torch.float64)
+    weights = torch.tensor([5 / 9, 8 / 9, 5 / 9], dtype=torch.float64)
+
+    def errors(k):
+        before = [(G, delta / k)] * k
+        after = [((s_ + root) / 2, tau / k)] * k + [((s_ - root) / 2, tau / k)] * k
+        seq = spin_echo(before, after)
+        ratio = sim(moving, seq, coils, scanner=scanner).signal[:, -1] / sim(moving, seq, coils).signal[:, -1]
+        t_end = torch.cumsum(seq.dt, 0)
+        total = torch.zeros(20, dtype=torch.float64)
+        for j in range(len(seq)):
+            if not bool(seq.grad[j].any()):
+                continue
+            a, b = float(t_end[j] - seq.dt[j]), float(t_end[j])
+            fc = torch.stack([bernstein(r0 + v * t, seq.grad[j], f0) for t in 0.5 * (a + b) + 0.5 * (b - a) * nodes], -1)
+            integral = 0.5 * (b - a) * (fc * weights).sum(-1)
+            total += -integral if j <= k else integral  # segment 0 the 90, 1..k the first lobe, k + 1 the 180
+        expect = torch.exp(-2j * math.pi * total)
+        assert (expect - 1).abs().max() > 0.2  # the velocity term is there
+        static = sim(ph, seq, coils, scanner=scanner).signal[:, -1] / sim(ph, seq, coils).signal[:, -1]
+        return float((ratio.to(expect.dtype) - expect).abs().max()), float((static.to(expect.dtype) - 1).abs().max())
+
+    (coarse, still), (fine, _) = errors(25), errors(50)
+    if engine == "core":
+        assert still < 1e-9  # a static spin stays compensated
+        assert fine < 1e-6
+        assert 3.8 < coarse / fine < 4.2  # second order in the segment length
+    else:  # float32: the lobes are ~6400 rad of G.r phase at 15 cm, resolved to ~4e-4 rad (2^-24 of it)
+        assert still < 2e-3 and fine < 2e-3
+
+
 @pytest.mark.parametrize("sim", SIMS)
 def test_exact_mode(sim):
     # one constant lobe: phase -2 pi delta (|B| - f0), |B| in 50 digits; exact minus leading

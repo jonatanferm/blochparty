@@ -12,9 +12,11 @@ at its effective position, the formula at the segment's mid-time: exact for the 
 constant velocity, second order in the segment length for the rest.
 
 Tissue properties (PD, T1, T2, dB0, coil sensitivities) move with the spin here; scanner-frame
-field maps sampled at the moving position are a separate step. Not supported together with
-motion: gradient nonlinearity and concomitant fields (their per-spin coefficients depend on
-the position).
+field maps sampled at the moving position are a separate step. Under the scanner field model
+(gradient nonlinearity, concomitant fields) positions are true positions, and every segment
+evaluates the encoding position f(r) and the concomitant coefficients where the spin is
+(``bloch._moving_fields``); the concomitant field being quadratic in r, its phase for a constant
+velocity is second order in the segment length.
 """
 
 from __future__ import annotations

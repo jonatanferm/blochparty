@@ -18,7 +18,9 @@ g.r + (Bx^2 + By^2) / (2 f0); for a = 1/2 that is Bernstein's
 
 f_c is a quadratic form in g with per-spin coefficients (``concomitant_coefficients``),
 so a free run's phase needs only the cumulative moments int g_i g_j dt, exact for
-piecewise-constant segments: the closed-form free runs stay closed form. Ramps cut on
+piecewise-constant segments: the closed-form free runs stay closed form. Moving spins (motion,
+diffusion) re-evaluate the coefficients and the encoding positions every segment, at their
+true positions. Ramps cut on
 the gradient raster are staircases of their segment averages, whose int g^2 is low by
 (step)^2 dt / 12 per segment. The "exact" mode evaluates |B| itself (for checks and
 very low field). The concomitant terms use the true spin positions and the linear
