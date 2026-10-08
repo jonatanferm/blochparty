@@ -185,6 +185,17 @@ inline float lineshape(float delta, float t2b, constant float* line, constant fl
         const float x = TWO_PI * delta * t2b;
         return t2b / (1.0f + x * x);
     }
+    if (line[0] > 2.5f) {  // no cut (cutoff=None): the tapered Green's function's transform from its
+        // modes, G = T2b Re sum_j c_j / (p_j + i x); log_f holds (Re p, Im p, Re c, Im c) per mode
+        const float x = TWO_PI * delta * t2b;
+        const int nj = int(line[5]);
+        float g = 0.0f;
+        for (int j = 0; j < nj; ++j) {
+            const float pr = log_f[4 * j], pim = log_f[4 * j + 1] + x, cr = log_f[4 * j + 2], ci = log_f[4 * j + 3];
+            g += (cr * pr + ci * pim) / (pr * pr + pim * pim);
+        }
+        return t2b * g;
+    }
     const float x = TWO_PI * max(fabs(delta), line[1]) * t2b;
     if (x > 30.0f) return 0.0f;
     const int n = int(line[5]);
@@ -1177,6 +1188,17 @@ inline float lineshape_d(float delta, float t2b, constant float* line, constant 
         g_t2 = (1.0f - x * x) / (den * den), g_d = -t2b * 2.0f * x * TWO_PI * t2b / (den * den);
         return t2b / den;
     }
+    if (line[0] > 2.5f) {  // no cut: G = T2b sum_j Re c_j / (p_j + i x), x = 2 pi delta T2b (lineshape kind 3)
+        const float x = TWO_PI * delta * t2b;
+        float g = 0.0f, dg = 0.0f;  // the sum and its derivative in x
+        for (int k = 0; k < int(line[5]); ++k) {
+            const float pr = log_f[4 * k], pim = log_f[4 * k + 1] + x, cr = log_f[4 * k + 2], ci = log_f[4 * k + 3];
+            const float den = pr * pr + pim * pim, num = cr * pr + ci * pim;
+            g += num / den, dg += (ci * den - 2.0f * pim * num) / (den * den);
+        }
+        g_t2 = g + t2b * dg * TWO_PI * delta, g_d = t2b * dg * TWO_PI * t2b;
+        return t2b * g;
+    }
     const float ad = fabs(delta);
     const bool cut = ad < line[1];
     const float d = cut ? line[1] : ad, x = TWO_PI * d * t2b;
@@ -1585,7 +1607,8 @@ class _Opts(NamedTuple):
     mode: int
     mma: bool | None
     lineshape: str
-    cutoff: float
+    cutoff: float | None
+    memory: float
 
 
 N_SPIN_GRADS = 20  # rows of the adjoint's per-spin gradients: pos (3), db0, pd, r1, r2, b1, conc (7), bound (5)
@@ -1601,7 +1624,7 @@ class _MetalSimulate(torch.autograd.Function):
         d = lambda t: None if t is None else t.detach()
         ph = Phantom(d(pos), d(pd), d(t1), d(t2), d(db0), b1=d(b1),
                      bound=None if bound is None else exchange.BoundPool(*d(bound).unbind(-1), lineshape=opts.lineshape,
-                                                                         cutoff=opts.cutoff))
+                                                                         cutoff=opts.cutoff, memory=opts.memory))
         sq = Sequence(d(dt), d(rf), d(grad), d(adc_phase), opts.is_rf, opts.adc, opts.spoil, {}, d(b0_offset), d(rf_freq))
         coils = torch.complex(coils_ri[..., 0], coils_ri[..., 1]).detach()
         from ..fields import SpinFields
@@ -1732,12 +1755,13 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
             coils = torch.complex(v[:, 2::2], v[:, 3::2])
     if coils is None:
         coils = torch.ones(n, 1, dtype=torch.complex64 if pd.dtype == torch.float32 else torch.complex128)
-    bound, rf_freq, lineshape, cutoff = None, None, "superlorentzian", 0.0
+    bound, rf_freq, lineshape, cutoff, memory = None, None, "superlorentzian", None, 300.0
     if phantom.bound is not None:
         pool = phantom.bound.expand(n, pd)
         bound = torch.stack([pool.f, pool.k, pool.t1, pool.t2, pool.dw], -1)
         rf_freq = exchange.rf_frequency(seq)
-        lineshape, cutoff = pool.lineshape, float(pool.cutoff)
+        lineshape, memory = pool.lineshape, float(pool.memory)
+        cutoff = None if pool.cutoff is None else float(pool.cutoff)
     if m_init is None:
         m0 = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], -1)
         if bound is not None:
@@ -1751,7 +1775,7 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
     every = every or default_checkpoint_every(len(seq))
     if every % 64:
         raise ValueError(f"checkpoint_every must be a multiple of 64, got {every}")
-    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff)
+    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff, memory)
     sig, m = _MetalSimulate.apply(opts, fields.pos, pd, phantom.t1, phantom.t2, db0, torch.view_as_real(coils),
                                   seq.dt, seq.rf, seq.grad, seq.adc_phase, m0, b1, seq.b0_offset, fields.conc, bound,
                                   rf_freq)
@@ -1913,11 +1937,19 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             mt_bufs += [dummy, dummy, dummy, 2]
         else:
             frf = exchange.rf_frequency(seq.to(dtype=torch.float64, device="cpu")).detach()
-            lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
-            kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
-            line = torch.tensor([kind, float(pool.cutoff), float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
-                                 float(len(lx))], dtype=f32)
-            mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.to(dev, f32).contiguous(), 1]
+            if pool.cutoff is None and pool.lineshape != "lorentzian":  # kind 3: the modes' sum of Lorentzians
+                from ..generalized_bloch import modes as green_modes
+
+                pm, cm = green_modes(pool.lineshape, pool.memory)
+                log_f = torch.tensor([[q.real, q.imag, c.real, c.imag] for q, c in zip(pm, cm)], dtype=torch.float64)
+                line = torch.tensor([3.0, 0.0, 0.0, 0.0, 0.0, float(len(pm))], dtype=f32)
+            else:
+                lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
+                kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
+                cut = 0.0 if pool.cutoff is None else float(pool.cutoff)
+                line = torch.tensor([kind, cut, float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
+                                     float(len(lx))], dtype=f32)
+            mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.reshape(-1).to(dev, f32).contiguous(), 1]
     else:
         if m_init is not None and m_init.shape[-1] == 4:
             raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")

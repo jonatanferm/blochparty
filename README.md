@@ -46,9 +46,11 @@ cell by `tests/test_engines.py`.
   by autograd. Every new effect lands here first.
 - `blochparty.metal.simulate_metal`: the engine for imaging-scale work, on the Apple GPU. Float32.
   Runs everything the core runs, free exchanging pools (CEST, up to five) included, except free
-  pools together with the generalized Bloch bound pool. Differentiable through a hand-written
-  adjoint on the GPU (sequence, phantom, coils, `m_init`, rate-model bound pool, scanner field
-  model; not moving spins or free pools).
+  pools together with the generalized Bloch bound pool. For CEST / MT saturation that combination is
+  not needed: the rate model with `BoundPool(cutoff=None)` (the generalized model's own lineshape,
+  no near-resonance cut) equals the generalized model to 5e-5 on 50 ms pulses and runs on the GPU
+  (ROADMAP M1c). Differentiable through a hand-written adjoint on the GPU (sequence, phantom, coils,
+  `m_init`, rate-model bound pool, scanner field model; not moving spins or free pools).
 - `blochparty.fused.simulate_fused`: a CPU kernel with a hand-written adjoint, float32 or float64.
   Frozen (no diffusion, motion or `FieldMaps`); due to retire now that Metal has an adjoint
   (ROADMAP M2).

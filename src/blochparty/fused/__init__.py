@@ -193,6 +193,9 @@ def _simulate_pools(phantom, seq, coils, *, m_init, n_threads, checkpoint_every,
     n = len(phantom)
     pools = [q.expand(n, pd) for q in phantom.pools]
     pool = None if phantom.bound is None else phantom.bound.expand(n, pd)
+    if pool is not None and pool.cutoff is None:
+        raise NotImplementedError("the lineshape without a cut (BoundPool.cutoff=None) is in blochparty.simulate"
+                                  " and the Metal kernel")
     if coils is None:
         sens = torch.zeros(n, 1, 2, dtype=dtype)
         sens[..., 0] = 1.0
@@ -287,6 +290,9 @@ def simulate_fused(
     else:
         sens = torch.stack([real(coils.real), real(coils.imag)], dim=-1)
     pool = None if phantom.bound is None else phantom.bound.expand(n, pd)
+    if pool is not None and pool.cutoff is None:
+        raise NotImplementedError("the lineshape without a cut (BoundPool.cutoff=None) is in blochparty.simulate"
+                                  " and the Metal kernel")
     if m_init is None:
         m0 = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], dim=-1)
     else:

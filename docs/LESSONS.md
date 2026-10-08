@@ -251,6 +251,30 @@ says where it came from so it can be re-checked.
   >= 64 steps: with 15 steps for a 22.8 us pi pulse its Heun free-pool rotation was 3e-3 off, and
   that error happened to *lower* the residual — a converged reference first, then conclusions.
 
+- **The rate and generalized bound-pool models differ at CEST offsets by a lineshape convention,
+  not by dynamics** (2026-10-09). On WM-like tissue with two free pools, 36 × 50 ms pulses at 2 µT
+  gave Z 1.2e-2 apart at ±3.5 ppm, yet 5e-6 apart with a Lorentzian pool: the rate model holds the
+  super-Lorentzian constant inside its 1 kHz cut, the generalized model's tapered Green's function
+  keeps rising toward resonance. The generalized model's lineshape is analytic: a Green's function
+  of modes Σ c_j e^{−p_j s/T2b} has the half-line transform T2b Re Σ c_j / (p_j + i x), a sum of
+  Lorentzians (`exchange.modes_lineshape`, `BoundPool(cutoff=None)`), and with it the two models
+  agree to 5e-5 on saturation pulses. Checked against quadrature of the tapered Green's function
+  (1.3e-4 to 10 kHz): the super-Lorentzian's own transform ∫₀^∞ exp(−x²s²/8) cos(kx) dx =
+  √(2π)/s · exp(−2k²/s²) is exactly the table's integrand, so the two normalisations agree by
+  construction. Which near-resonance convention is physical is still a model choice (BMCTool cuts
+  at ~150 Hz, Gloor at 1 kHz, the taper is Assländer's homogeneous broadening); real CEST data
+  with MT decide it, not this.
+- **The rate model needs pulses long against the Green's function's memory, not just against
+  T2b, when played on resonance** (2026-10-09). The taper memory is 300 T2b = 3 ms at T2b 10 µs:
+  60 hard 90° pulses of 0.5 to 2 ms stay 2 to 8e-3 from the generalized model with either
+  lineshape, 0.2 ms / 60° pulses 1.4e-3 (cut) or 2.3e-2 (no cut), 0.1 ms / 30° 4e-2 or 1e-1. The
+  1 kHz cut happens to approximate the short-pulse rotation better than the true long-pulse
+  lineshape does, which is why the cut-free lineshape is for saturation pulses only. Off
+  resonance by Δ the relevant time is 1 / Δ instead, so 50 ms CEST pulses at 447 Hz are safely
+  in the rate regime (ROADMAP M1c; `tests/test_pools.py`).
+- **A gradcheck step of 1e-6 on a parameter of 1e-5 is a 10 % perturbation**: check derivatives
+  w.r.t. T2b through a unit-scale multiplier (`t2 = 1e-5 * s`), or the mismatch looks like a bug.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.

@@ -314,3 +314,30 @@ def test_free_pools_moving_and_mapped(kind):
     out = metal.simulate_metal(ph, seq, coils, maps=maps, seed=2)
     assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
     assert float((out.m_pools.double() - ref.m_pools).abs().max()) < 1e-5 * float(ref.m.abs().max())
+
+
+@pytest.mark.parametrize("n_pools", [0, 2])
+def test_lineshape_without_cut(n_pools):
+    """BoundPool.cutoff=None: the shader sums the modes' Lorentzians (kind 3 of the lineshape table)
+    in the MT kernel (no free pools) and in the Bloch-McConnell kernels."""
+    from dataclasses import replace
+
+    from test_exchange import bm_case
+    from test_fused import with_readout
+
+    if n_pools == 0:
+        ph, seq = bm_case(0, "superlorentzian")
+        seq = with_readout(seq)
+        ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64))
+    else:
+        ph, seq = _pools_case(n_pools, True)
+    ph = replace(ph, bound=replace(ph.bound, cutoff=None))
+    coils = bp.birdcage_sensitivities(ph.pos, 4)
+    ref = bp.simulate(ph, seq, coils)
+    out = metal.simulate_metal(ph, seq, coils)
+    scale = float(ref.m.abs().max())
+    assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
+    assert float((out.m_bound.double() - ref.m_bound).abs().max()) < 1e-5 * scale
+    # the cut matters on this case: the two lineshapes give different bound pools in the core
+    cut = bp.simulate(replace(ph, bound=replace(ph.bound, cutoff=1e3)), seq, coils)
+    assert float((cut.m_bound - ref.m_bound).abs().max()) > 1e-4 * scale

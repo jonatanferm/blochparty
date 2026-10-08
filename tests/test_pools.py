@@ -312,3 +312,62 @@ def test_generalized_with_pools_approaches_the_rate_model_off_resonance(offset):
         return float(simulate(ph, bp.SequenceBuilder().rf(0.5, amplitude=64.0, n_steps=1).build()).m[0, 2])
 
     assert z("generalized") == pytest.approx(z("rate"), abs=2e-3)
+
+
+# ---------------------------------------------------------------- the lineshape without a cut (BoundPool.cutoff=None)
+
+
+def _wm_like(model, db0, cutoff):
+    """WM-like tissue at 3 T with an amide and a myelin-water pool; the spin sits at -offset so a
+    pulse at zero frequency saturates at +offset from the water."""
+    one = torch.ones(1, dtype=f64)
+    amide = ExchangePool(f=0.01, k=50.0, t1=1.0, t2=0.02, dw=3.5e-6 * 3 * bp.GAMMA_BAR)
+    myelin = ExchangePool(f=0.15, k=10.0, t1=0.5, t2=0.012, dw=0.0)
+    return Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=one, t1=one, t2=0.07 * one, db0=db0 * one,
+                   bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=10e-6, model=model, cutoff=cutoff), pools=(amide, myelin))
+
+
+def _pulsed_saturation(n_pulses=36, duration=50e-3, b1_ut=2.0, gap=5e-3):
+    b = bp.SequenceBuilder()
+    for _ in range(n_pulses):
+        b.rf(duration, amplitude=b1_ut * 1e-6 * bp.GAMMA_BAR, n_steps=1).delay(gap)
+    return b.build()
+
+
+@pytest.mark.parametrize("offset", [447.0, 1000.0, 3000.0, 10000.0])
+def test_rate_model_without_cut_equals_generalized_for_long_pulses(offset):
+    """Pulsed CEST saturation (36 x 50 ms at 2 uT, as the Pulseq-CEST APTw preparation): the rate
+    model with the tapered Green's function's lineshape (cutoff=None) equals the generalized Bloch
+    model to 5e-5 at every offset, where the default 1 kHz cut differs by 1e-2 in Z at the CEST
+    offsets inside it (measured 2026-10-09: 1.15e-2 at 447 Hz, 2.2e-4 at 3 kHz, 8.4e-4 at 10 kHz)."""
+    seq = _pulsed_saturation()
+    gen = simulate(_wm_like("generalized", -offset, 1e3), seq).m[0]
+    nocut = simulate(_wm_like("rate", -offset, None), seq).m[0]
+    assert float((nocut - gen).abs().max()) < 5e-5
+    if offset < 1e3:
+        cut = simulate(_wm_like("rate", -offset, 1e3), seq).m[0]
+        assert float((cut - gen).abs().max()) > 5e-3
+
+
+def test_rate_model_is_wrong_for_short_on_resonance_pulses_with_or_without_cut():
+    """Where the generalized model is needed (pulses short against the Green's function's memory,
+    300 T2b = 3 ms here, on resonance), neither rate variant reproduces it: 60 hard 0.2 ms 60 deg
+    pulses leave the water 1.4e-3 (cut) / 2.3e-2 (no cut) away from the generalized model. The
+    cut-free lineshape is for saturation pulses, not a substitute for the generalized model."""
+    b = bp.SequenceBuilder()
+    for i in range(60):
+        b.rf(0.2e-3, flip_deg=60.0, phase=math.pi * (i % 2)).delay(4.8e-3)
+    seq = b.build()
+    gen = simulate(_wm_like("generalized", 0.0, 1e3), seq).m[0]
+    nocut = simulate(_wm_like("rate", 0.0, None), seq).m[0]
+    assert float((nocut - gen).abs().max()) > 1e-2
+
+
+def test_cut_free_lineshape_rejected_by_the_fused_kernel():
+    from blochparty.fused import simulate_fused
+
+    ph = _wm_like("rate", 0.0, None)
+    with pytest.raises(NotImplementedError, match="cutoff=None"):
+        simulate_fused(replace(ph, pools=None), _pulsed_saturation(n_pulses=1))
+    with pytest.raises(NotImplementedError, match="cutoff=None"):
+        simulate_fused(ph, _pulsed_saturation(n_pulses=1))
