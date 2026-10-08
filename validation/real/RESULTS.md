@@ -342,6 +342,9 @@ grid; |Z| since the images are magnitudes):
 
 ![MAGMA Z-spectra](magma_zspectra.png)
 
+**On the Apple GPU** (`BLOCHPARTY_BACKEND=metal`, 2026-10-08): the table above reproduced digit for
+digit; Z within 8.3e-6 of the core over all tubes, voxels and offsets.
+
 The library's models do not reproduce these measurements: the agarose tubes are over-saturated
 (Z 0.47 vs 0.62 at +-4 ppm: MT pool or water T2 = 50 ms off) and the CEST asymmetry is 1.4-2.5x
 too large; playing the 3.5 s recovery from a saturated readout instead of the library's reset
@@ -393,6 +396,22 @@ amide f 1.5-2.8e-3, k 210-880 Hz; the hydroxyl pool is poorly determined (bounds
 | 8 | 0.022 | 0.026 | 0.048 | -0.028 / -0.022 |
 
 ![iohexol prediction](iohexol_prediction.png)
+
+**On the Apple GPU** (`BLOCHPARTY_BACKEND=metal uv run python validation/real/iohexol.py predict`,
+2026-10-08): the table above reproduced digit for digit (median prediction rms 0.022, correlation
+0.75), the whole `predict` run in 27 s. One pass of the simulation, core vs Metal (Z within
+3.5e-7 of the core):
+
+| spectra call | core | Metal | |
+|---|---|---|---|
+| 8 tubes, 15 pulses, 100 us RF steps (prediction) | 37.6 s | 5.5 s | 7x |
+| 8 tubes x 8 parameter sets, 15 pulses, 200 us (one fit iteration) | 141 s | 5.7 s | 25x |
+| 8 tubes, 40 pulses, 100 us (prediction) | 114 s | 8.6 s | 13x |
+
+The GPU time is mostly two kinds of slow spins: the M0 offset at -1500 ppm (~80 Taylor sub-steps
+per 100 us RF sample, the other offsets ~2; it bounds a call at ~1.5 s however few spins) and
+tube 8's hydroxyl exchange at its 40 kHz bound (~280 sub-steps per 5.2 ms readout TR). Free segments
+could be made exact and cached (ROADMAP M1a, "Left").
 
 The prediction beats "no change" in every tube (median 0.022 vs 0.032) and the predicted change
 correlates 0.75 with the measured one over all tubes and offsets, but the CEST build-up from 1.5 to

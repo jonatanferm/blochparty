@@ -11,6 +11,14 @@ exchange around the free pool's rotation on a 10 µs RF raster. Z = Mz / Mz(−3
 
 ## Results
 
+**On the Apple GPU** (`BLOCHPARTY_BACKEND=metal`, float32, 2026-10-08): Lorentzian max |ΔZ| 6.5e-7
+(the core 5.8e-7), `.seq` path max |ΔMz| 2.0e-5 (2.1e-5); BMCTool's 5-pool CEST model (four free
+pools) max |ΔZ| 8.3e-7; super-Lorentzian 1.2e-1 as the core (the lineshape definitions differ; the
+replica check below patches a Python function the GPU does not call). 0.2 s for the 30 offsets as
+spins (the core 12.8 s), 2 s for the `.seq` path (122 s). Before the RF segments' increments were
+added by two-sum (M1a), the GPU was 1.2e-2 off here: float32 rounding of the whole state over the
+1e5 RF segments of the 1 s CW pulse.
+
 - **Lorentzian (identical lineshape definitions): max |ΔZ| = 5.8e-7** over 30 offsets, the
   bound pool's asymmetry included (MTR_asym at 3 ppm +0.0050 in both). Through the `.seq`
   file (`read_pulseq`, RF frequency from the phase ramp, spoilers as ideal spoils): max |ΔMz|
