@@ -27,7 +27,9 @@ Three conditions, each testable. The core is done when all three hold.
 1. **Parity.** The Metal kernel runs everything the PyTorch core runs (since M1a, free pools
    too; since M1b, moving spins under the field model; since M1c, free pools with motion,
    diffusion and `FieldMaps`), with one exception: free pools together with the generalized
-   Bloch bound pool, which only the core runs (`docs/ENGINES.md`, M1c).
+   Bloch bound pool, which only the core runs (`docs/ENGINES.md`, M1c). Since 2026-10-09 the
+   exception is confined to short, intense pulses: for saturation pulses the rate model with
+   `BoundPool(cutoff=None)` reproduces the generalized model on the GPU (M1c).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
    design need (M2). Without it, "differentiable" holds only for the CPU reference and the
    frozen fused kernel.
@@ -195,9 +197,43 @@ acquires Bernstein's velocity-dependent phase for a moving one.
       Mzb on a Lorentzian random case (sub-steps ≤ T2b / 2 whatever the segment length); the
       exact engine matches the ODE to 1e-13 there.
 - [ ] The same on **Metal** (raises): 2J ≈ 60 extra components per Taylor vector (super-Lorentzian
-      J = 30) is beyond the register budget of the `_bm` kernels; either keep the modes in
-      thread memory as the `_gen` variant does (slow, but this combination is rare), or decide it
-      is not needed. Until then the parity condition has this one exception.
+      J = 30) is beyond the register budget of the `_bm` kernels. Resolved for the regime that
+      matters by **(A) the cut-free lineshape** (2026-10-09, below); **(B)**, below, is the plan if
+      the remaining regime is ever needed. Until then the parity condition has this one exception.
+- [x] **(A) `BoundPool(cutoff=None)`** (2026-10-09): the rate model's lineshape is then the
+      half-line Fourier transform of the generalized model's tapered Green's function, as a sum of
+      Lorentzians over its 30 modes (`exchange.modes_lineshape`; Metal: lineshape kind 3, same
+      buffers, no new kernel; the fused kernel raises). Measured first: with the default 1 kHz cut,
+      rate and generalized model differed by 1.2e-2 in Z after a 36 × 50 ms, 2 µT saturation train
+      at 3.5 ppm on WM-like tissue with two free pools (2.2e-4 at 3 kHz, 8.4e-4 at 10 kHz); with a
+      Lorentzian pool they agree to 5e-6, so the gap was the near-resonance convention, not the
+      dynamics. Without the cut: ≤ 5e-5 at every offset (9.6e-6 at 447 Hz). Verified: the modes
+      sum equals quadrature of the tapered Green's function's transform to 1.3e-4 up to 10 kHz
+      (3.8e-3 at 30 kHz, where G is 2e-3 of its peak), is finite on resonance (8.39 T2b), within
+      0.75 % of the untapered table from 200 Hz to 10 kHz, even, exact for a Lorentzian pool,
+      gradcheck; Metal `_full` and `_bm1`/`_bm2` kernels vs the core 5e-7 (signal), ≤ 1e-7
+      (states); snapshot bit-identical; engine matrix row with the fused raise.
+      **Where it does not help**: pulses short against the Green's function's memory
+      (300 T2b = 3 ms at T2b 10 µs) played on resonance. 60 hard pulses of 0.2 ms / 60° leave
+      the water 1.4e-3 (cut) and 2.3e-2 (no cut) from the generalized model; 0.1 ms / 30°:
+      3.9e-2 and 1.1e-1; 0.5 to 2 ms / 90°: 2 to 8e-3 either way. There the pool rotates and
+      neither rate variant is right (`tests/test_pools.py`).
+- [ ] **(B) Generalized bound pool with free pools on Metal by operator splitting**, if needed:
+      keep the mode state in the device buffer the `_gen` variant already uses (`U`, 2J × N), and
+      per RF sub-step do a half step of the existing mode and bound-pool rotation (`step_gen`'s
+      "pool about the RF alone" block), a full Taylor step of water + free pools with the bound
+      exchange rows and no saturation rate, then the second half step; Strang, second order. The
+      Taylor vector stays at its current size, so no register growth. Verify against the core's
+      exact engine (expect ~1e-4, the level of the core's own split engine). It inherits the
+      `_gen` cost of sub-steps at T2b / 2, which makes it wrong for 50 ms saturation pulses
+      (10⁴ sub-steps each; A covers those) and right for hard pulses ≲ 0.3 ms. **When we will
+      need it**: imaging with free pools *and* short intense on-resonance pulses, i.e. MRF or
+      bSSFP-style trains of ≲ 0.3 ms hard pulses on tissue with a CEST or myelin-water pool, or
+      inversion / refocusing hard pulses in an MT + CEST protocol, at imaging scale (the core
+      already runs it exactly for small cases). None of the nine real-data benchmarks is in this
+      regime; benchmark 9 (iohexol, no MT) and the Pulseq-CEST protocols use 50 to 100 ms pulses.
+      Not recommended: the 60 mode components in thread memory with the exact Taylor step (the
+      modes make A dt stiff, so it needs the same sub-steps and is no more accurate than B).
 - [x] Free pools with diffusion or motion (2026-10-08): positions, walks and the field model per
       segment in the exact engine, core and Metal (`_bm*_diff` kernels; spins not cost-sorted
       when moving: walks are keyed by spin index). Inert pools equal the single-pool path with the

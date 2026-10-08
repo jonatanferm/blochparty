@@ -12,7 +12,8 @@ import torch
 from scipy.integrate import quad, solve_ivp
 
 from blochparty import Phantom, SequenceBuilder, simulate
-from blochparty.exchange import BoundPool, lineshape, lorentzian, rf_frequency, superlorentzian, z_exchange
+from blochparty.exchange import (BoundPool, lineshape, lorentzian, modes_lineshape, pool_modes, rf_frequency,
+                                 superlorentzian, z_exchange)
 
 f64 = torch.float64
 
@@ -35,6 +36,37 @@ def test_superlorentzian_matches_quadrature_and_has_unit_area():
     assert area(lorentzian(d, t2)) == pytest.approx(2 / math.pi * (math.atan(x_hi) - math.atan(x_lo)), abs=1e-6)
     # held constant inside the cutoff
     assert float(superlorentzian(torch.tensor(10.0, dtype=f64), t2)) == float(superlorentzian(torch.tensor(1e3, dtype=f64), t2))
+
+
+def test_lineshape_without_cut_is_the_tapered_green_functions_transform():
+    """cutoff=None: G(2 pi delta) = T2b Re sum_j c_j / (p_j + i x) over the Green's function's modes equals
+    the half-line Fourier transform of the tapered super-Lorentzian Green's function itself
+    (``generalized_bloch.green``, memory 300 T2b, trapezoid on 8e5 points to 3000 T2b) to 1.3e-4 up to
+    10 kHz at T2b = 10 us (the modes fit G to 4e-5; 3.8e-3 at 30 kHz, where G is 2e-3 of its peak), is
+    finite on resonance (8.39 T2b), differs from the untapered table by <= 0.75 % up to 10 kHz, is even in
+    delta, equals the Lorentzian exactly for a Lorentzian pool, and is differentiable."""
+    from blochparty.generalized_bloch import green
+
+    t2 = 10e-6
+    pool = BoundPool(f=0.1, k=30.0, t1=1.0, t2=torch.tensor(t2, dtype=f64), cutoff=None)
+    x = np.concatenate([np.linspace(0, 10, 200_001), np.linspace(10, 3000, 600_001)[1:]])  # lags in T2b
+    g = green(x, 1.0, "superlorentzian", 300.0)
+    for hz, tol in ((0.0, 5e-5), (447.0, 1e-5), (1e3, 2e-5), (3e3, 1e-4), (1e4, 3e-4), (3e4, 1e-2)):
+        d = torch.tensor(hz, dtype=f64)
+        quad = t2 * np.trapezoid(g * np.cos(2 * math.pi * hz * t2 * x), x)
+        assert float(lineshape(pool, d)) == pytest.approx(quad, rel=tol), hz
+        if 0 < hz <= 1e4:
+            assert float(lineshape(pool, d)) == pytest.approx(float(superlorentzian(d, pool.t2, cutoff=1e-9)), rel=1e-2)
+    assert float(lineshape(pool, torch.tensor(0.0, dtype=f64))) == pytest.approx(8.389 * t2, rel=1e-3)
+    d = torch.linspace(-5e3, 5e3, 11, dtype=f64)
+    assert float((lineshape(pool, d) - lineshape(pool, -d)).abs().max()) < 1e-18
+    lor = BoundPool(f=0.1, k=30.0, t1=1.0, t2=torch.tensor(t2, dtype=f64), lineshape="lorentzian", cutoff=None)
+    assert float((lineshape(lor, d) - lorentzian(d, lor.t2)).abs().max()) == 0.0
+    p, c = pool_modes(pool, d)  # T2b as 1e-5 x s so the finite-difference step is small against it
+    assert torch.autograd.gradcheck(lambda dd, s: modes_lineshape(dd, 1e-5 * s, p, c),
+                                    (d.clone().requires_grad_(), torch.tensor(1.0, dtype=f64, requires_grad=True)))
+    with pytest.raises(ValueError, match="cutoff"):
+        BoundPool(f=0.1, k=30.0, t1=1.0, t2=t2, cutoff=0.0)
 
 
 def test_rf_frequency_sign_matches_resonance():

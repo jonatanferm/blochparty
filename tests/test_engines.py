@@ -174,6 +174,11 @@ def case_bound_generalized(leaf):
     return _with_bound(leaf, 1, "generalized")
 
 
+def case_bound_rate_nocut(leaf):
+    ph, seq, kw = _with_bound(leaf, 2, "rate")
+    return replace(ph, bound=replace(ph.bound, cutoff=None)), seq, kw
+
+
 def _pools(leaf, with_bound):
     ph, seq = pool_case(0, with_bound)
     seq = with_readout(seq)
@@ -373,6 +378,7 @@ CASES = {
     "FieldMaps, static spins": case_maps_static,
     "FieldMaps, moving spins": case_maps_moving,
     "bound pool, rate model": case_bound_rate,
+    "bound pool, rate model without a cut (cutoff=None)": case_bound_rate_nocut,
     "bound pool, generalized Bloch": case_bound_generalized,
     "free pools (Phantom.pools)": case_pools,
     "free pools + rate bound pool": case_pools_rate,

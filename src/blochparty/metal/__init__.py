@@ -176,6 +176,17 @@ inline float lineshape(float delta, float t2b, constant float* line, constant fl
         const float x = TWO_PI * delta * t2b;
         return t2b / (1.0f + x * x);
     }
+    if (line[0] > 2.5f) {  // no cut (cutoff=None): the tapered Green's function's transform from its
+        // modes, G = T2b Re sum_j c_j / (p_j + i x); log_f holds (Re p, Im p, Re c, Im c) per mode
+        const float x = TWO_PI * delta * t2b;
+        const int nj = int(line[5]);
+        float g = 0.0f;
+        for (int j = 0; j < nj; ++j) {
+            const float pr = log_f[4 * j], pim = log_f[4 * j + 1] + x, cr = log_f[4 * j + 2], ci = log_f[4 * j + 3];
+            g += (cr * pr + ci * pim) / (pr * pr + pim * pim);
+        }
+        return t2b * g;
+    }
     const float x = TWO_PI * max(fabs(delta), line[1]) * t2b;
     if (x > 30.0f) return 0.0f;
     const int n = int(line[5]);
@@ -1198,11 +1209,19 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             mt_bufs += [dummy, dummy, dummy, 2]
         else:
             frf = exchange.rf_frequency(seq.to(dtype=torch.float64, device="cpu")).detach()
-            lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
-            kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
-            line = torch.tensor([kind, float(pool.cutoff), float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
-                                 float(len(lx))], dtype=f32)
-            mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.to(dev, f32).contiguous(), 1]
+            if pool.cutoff is None and pool.lineshape != "lorentzian":  # kind 3: the modes' sum of Lorentzians
+                from ..generalized_bloch import modes as green_modes
+
+                pm, cm = green_modes(pool.lineshape, pool.memory)
+                log_f = torch.tensor([[q.real, q.imag, c.real, c.imag] for q, c in zip(pm, cm)], dtype=torch.float64)
+                line = torch.tensor([3.0, 0.0, 0.0, 0.0, 0.0, float(len(pm))], dtype=f32)
+            else:
+                lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
+                kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
+                cut = 0.0 if pool.cutoff is None else float(pool.cutoff)
+                line = torch.tensor([kind, cut, float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
+                                     float(len(lx))], dtype=f32)
+            mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.reshape(-1).to(dev, f32).contiguous(), 1]
     else:
         if m_init is not None and m_init.shape[-1] == 4:
             raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")

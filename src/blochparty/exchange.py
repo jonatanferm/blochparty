@@ -23,6 +23,13 @@ absorption lineshape in BMCTool's normalisation (G = pi g, with g of unit area o
   integral outside it: near the pool (CEST offsets) the two conventions differ by up to 0.12
   in Z (``validation/compare_bmctool.py``). The near-resonance super-Lorentzian is a model
   choice, not physics this model can settle.
+* ``cutoff=None``: no cut. G is then the half-line Fourier transform of the *tapered* Green's
+  function of the generalized Bloch model (``generalized_bloch.green`` with ``memory``), finite on
+  resonance, computed from its exponential modes as a sum of Lorentzians,
+  G = T2b Re sum_j c_j / (p_j + i x) (``modes_lineshape``). This is the lineshape the
+  generalized model saturates with, so with it the rate model and the generalized model agree
+  wherever pulses are long against T2b (CEST saturation), instead of differing by ~1e-2 in Z at
+  the CEST offsets (inside the 1 kHz cut) as they do with the default cut.
 
 Delta is the offset of the RF from the bound pool's resonance: the RF's instantaneous
 frequency (from the phase of consecutive RF samples, ``rf_frequency``) minus the spin's
@@ -59,7 +66,9 @@ class BoundPool:
     t2: Tensor  # [s], sets the lineshape width (~10 us in tissue)
     dw: Tensor | float = 0.0  # resonance shift from water [Hz]
     lineshape: str = "superlorentzian"
-    cutoff: float = SL_CUTOFF  # [Hz] the super-Lorentzian is held constant closer to resonance (rate model)
+    # [Hz] the super-Lorentzian is held constant closer to resonance (rate model); None: no cut, the
+    # tapered Green's function's lineshape from its modes (``modes_lineshape``; ``memory`` sets the taper)
+    cutoff: float | None = SL_CUTOFF
     # "rate": saturation at W = w1^2 G (Graham); "generalized": the generalized Bloch model, RF
     # rotates the pool through modes of its lineshape's Green's function (generalized_bloch.modes)
     model: str = "rate"
@@ -72,6 +81,8 @@ class BoundPool:
             raise ValueError(f"lineshape must be one of {LINESHAPES}, got {self.lineshape!r}")
         if self.model not in ("rate", "generalized"):
             raise ValueError(f"model must be 'rate' or 'generalized', got {self.model!r}")
+        if self.cutoff is not None and not self.cutoff > 0:
+            raise ValueError(f"cutoff must be positive or None, got {self.cutoff!r}")
 
     def expand(self, n: int, like: Tensor) -> BoundPool:
         conv = lambda v: torch.as_tensor(v, dtype=like.dtype, device=like.device).expand(n)
@@ -143,9 +154,22 @@ def lorentzian(delta: Tensor, t2: Tensor) -> Tensor:
     return t2 / (1 + x * x)
 
 
+def modes_lineshape(delta: Tensor, t2: Tensor, poles: Tensor, weights: Tensor) -> Tensor:
+    """G(2 pi delta) [s] of a Green's function given as modes, G(s) = sum_j c_j exp(-p_j s / T2):
+    its half-line Fourier transform G = T2 Re sum_j c_j / (p_j + i x), x = 2 pi delta T2 (the
+    Lorentzian, one mode p = c = 1, gives T2 / (1 + x^2); the super-Lorentzian's untapered transform
+    is ``superlorentzian`` without its cut). ``poles``, ``weights``: (J,) complex (``pool_modes``);
+    differentiable in ``delta`` and ``t2``."""
+    x = 2 * math.pi * delta * t2
+    terms = weights / (poles + 1j * x.to(poles.dtype)[..., None])
+    return t2 * terms.real.sum(-1)
+
+
 def lineshape(pool: BoundPool, delta: Tensor) -> Tensor:
     if pool.lineshape == "lorentzian":
         return lorentzian(delta, pool.t2)
+    if pool.cutoff is None:
+        return modes_lineshape(delta, pool.t2, *pool_modes(pool, delta))
     return superlorentzian(delta, pool.t2, pool.cutoff)
 
 
