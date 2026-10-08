@@ -5,3 +5,4 @@ __pycache__/
 outputs/
 .claude/worktrees/
 validation/real/data/
+.claude/settings.local.json
