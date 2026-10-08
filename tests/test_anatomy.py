@@ -259,6 +259,7 @@ def test_gpu_equals_core():
     assert error < 1e-5
 
 
+@pytest.mark.slow
 def test_variability_statistics_and_defaults():
     # a 96^3 one-tissue anatomy at 1 mm, L = 4 mm: the realised log-SD, mean and correlation at
     # lag L match the request within 10 %; T1 / T2 / PD fields are independent; default is off

@@ -89,6 +89,7 @@ def test_gradients_match_simulate(spin_chunk, checkpoint_every):
         assert rel(out[k], ref[k]) <= 1e-10, (k, rel(out[k], ref[k]))
 
 
+@pytest.mark.slow
 def test_gradcheck_tiny():
     n = 5
     g = torch.Generator().manual_seed(0)

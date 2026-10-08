@@ -9,6 +9,7 @@ order reached by the time of an echo the two models agree to round-off.
 
 import math
 
+import pytest
 import torch
 
 from blochparty import Phantom, SequenceBuilder, simulate
@@ -118,6 +119,7 @@ def test_rf_spoiling_approaches_ernst_but_gradient_spoiling_alone_does_not():
     assert abs(abs(grad_only[-1]) / ss - 1) > 0.1
 
 
+@pytest.mark.slow
 def test_bssfp_steady_state_closed_form():
     t1, t2, tr, flip = 0.4, 0.1, 5e-3, 40.0
     e1, e2, a = math.exp(-tr / t1), math.exp(-tr / t2), math.radians(flip)

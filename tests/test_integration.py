@@ -28,6 +28,7 @@ def realistic_gre(flip=20.0):
                      ramps=True)
 
 
+@pytest.mark.slow
 @needs_fused
 def test_fused_matches_core_on_realistic_inputs(phantom):
     flip = torch.tensor(20.0, dtype=torch.float64, requires_grad=True)

@@ -264,6 +264,7 @@ def test_float32_gradients():
         assert rel(t32[k].to(ref[k].dtype), ref[k]) <= 2e-5, k
 
 
+@pytest.mark.slow
 def test_optimize_contrast_example():
     # the example asserts that gradient descent through the fused adjoint lands within
     # 0.05 deg of the analytic optimum
@@ -273,6 +274,7 @@ def test_optimize_contrast_example():
     assert "analytic optimum: 16.109 deg" in out.stdout
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("c++") is None, reason="no C++ compiler")
 def test_kernel_builds_standalone(tmp_path):
     # kernel.h needs neither PyTorch nor more than C++17; finite differences in plain C++

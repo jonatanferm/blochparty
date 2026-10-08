@@ -241,6 +241,7 @@ def test_epi_kspace(ramps):
 # --- the same sequence written with pypulseq ---------------------------------------------
 
 
+@pytest.mark.slow
 def test_gre_matches_pypulseq_written_equivalent():
     pp = pytest.importorskip("pypulseq")
     from blochparty.pulseq import read_pulseq

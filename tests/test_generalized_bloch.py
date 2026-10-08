@@ -112,6 +112,7 @@ def test_engine_converges_second_order():
     assert 3.5 < err[0] / err[1] < 5 and 3.5 < err[1] / err[2] < 5, err
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("offset", [2e3, 5e3, 1e4])
 def test_off_resonant_saturation_agrees_with_rate_model(offset):
     # long off-resonant saturation is the rate model's regime: both give the same Z (the tapered
@@ -126,6 +127,7 @@ def test_off_resonant_saturation_agrees_with_rate_model(offset):
     assert z("generalized") == pytest.approx(z("rate"), abs=2e-3)
 
 
+@pytest.mark.slow
 def test_engine_gradients():
     ph = single_pool("superlorentzian", f=0.15, k=30.0)
     seq = bp.SequenceBuilder().rf(100e-6, flip_deg=120.0, n_steps=8).delay(2e-3).rf(60e-6, flip_deg=70.0, n_steps=4).build()

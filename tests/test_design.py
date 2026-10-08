@@ -126,6 +126,7 @@ def test_instantaneous_steps_are_reported_with_segments_and_excess():
     assert report["violations"][0].startswith("slew x exceeded at 38 boundaries (2 ranges); worst in boundaries 2–20")
 
 
+@pytest.mark.slow
 def test_pns_follows_the_hyperbolic_strength_duration_law():
     # one ramp: R = S/rheobase * tau / (c + tau), i.e. threshold slew rheobase * (1 + c / tau).
     # Sampled on a raster dt, the ramp's corners are rounded over dt: first-order error, < dt / tau
@@ -223,6 +224,7 @@ def test_psf_with_t2_decay_matches_closed_form_weighting(fused):
 # --- Cramér-Rao bound ----------------------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_crb_matches_closed_form(fused):
     flips = f64([5.0, 30.0])
     expected = float(despot1.closed_form_cov(*torch.deg2rad(flips)))
@@ -255,6 +257,7 @@ def test_despot1_optimum_gives_71_percent_of_ernst(fused):
         assert abs(despot1.ernst_fraction(a) - 0.71) < 0.005  # Deoni 2003
 
 
+@pytest.mark.slow
 @tr_with_grad
 def test_contrast_with_free_tr_under_scan_time_budget(fused):
     budget = (contrast_tr.N_DUMMY + contrast_tr.N) * 10e-3

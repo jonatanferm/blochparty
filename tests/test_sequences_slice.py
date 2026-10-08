@@ -127,6 +127,7 @@ def test_slice_offset_moves_the_slice_to_plus_z0():
     assert abs((z.numpy() * a).sum() / a.sum() + 4e-3) < 0.01 * THK
 
 
+@pytest.mark.slow
 def test_selective_gre_excites_only_the_slice():
     # the builder's slice-selective GRE: spins outside the slice give no signal
     seq = bp.gre_2d(8, slice_thickness=THK, slice_offset=2e-3, ramps=True, spoiling="ideal")

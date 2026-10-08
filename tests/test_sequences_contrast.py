@@ -5,6 +5,7 @@ profile, and the EPI off-resonance shift along the phase-encode direction."""
 
 import math
 
+import pytest
 import torch
 
 import blochparty as bp
@@ -171,6 +172,7 @@ def test_epi_off_resonance_shifts_along_phase_encode():
 # --- gradients through the new builders ------------------------------------------------------
 
 
+@pytest.mark.slow
 def test_autograd_through_realistic_builders():
     # flip angles (excitation, a variable refocusing train, slice-selective sinc) reach the
     # signal through the block assembly; checked against finite differences

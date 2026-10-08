@@ -38,6 +38,7 @@ def signals(sim, ph, qs, delta, big_delta, **kw):
     return np.array([float(sim(ph, sgp(q, delta, big_delta), seed=2, **kw).signal[0, 0].abs()) / len(ph) for q in qs])
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("kind, axis, power", [("sphere", None, 3), ("cylinder", (0.0, 0.0, 1.0), 2)])
 def test_equilibrium_is_uniform(kind, axis, power):
     # specular reflection keeps the uniform density (a radial mirror left the wall shell 11 % empty)
@@ -86,6 +87,7 @@ def test_planes_tanner_stejskal(metal, big_delta):
     assert np.abs(sim - ref).max() < 3e-3, (sim, ref)
 
 
+@pytest.mark.slow
 def test_sphere_and_cylinder_long_time_limits(metal):
     n, r_c = 1_000_000, 5e-6
     qs = np.array([0.6, 1.0, 1.4, 2.0]) / r_c

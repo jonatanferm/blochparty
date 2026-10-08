@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import torch
 
-pytestmark = pytest.mark.crosscheck
+pytestmark = [pytest.mark.crosscheck, pytest.mark.slow]  # slow: excluded by -m 'not slow' too
 pytest.importorskip("pypulseq")
 pytest.importorskip("MRzeroCore")
 sys.path.insert(0, str(Path(__file__).parents[1] / "validation"))

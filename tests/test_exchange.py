@@ -150,6 +150,7 @@ def test_bloch_mcconnell_matches_ode_second_order(seed, shape):
     assert (ref[:, 3] < 0.97 * (ph.bound.f * ph.pd).numpy()).all()
 
 
+@pytest.mark.slow
 def test_cw_saturation_reaches_linear_algebra_steady_state():
     # long continuous-wave saturation: the free pool's Mz approaches the steady state of the
     # 4x4 linear system (the RF is static in its own frame); classic MT (Z-spectrum) physics.
@@ -176,6 +177,7 @@ def test_cw_saturation_reaches_linear_algebra_steady_state():
         assert float(res.m_bound[0]) == pytest.approx(ss[3], abs=5e-6), offset
 
 
+@pytest.mark.slow
 def test_gradients_reach_bound_pool_parameters():
     ph, seq = bm_case(0, "superlorentzian")
     ph = replace(ph, pos=ph.pos[:2], pd=ph.pd[:2], t1=ph.t1[:2], t2=ph.t2[:2], db0=ph.db0[:2], bound=ph.bound[:2])

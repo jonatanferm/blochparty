@@ -21,5 +21,6 @@ build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m crosscheck)"]
+markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m crosscheck)",
+           "slow: over ~1 s; pytest -m 'not slow' is the quick subset for iterating (under a minute)"]
 addopts = "-m 'not crosscheck'"
