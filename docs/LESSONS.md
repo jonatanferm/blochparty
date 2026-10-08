@@ -7,6 +7,21 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Float32 drifts wherever a step rewrites the whole state.** Every Metal variant drifted from the
+  float64 core by 1e-3 in Mz per 1e4 RF segments (1e-2 after 1e5 segments of 10 µs CW), because
+  each RF segment rotated m by a tiny angle (cos φ ≈ 1 − 1e-5) and rounded all of it. Writing the
+  step as an increment (m += s1 w×m + s2 w×(w×m), relaxation and exchange increments) and adding it
+  by Knuth's two-sum into a per-spin low part brought it to ≤ 3e-7 at no measurable cost. Free
+  segments (exact rotation, `mz += (mz − pd) e1`) still drift ~1.5e-5 per 1e5 segments. The short
+  parity tests never saw it; the BMCTool MT comparison through Metal (1.2e-2 vs the core's 5.8e-7)
+  did. Source: M1a, 2026-10-08.
+- **A float32 matrix exponential per segment fails over a CEST train.** Prototyped against the
+  float64 core: dense `matrix_exp` in float32 was 1e-2 off after 2000 segments of benchmark 9's
+  saturation (2e-2 after 6000) and 3.5e-4 on a stiff case; a Taylor series applied to the state
+  (structured A·v, sub-steps of norm ≤ 1.5, common precession of free segments rotated exactly)
+  3.3e-5; with the increment added by two-sum 2-3e-7. The Taylor scheme in float64 was exact to
+  3e-11, so all the error was state rounding. Source: M1a prototype, 2026-10-08.
+
 - **The restricted walk is discontinuous in D, and a lucky D sits on a jump.** Sub-steps per
   segment are ceil(dt / tau_max) with tau_max = min over spins of R² / (200 D), so the walk (new
   Philox draws per sub-step) changes discretely with D or R. With D = 2e-9 m²/s and R = 5 µm,
@@ -448,6 +463,19 @@ says where it came from so it can be re-checked.
 
 ## Performance
 
+- **On the Apple GPU a runtime loop bound over per-thread arrays puts them in memory.** The free-pool
+  kernel with the pool count as a runtime value ran 2.7x slower than with it as a template
+  parameter (one kernel per count, loops unrolled). An array of pointers into the state, suspected
+  first, made no difference. Source: M1a, 2026-10-08.
+- **A simdgroup waits for its slowest lane: sort the work.** Free-pool segments cost Taylor
+  sub-steps in proportion to |A| dt; a CEST spectrum's M0 offset at −1500 ppm is ~80 sub-steps per
+  100 µs RF sample against ~2 for the other offsets. Scattered over the simdgroups, 30k spins took
+  18 s; sorted by an estimated cost, 3.3 s. With few spins the slowest spin's sequential work
+  bounds the run (~1.5 s for 15k segments, wherever it sits). Source: M1a, 2026-10-08.
+- **Metal's default fast math keeps a two-sum.** Adding 3e-8 to 1.0 1e5 times: the naive float sum
+  stays 1.0, the two-sum's error term recovers 1.003002 (exact 1.003000); `#pragma METAL fp
+  math_mode(safe)` changed nothing (torch 2.14 `compile_shader`, macOS 26). Source: M1a, 2026-10-08.
+
 - **At realistic sizes the PyTorch core is memory-bandwidth bound**, not Python bound (~20 µs
   fixed overhead per segment). Porting the same ops to LibTorch would not help; a fused kernel
   does (11–16× over the closed-form core; 43× over the original at 3D 64³).
@@ -524,6 +552,13 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **A validation script's entry point goes last.** `compare_bmctool.py` defined `cest_comparison`
+  after `if __name__ == "__main__": main()`, so running it as a script died with a NameError
+  before the CEST section; found when rerunning it through Metal. Source: M1a, 2026-10-08.
+- **A check that patches a Python function does not reach the GPU.** BMCTool's super-Lorentzian
+  replica is swapped into `exchange` for one comparison; Metal reads its own lineshape table, so
+  under `BLOCHPARTY_BACKEND=metal` that row shows the unpatched 1.2e-1. Source: M1a, 2026-10-08.
 
 - **A finite-difference check must rebuild its inputs.** Perturbing leaf tensors in place misses
   everything derived from them when the case was built (`apply_girf` output, `subdivide_rf`

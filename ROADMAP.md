@@ -24,10 +24,10 @@ hardware come when other machines exist (M8).
 
 Three conditions, each testable. The core is done when all three hold.
 
-1. **Parity.** The Metal kernel runs everything the PyTorch core runs. Today it refuses only
-   free exchanging pools; both engines refuse motion under gradient nonlinearity or concomitant
-   fields, diffusion with exact concomitant fields, and free pools with the generalized bound
-   pool, diffusion, motion or `FieldMaps` (`docs/ENGINES.md`, M1).
+1. **Parity.** The Metal kernel runs everything the PyTorch core runs (since M1a, free pools
+   too). Both engines refuse motion under gradient nonlinearity or concomitant fields, diffusion
+   with exact concomitant fields, and free pools with the generalized bound pool, diffusion,
+   motion or `FieldMaps` (`docs/ENGINES.md`, M1b, M1c).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
    design need (M2). Without it, "differentiable" holds only for the CPU reference and the
    frozen fused kernel.
@@ -106,7 +106,22 @@ Verify: suite green; snapshot identical; the matrix agrees with the raises.
 
 ## M1. Metal parity (3 to 4 days)
 
-### M1a. Free exchanging pools on the GPU
+### M1a. Free exchanging pools on the GPU — done 2026-10-08
+
+Done, with a different design than planned below: a float32 matrix exponential per segment was
+1e-2 off over the 2000 segments of a CEST train, so the kernel applies exp(A dt) to the state by a
+Taylor series on sub-steps (no matrix), common precession of free segments factored out exactly,
+increments added by two-sum; one kernel per pool count (`_bm1` .. `_bm5`), spins sorted by cost.
+Agreement with the core ≤ 1e-6 on the tests, ≤ 3.5e-7 in Z on benchmark 9, 8.3e-6 on benchmark 8,
+BMCTool 8.3e-7 (5 pools) and 6.5e-7 (MT); benchmarks 8 and 9 reproduce their tables; benchmark 9's
+fit forward 141 s → 5.7 s (`validation/real/RESULTS.md`). Found on the way and fixed: every Metal
+variant drifted 1e-2 from the core over 1e5 RF segments (float32 rounding of the whole state each
+segment), now ≤ 3e-7. Left: free segments with fast exchange cost sub-steps in proportion to
+k dt (benchmark 9's readout, k = 40 kHz over 5.2 ms TRs: ~280); an exact propagator per spin,
+cached on dt (free segments only depend on dt once the precession is factored out), would make them
+one small matrix-vector product.
+
+The original plan:
 
 The core (`bloch._simulate_exchange`) builds one augmented Bloch–McConnell matrix per segment
 (`exchange._bm_matrix`, size d = 3(P+1) + nb + 1 for P free pools and nb ∈ {0, 1} bound pools)
