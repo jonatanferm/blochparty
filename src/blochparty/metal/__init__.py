@@ -23,9 +23,18 @@ Magnetization transfer (``Phantom.bound``): the bound pool's Mz is a fourth stat
 longitudinal relaxation the exact exchange step of ``exchange.py``, saturated during RF (about
 +15 % on a 3D GRE).
 
+Free exchanging pools (``Phantom.pools``, up to ``MAX_POOLS``, with or without the rate-model bound
+pool): the Bloch-McConnell system of ``bloch._simulate_exchange``, one kernel per pool count
+(``_bm1`` ...). Each segment applies exp(A dt) to the state by a Taylor series on sub-steps, the
+common precession of free segments factored out exactly, increments added by two-sum; a float32
+matrix exponential per segment was 1e-2 off over a CEST saturation train. A segment costs sub-steps
+in proportion to |A| dt, so spins are sorted by that cost before the dispatch (a simdgroup waits
+for its slowest lane) and returned in the caller's order.
+
 The scanner field model (``fields.Scanner``: gradient nonlinearity through the encoding
 positions, concomitant fields at leading order or exact) enters the off-resonance as in
 ``fused/kernel.h``. Not (yet) supported here: gradients; use ``blochparty.fused.simulate_fused``.
+What runs where: ``docs/ENGINES.md``.
 """
 
 from __future__ import annotations
@@ -322,6 +331,148 @@ inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float
     if (f & 4) for (uint j = 0; j < nj; ++j) md.ur[j] = 0.0f, md.ui[j] = 0.0f;
 }
 
+// ---- free exchanging pools (exchange.ExchangePool, bloch._simulate_exchange): the Bloch-McConnell
+// system of the water, up to MAX_POOLS free pools (x, y, z each) and the rate-model bound pool's Mz.
+// A segment applies exp(A dt) to the state as a Taylor series of the structured A on sub-steps of
+// norm <= BM_THETA, truncated when a term falls below 2^-27 of the magnetization: no matrix is
+// formed, the state stays in registers. (A float32 matrix exponential per segment, as the core does
+// in float64, was 1e-2 off over the 2000 segments of a CEST saturation train.) Free segments leave
+// the common precession bz out of A and rotate every pool's Mxy by it exactly afterwards (it
+// commutes with the rest there), so readout gradients cost no sub-steps. The state is kept as
+// hi + lo with every increment added by an exact two-sum: rounding of a slowly changing Mz otherwise
+// accumulates over thousands of segments (3e-5 after 2000 saturation steps).
+#define MAX_POOLS 5                         // = metal.MAX_POOLS
+#define BM_NC (3 * (MAX_POOLS + 1) + 1)     // state components: water, pools (x y z), bound Mz
+#define BM_THETA 1.5f
+
+struct BMVec { float x, y, z, px[MAX_POOLS], py[MAX_POOLS], pz[MAX_POOLS], b; };
+
+// Per spin, fixed: the state (hi + lo) and the coefficients that do not change between segments.
+struct BMS {
+    BMVec hi, lo;
+    bool bound = false;
+    float c0;                                                          // water: r1 PD
+    float kin[MAX_POOLS], kout[MAX_POOLS], r1[MAX_POOLS], r2[MAX_POOLS], cz[MAX_POOLS], dw[MAX_POOLS];  // dw [rad/s]
+    float kex;                                                         // sum of the pools' kin + kout
+    float kfb, kb, r1b, cb;                                            // bound pool: k f, k, r1b, r1b f PD
+};
+
+// Per segment: RF [rad/s] (B1+ included), the water's precession wz (pools: wz + dw) and the bound
+// pool's loss rate r1b + k + W.
+struct BMSeg { float wx, wy, wz, rb; };
+
+// o = A u (exchange._bm_matrix); `inh`: u's augmented entry is 1 (the first Taylor term only). NP, the
+// number of free pools, is a compile-time constant (kernels _bm1 .. _bm3): with a runtime count the
+// pool loops are not unrolled, the pools' arrays live in memory, and the kernel ran ~3x slower.
+template <uint NP>
+inline void bm_apply(thread const BMS& s, thread const Spin& p, thread const BMSeg& c, thread const BMVec& u, bool inh,
+                     thread BMVec& o) {
+    o.x = c.wz * u.y - c.wy * u.z - p.r2 * u.x;
+    o.y = -c.wz * u.x + c.wx * u.z - p.r2 * u.y;
+    o.z = c.wy * u.x - c.wx * u.y - p.r1 * u.z + (inh ? s.c0 : 0.0f);
+    for (uint q = 0; q < NP; ++q) {
+        const float x = u.px[q], y = u.py[q], z = u.pz[q], wz = c.wz + s.dw[q];
+        const float ex = s.kin[q] * x - s.kout[q] * u.x, ey = s.kin[q] * y - s.kout[q] * u.y,
+                    ez = s.kin[q] * z - s.kout[q] * u.z;
+        o.px[q] = wz * y - c.wy * z - s.r2[q] * x - ex;
+        o.py[q] = -wz * x + c.wx * z - s.r2[q] * y - ey;
+        o.pz[q] = c.wy * x - c.wx * y - s.r1[q] * z - ez + (inh ? s.cz[q] : 0.0f);
+        o.x += ex, o.y += ey, o.z += ez;
+    }
+    o.b = 0.0f;
+    if (s.bound) {
+        o.z += s.kb * u.b - s.kfb * u.z;
+        o.b = s.kfb * u.z - c.rb * u.b + (inh ? s.cb : 0.0f);
+    }
+}
+
+template <uint NP>
+inline float bm_max(thread const BMVec& u) {
+    float m = max(max(fabs(u.x), fabs(u.y)), max(fabs(u.z), fabs(u.b)));
+    for (uint p = 0; p < NP; ++p) m = max(m, max(max(fabs(u.px[p]), fabs(u.py[p])), fabs(u.pz[p])));
+    return m;
+}
+
+inline void rot2(thread float& x, thread float& y, float c, float s) {
+    const float nx = c * x - s * y, ny = s * x + c * y;
+    x = nx, y = ny;
+}
+
+// state buffer (2 BM_NC, N): hi then lo, components x y z, pools' x y z (3 + 3p ...), bound Mz (last).
+// No pointers into the state: taking addresses keeps it out of registers for the whole kernel.
+inline BMVec bm_load(device const float* buf, uint off, uint n, uint j) {
+    BMVec v;
+    v.x = buf[off * n + j], v.y = buf[(off + 1) * n + j], v.z = buf[(off + 2) * n + j];
+    for (uint p = 0; p < MAX_POOLS; ++p)
+        v.px[p] = buf[(off + 3 + 3 * p) * n + j], v.py[p] = buf[(off + 4 + 3 * p) * n + j], v.pz[p] = buf[(off + 5 + 3 * p) * n + j];
+    v.b = buf[(off + BM_NC - 1) * n + j];
+    return v;
+}
+
+inline void bm_store(thread const BMVec& v, device float* buf, uint off, uint n, uint j) {
+    buf[off * n + j] = v.x, buf[(off + 1) * n + j] = v.y, buf[(off + 2) * n + j] = v.z;
+    for (uint p = 0; p < MAX_POOLS; ++p)
+        buf[(off + 3 + 3 * p) * n + j] = v.px[p], buf[(off + 4 + 3 * p) * n + j] = v.py[p], buf[(off + 5 + 3 * p) * n + j] = v.pz[p];
+    buf[(off + BM_NC - 1) * n + j] = v.b;
+}
+
+template <uint NP>
+inline void step_bm(constant float* q, int f, float bz, float f_rf, thread BMS& s, thread const Spin& p,
+                    thread const Pool& b, constant float* line, constant float* log_f, thread float& mx,
+                    thread float& my, thread float& mz) {
+    const float dt = q[0];
+    const bool rf = (f & 1) != 0;
+    BMSeg c;
+    c.wx = rf ? TWO_PI * p.b1 * q[1] : 0.0f;
+    c.wy = rf ? TWO_PI * p.b1 * q[2] : 0.0f;
+    c.wz = rf ? TWO_PI * bz : 0.0f;  // free segments: the common precession is rotated exactly below
+    c.rb = 0.0f;
+    if (s.bound)  // saturated during RF at W = w1^2 G (exchange.saturation_rate)
+        c.rb = s.r1b + s.kb + (rf ? TWO_PI * TWO_PI * p.b1 * p.b1 * (q[1] * q[1] + q[2] * q[2]) *
+                                        lineshape(f_rf - bz - b.dw, b.t2b, line, log_f) : 0.0f);
+    // the max row sum of |A| (the series' terms then shrink at least as BM_THETA / k)
+    const float w = fabs(c.wx) + fabs(c.wy);
+    float nrm = max(p.r2 + fabs(c.wz), p.r1 + s.kfb + s.kb) + w + s.kex;
+    for (uint j = 0; j < NP; ++j)
+        nrm = max(nrm, max(s.r2[j] + fabs(c.wz + s.dw[j]), s.r1[j]) + w + s.kin[j] + s.kout[j]);
+    if (s.bound) nrm = max(nrm, c.rb + s.kfb);
+    const uint ns = max(1u, uint(ceil(dt * nrm / BM_THETA)));
+    const float h = dt / float(ns);
+    for (uint i = 0; i < ns; ++i) {
+        const float tol = 7.450580596923828e-9f * (bm_max<NP>(s.hi) + p.pd);  // 2^-27
+        BMVec term = s.hi, acc = {}, nxt;
+        for (uint k = 1; k <= 40; ++k) {
+            bm_apply<NP>(s, p, c, term, k == 1, nxt);
+            const float g = h / float(k);
+            term.x = nxt.x * g, term.y = nxt.y * g, term.z = nxt.z * g, term.b = nxt.b * g;
+            acc.x += term.x, acc.y += term.y, acc.z += term.z, acc.b += term.b;
+            for (uint j = 0; j < NP; ++j) {
+                term.px[j] = nxt.px[j] * g, term.py[j] = nxt.py[j] * g, term.pz[j] = nxt.pz[j] * g;
+                acc.px[j] += term.px[j], acc.py[j] += term.py[j], acc.pz[j] += term.pz[j];
+            }
+            if (bm_max<NP>(term) <= tol) break;
+        }
+        two_sum(s.hi.x, s.lo.x, acc.x), two_sum(s.hi.y, s.lo.y, acc.y), two_sum(s.hi.z, s.lo.z, acc.z);
+        two_sum(s.hi.b, s.lo.b, acc.b);
+        for (uint j = 0; j < NP; ++j) {
+            two_sum(s.hi.px[j], s.lo.px[j], acc.px[j]), two_sum(s.hi.py[j], s.lo.py[j], acc.py[j]);
+            two_sum(s.hi.pz[j], s.lo.pz[j], acc.pz[j]);
+        }
+    }
+    if (!rf) {  // Mxy *= exp(-i 2 pi bz dt) for every pool
+        const float phi = -TWO_PI * dt * bz, cs = precise::cos(phi), sn = precise::sin(phi);
+        rot2(s.hi.x, s.hi.y, cs, sn), rot2(s.lo.x, s.lo.y, cs, sn);
+        for (uint j = 0; j < NP; ++j) rot2(s.hi.px[j], s.hi.py[j], cs, sn), rot2(s.lo.px[j], s.lo.py[j], cs, sn);
+    }
+    // the signal is every free pool's Mxy (the kernel samples mx, my and then spoils them)
+    mx = s.hi.x + s.lo.x, my = s.hi.y + s.lo.y, mz = s.hi.z + s.lo.z;
+    for (uint j = 0; j < NP; ++j) mx += s.hi.px[j] + s.lo.px[j], my += s.hi.py[j] + s.lo.py[j];
+    if (f & 4) {
+        s.hi.x = s.hi.y = s.lo.x = s.lo.y = 0.0f;
+        for (uint j = 0; j < NP; ++j) s.hi.px[j] = s.hi.py[j] = s.lo.px[j] = s.lo.py[j] = 0.0f;
+    }
+}
+
 // ---- diffusion: exact Brownian segments drawn from Philox4x32-10 (rng.py), as bloch._walk
 inline uint4 philox(uint4 c, uint2 k) {
     for (int r = 0; r < 10; ++r) {
@@ -418,7 +569,8 @@ struct State {
 };
 
 // V: 0 plain Bloch (no field model, no bound pool), 1 rate-model bound pool and/or field model,
-// 2 generalized Bloch bound pool (and/or field model). Compiled separately so the plain kernels
+// 2 generalized Bloch bound pool (and/or field model), 3 free exchanging pools (and/or the rate-model
+// bound pool, field model). Compiled separately so the plain kernels
 // carry none of the others' per-thread state.
 struct Move {
     bool diffuse = false, move = false, maps = false;
@@ -447,8 +599,8 @@ inline float map_sample(constant float* maps, constant float* mg, uint k, float3
     return out;
 }
 
-template <int V, bool DIFF>
-inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread const Geom& gm, thread const Move& mv,
+template <int V, bool DIFF, uint NP>
+inline void advance(thread State& st, thread Modes& md, thread BMS& bm, thread Walk& wk, thread const Geom& gm, thread const Move& mv,
                     constant float* segs, constant int* flags, constant float* frf, uint s, uint mt,
                     constant float* line, constant float* log_f, uint mode, constant int* nsub, constant float* modes,
                     uint nj, constant int* wsub, constant float* mseg, constant float* maps, constant float* mg) {
@@ -472,6 +624,7 @@ inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread 
     }
     const float bz = offset(st.p, st.conc, V == 0 ? 0u : mode, q);
     if (V == 0) step(q, flags[s], bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+    else if (V == 3) step_bm<NP>(q, flags[s], bz, mt ? frf[s] : 0.0f, bm, st.p, st.b, line, log_f, st.mx, st.my, st.mz);
     else if (V == 2) step_gen(q, flags[s], bz, uint(nsub[s]), st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, md, st.p,
                               st.b, modes, nj, st.cache, st.zc);
     else if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line,
@@ -570,7 +723,9 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                                 constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
                                 constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
                                 constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
-                                constant uint* prm         [[buffer(24)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
+                                constant uint* prm         [[buffer(24)]],  // (15,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped
+                                device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
+                                constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                 uint i    [[thread_position_in_grid]],
                                 uint lane [[thread_index_in_simdgroup]],
                                 uint sg   [[simdgroup_index_in_threadgroup]],
@@ -618,6 +773,20 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    BMS bm;
+    if (@V@ == 3) {  // inactive threads: zero state and PD (inert)
+        bm.bound = mt != 0;
+        bm.hi = bm_load(BMv, 0, n, j), bm.lo = bm_load(BMv, BM_NC, n, j);
+        if (!active) bm.hi = BMVec{}, bm.lo = BMVec{}, st.p.pd = 0.0f;
+        bm.c0 = st.p.r1 * st.p.pd, bm.kex = 0.0f;
+        for (uint p = 0; p < @NP@; ++p) {
+            const float f = bmp[(5 * p) * n + j], k = bmp[(5 * p + 1) * n + j];
+            bm.kin[p] = k, bm.kout[p] = k * f, bm.r1[p] = bmp[(5 * p + 2) * n + j], bm.r2[p] = bmp[(5 * p + 3) * n + j];
+            bm.cz[p] = bm.r1[p] * f * st.p.pd, bm.dw[p] = TWO_PI * bmp[(5 * p + 4) * n + j], bm.kex += k + k * f;
+        }
+        bm.kfb = bm.kb = bm.r1b = bm.cb = 0.0f;
+        if (mt) bm.kfb = st.b.k * st.b.f, bm.kb = st.b.k, bm.r1b = st.b.r1b, bm.cb = st.b.r1b * st.b.f * st.p.pd;
+    }
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
     const uint nv = 2 * n_coils;
     const uint block = TG_FLOATS / (MAX_SG * nv);  // samples buffered per flush
@@ -626,7 +795,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
+        advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
         if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
             const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
             for (uint v = 0; v < nv; v += 2) {
@@ -653,6 +822,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
         if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
+        if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
     }
 }
 
@@ -680,7 +850,9 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
                                     constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
                                     constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
-                                    constant uint* prm         [[buffer(24)]],  // (14,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse
+                                    constant uint* prm         [[buffer(24)]],  // (15,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped
+                                    device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
+                                    constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                     uint i    [[thread_position_in_grid]],
                                     uint lane [[thread_index_in_simdgroup]],
                                     uint sg   [[simdgroup_index_in_threadgroup]],
@@ -727,6 +899,20 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     }
     Modes md;
     for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    BMS bm;
+    if (@V@ == 3) {  // inactive threads: zero state and PD (inert)
+        bm.bound = mt != 0;
+        bm.hi = bm_load(BMv, 0, n, j), bm.lo = bm_load(BMv, BM_NC, n, j);
+        if (!active) bm.hi = BMVec{}, bm.lo = BMVec{}, st.p.pd = 0.0f;
+        bm.c0 = st.p.r1 * st.p.pd, bm.kex = 0.0f;
+        for (uint p = 0; p < @NP@; ++p) {
+            const float f = bmp[(5 * p) * n + j], k = bmp[(5 * p + 1) * n + j];
+            bm.kin[p] = k, bm.kout[p] = k * f, bm.r1[p] = bmp[(5 * p + 2) * n + j], bm.r2[p] = bmp[(5 * p + 3) * n + j];
+            bm.cz[p] = bm.r1[p] * f * st.p.pd, bm.dw[p] = TWO_PI * bmp[(5 * p + 4) * n + j], bm.kex += k + k * f;
+        }
+        bm.kfb = bm.kb = bm.r1b = bm.cb = 0.0f;
+        if (mt) bm.kfb = st.b.k * st.b.f, bm.kb = st.b.k, bm.r1b = st.b.r1b, bm.cb = st.b.r1b * st.b.f * st.p.pd;
+    }
     thread float &mx = st.mx, &my = st.my, &mz = st.mz;
     const uint j0 = i - lane;
     uint nb = 0;
@@ -734,7 +920,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
-        advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
+        advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx + st.lx;
             mine[256 + 8 * lane + nb] = my + st.ly;
@@ -750,24 +936,30 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
         if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
+        if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
     }
 }
 """
 
 _LIB = None
 MAX_COILS = 32  # the direct (simd_sum) reduction; the matrix-product one has no limit
+MAX_POOLS = 5  # free exchanging pools (the shader's MAX_POOLS; one kernel per count)
 MMA_MIN_COILS = 2
 
 
 def _lib():
     global _LIB
     if _LIB is None:
-        # each kernel three times (advance<V>): plain, with the rate-model bound pool and/or the field
-        # model, and with the generalized Bloch modes; extra per-thread state costs the plain
-        # kernels ~10-30 % in register pressure otherwise
-        kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix + dsuf).replace("@V@", v).replace("@DIFF@", diff)
-                          for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
-                          for dsuf, diff in (("", "false"), ("_diff", "true")))
+        # each kernel four times (advance<V>): plain, with the rate-model bound pool and/or the field
+        # model, with the generalized Bloch modes, and with free exchanging pools; extra per-thread
+        # state costs the plain kernels ~10-30 % in register pressure otherwise
+        variants = [(suffix + dsuf, v, diff, "0") for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
+                    for dsuf, diff in (("", "false"), ("_diff", "true"))]
+        # free pools, one kernel per pool count; static spins only, as in the core
+        variants += [(f"_bm{k}", "3", "false", str(k)) for k in range(1, MAX_POOLS + 1)]
+        kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@DIFF@", diff)
+                          .replace("@NP@", np_) for suffix, v, diff, np_ in variants)
+        assert f"#define MAX_POOLS {MAX_POOLS} " in _SOURCE
         _LIB = torch.mps.compile_shader(_SOURCE + kernels)
     return _LIB
 
@@ -811,9 +1003,47 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
         return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps)
 
 
-def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps) -> SimResult:
-    if getattr(phantom, "pools", None):
-        raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
+def _cost_order(phantom: Phantom, seq: Sequence) -> Tensor | None:
+    """Spins in order of their free-pool kernel cost: an RF segment takes sub-steps in proportion to
+    the spin's off-resonance there, and the lanes of a simdgroup wait for its slowest spin (a CEST
+    spectrum's M0 offset at -1500 ppm is ~80 sub-steps per 100 us sample, the other offsets ~2)."""
+    rf = torch.tensor(seq.is_rf)
+    if not bool(rf.any()):
+        return None
+    g = seq.grad.detach().double().cpu()[rf].abs().amax(0)
+    off = 0.0 if seq.b0_offset is None else float(seq.b0_offset.detach().double()[rf].abs().max())
+    cost = phantom.db0.detach().double().cpu().abs() + phantom.pos.detach().double().cpu().abs() @ g + off
+    return torch.argsort(cost, stable=True)
+
+
+def _take(phantom: Phantom, idx: Tensor) -> Phantom:
+    """The (static) spins ``idx`` of a phantom with free pools."""
+    n, pd = len(phantom), phantom.pd
+    pick = lambda t: None if t is None else t[idx]
+    pools = tuple(type(q)(*(getattr(q.expand(n, pd), a)[idx] for a in ("f", "k", "t1", "t2", "dw"))) for q in phantom.pools)
+    bound = None if phantom.bound is None else phantom.bound.expand(n, pd)[idx]
+    return dataclasses.replace(phantom, pos=phantom.pos[idx], pd=pd[idx], t1=phantom.t1[idx], t2=phantom.t2[idx],
+                               db0=phantom.db0[idx], b1=pick(phantom.b1), bound=bound, pools=pools)
+
+
+def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
+             ordered: bool = False) -> SimResult:
+    pools = tuple(getattr(phantom, "pools", None) or ())
+    if pools:  # as bloch.simulate
+        if phantom.diffusion is not None or phantom.motion is not None:
+            raise NotImplementedError("free pools with diffusion or motion are not implemented")
+        if phantom.bound is not None and phantom.bound.model == "generalized":
+            raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
+        if maps is not None:
+            raise NotImplementedError("free pools with FieldMaps are not implemented")
+        if len(pools) > MAX_POOLS:
+            raise NotImplementedError(f"at most {MAX_POOLS} free pools on the GPU, got {len(pools)}")
+        order = None if ordered else _cost_order(phantom, seq)
+        if order is not None:  # run the spins sorted by cost, return them in the caller's order
+            inv = torch.argsort(order)
+            r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
+                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True)
+            return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv], r.m_pools[inv])
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
@@ -963,7 +1193,28 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         vel = mo.velocity.detach().double().cpu() if mo.velocity is not None else zero3
         dsp = mo.displacement.detach().double().cpu() if mo.displacement is not None else zero3
         move_bufs = [mseg.to(dev, f32).contiguous(), torch.cat([vel.T, dsp.T]).to(dev, f32).contiguous()]
+    dz = torch.zeros(1, device=dev, dtype=f32)
+    bm_bufs = [dz, dz]
+    if pools:  # state (2 nc, N): hi, lo of water, pools (x y z) and the bound pool's Mz (bm_load); split exactly
+        pd64 = phantom.pd.detach().double().cpu()
+        nc = 3 * (MAX_POOLS + 1) + 1
+        init = torch.zeros(nc, n, dtype=torch.float64)
+        if m_init is None:
+            init[2] = pd64
+        else:
+            init[:3] = m_init[:, :3].detach().double().cpu().T
+        params = torch.zeros(5 * MAX_POOLS, n, dtype=torch.float64)
+        for k, q in enumerate(pools):
+            q = q.expand(n, pd64)
+            init[5 + 3 * k] = q.f.detach() * pd64
+            params[5 * k: 5 * k + 5] = torch.stack([q.f, q.k, 1 / q.t1, 1 / q.t2, q.dw]).detach()
+        if pool is not None:
+            init[nc - 1] = mb.detach().double().cpu()
+        hi = init.float()
+        bm_bufs = [torch.cat([hi, (init - hi.double()).float()]).to(dev).contiguous(), params.to(dev, f32).contiguous()]
     suffix = "_gen" if gen_bufs[3] else ("_full" if (mt_bufs[5] or conc_buf[1]) else "")
+    if pools:
+        suffix = f"_bm{len(pools)}"
     if phantom.diffusion is not None or phantom.motion is not None:
         suffix += "_diff"
     lib, S = _lib(), len(seq)
@@ -984,13 +1235,18 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     for s0 in range(0, S, chunk):
         if mma:
             getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, n_tiles, threads),
-                                                     threads=threads, group_size=group)
+                                                     *bm_bufs, threads=threads, group_size=group)
         else:
             getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, 0, 0),
-                                                 threads=threads, group_size=group)
+                                                 *bm_bufs, threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
+    if pools:
+        st = bm_bufs[0].cpu().double()
+        st = (st[:len(st) // 2] + st[len(st) // 2:]).float()
+        m_pools = torch.stack([st[3 + 3 * k: 6 + 3 * k].T for k in range(len(pools))], 1).contiguous()
+        return SimResult(signal, st[:3].T.contiguous(), st[-1].clone() if pool is not None else None, m_pools)
     if pool is not None:
         return SimResult(signal, M.cpu().T.contiguous(), mt_bufs[0].cpu())
     return SimResult(signal, M.cpu().T.contiguous())

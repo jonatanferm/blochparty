@@ -173,6 +173,102 @@ def test_generalized_bloch_memory(memory):
     assert float((a.m_bound - b.m_bound.to(a.m_bound.dtype)).abs().max()) < 5e-6
 
 
+def _pools_case(n_pools, with_bound, seed=0):
+    """pool_case's random RF / gradient / off-resonance sequence with 1-3 free pools, B1+ and a readout."""
+    from dataclasses import replace
+
+    from test_fused import with_readout
+    from test_pools import pool_case
+
+    ph, seq = pool_case(seed, with_bound)
+    n = len(ph)
+    g = torch.Generator().manual_seed(seed + 11)
+    rnd = lambda: torch.rand(n, generator=g, dtype=torch.float64)
+    mt = bp.ExchangePool(f=0.08 + 0.04 * rnd(), k=30 + 20 * rnd(), t1=0.8 + 0.2 * rnd(), t2=0.03 + 0.02 * rnd(),
+                         dw=-200 + 50 * rnd())
+    pools = (*ph.pools, mt)[:n_pools]
+    return replace(ph, pools=pools, b1=torch.linspace(0.8, 1.2, n, dtype=torch.float64)), with_readout(seq)
+
+
+@pytest.mark.parametrize("mma", [False, True])
+@pytest.mark.parametrize("with_bound", [False, True])
+@pytest.mark.parametrize("n_pools", [1, 2, 3])
+def test_free_pools(n_pools, with_bound, mma):
+    # the Bloch-McConnell kernel (_bm1.._bm3) against the core's matrix exponentials, from equilibrium
+    # and from a random start (water, and the bound pool's Mz)
+    ph, seq = _pools_case(n_pools, with_bound)
+    coils = bp.birdcage_sensitivities(ph.pos, 4)
+    m0 = torch.randn(len(ph), 4 if with_bound else 3, dtype=torch.float64, generator=torch.Generator().manual_seed(2))
+    for m_init in (None, m0):
+        ref = bp.simulate(ph, seq, coils, m_init=m_init)
+        out = metal.simulate_metal(ph, seq, coils, m_init=m_init, mma=mma)
+        scale = float(ref.m.abs().max())
+        assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
+        assert out.m_pools.shape == ref.m_pools.shape == (len(ph), n_pools, 3)
+        assert float((out.m_pools.double() - ref.m_pools).abs().max()) < 1e-5 * scale
+        if with_bound:
+            assert float((out.m_bound.double() - ref.m_bound).abs().max()) < 1e-5 * scale
+        else:
+            assert out.m_bound is None
+
+
+def test_free_pools_cest_spectrum():
+    # a CEST Z-spectrum: offsets as spins in the RF frame (dB0 = -offset), a train of Gaussian
+    # pulses with spoiled gaps, then a readout; the M0 offset at -300 ppm takes ~100 Taylor sub-steps
+    # per RF sample (the others ~2), and the spins are sorted by that cost inside simulate_metal
+    import math
+
+    f0 = 127.7  # MHz
+    offsets = torch.tensor([-300.0, *torch.linspace(-5, 5, 41).tolist()], dtype=torch.float64) * f0
+    n = len(offsets)
+    one = torch.ones(n, dtype=torch.float64)
+    ph = bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=one, t1=1.2 * one, t2=0.08 * one, db0=-offsets,
+                    pools=(bp.ExchangePool(0.002 * one, 300 * one, one, 0.01 * one, 3.5 * f0 * one),
+                           bp.ExchangePool(0.004 * one, 2000 * one, one, 0.01 * one, 1.0 * f0 * one)),
+                    bound=bp.BoundPool(f=0.1 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-2.6 * f0 * one))
+    t = (torch.arange(200, dtype=torch.float64) + 0.5) * 100e-6
+    env = 120.0 * torch.exp(-0.5 * ((t - 0.01) / 0.004) ** 2)  # [Hz], ~2.8 uT peak
+    b = bp.SequenceBuilder()
+    for k in range(5):
+        b.rf_waveform(torch.stack([env, 0 * env], -1), 100e-6).delay(5e-3, grad=(2000.0, 0.0, 0.0))
+    b.spoil().rf(100e-6, flip_deg=90.0).readout(8, 10e-6)
+    seq = b.build()
+    ref = bp.simulate(ph, seq)
+    out = metal.simulate_metal(ph, seq)
+    assert float((out.m.double() - ref.m).abs().max()) < 1e-5  # Z of every offset
+    assert rel(out.signal, ref.signal) < 1e-5
+    assert float(ref.m[0, 2]) > 0.95 and float(ref.m[1:, 2].min()) < 0.5  # M0 barely saturated, the water dip deep
+    assert math.isfinite(float(out.m_bound.abs().max()))
+
+
+def test_free_pools_scanner_field_model():
+    from dataclasses import replace
+
+    from test_fields_nonlinearity import distortion
+
+    from blochparty.fields import Scanner
+
+    ph, seq = _pools_case(2, True)
+    seq = replace(seq, grad=seq.grad * 30)  # ~3 mT/m: concomitant fields of a few Hz at 0.55 T
+    scanner = Scanner(field_strength=0.55, nonlinearity=distortion())
+    ref, plain = bp.simulate(ph, seq, scanner=scanner), bp.simulate(ph, seq)
+    out = metal.simulate_metal(ph, seq, scanner=scanner)
+    assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
+    assert rel(plain.signal, ref.signal) > 1e-3  # the field model matters in this case
+
+
+def test_five_pools_and_the_limit():
+    from dataclasses import replace
+
+    ph, seq = _pools_case(3, True)
+    five = replace(ph, pools=ph.pools + tuple(replace(q, dw=q.dw + 300.0) for q in ph.pools[:2]))
+    ref, out = bp.simulate(five, seq), metal.simulate_metal(five, seq)
+    assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
+    assert float((out.m_pools.double() - ref.m_pools).abs().max()) < 1e-5 * float(ref.m.abs().max())
+    with pytest.raises(NotImplementedError, match="at most 5 free pools"):
+        metal.simulate_metal(replace(five, pools=five.pools + ph.pools[:1]), seq)
+
+
 @pytest.mark.parametrize("model", [None, "rate", "generalized"])
 def test_long_rf_trains_do_not_drift(model):
     # CW saturation as 10 us RF segments: rotating all of m by a small angle every segment rounded it

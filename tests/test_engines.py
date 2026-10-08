@@ -344,6 +344,13 @@ def case_bound_field_model(leaf):
                                               nonlinearity=distortion())}
 
 
+def case_pools_field_model(leaf):
+    ph, seq, kw = _pools(leaf, True)
+    seq = replace(seq, grad=seq.grad * 30)  # ~3 mT/m: concomitant fields of a few Hz at 0.55 T
+    return ph, seq, {**kw, "scanner": Scanner(field_strength=leaf(torch.tensor(0.55, dtype=f64)),
+                                              nonlinearity=distortion())}
+
+
 def _bound_diffusing(leaf, model):
     ph, seq, kw = _diffusing(leaf, n=64)
     n = len(ph)
@@ -381,6 +388,7 @@ CASES = {
     "many coils (40)": case_many_coils,
     "initial magnetization (m_init)": case_m_init,
     "bound pool + scanner field model": case_bound_field_model,
+    "free pools + scanner field model": case_pools_field_model,
     "bound pool + diffusion": case_bound_diffusion,
     "generalized Bloch + diffusion": case_generalized_diffusion,
     "diffusion + leading-order concomitant fields": case_diffusion_conc_leading,

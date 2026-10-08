@@ -26,8 +26,8 @@ last column; combinations of features are checked only engine against engine.
 | FieldMaps, moving spins | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | motion through a linear B0 map = a gradient; moved object under mapped coils (`test_maps.py`) |
 | bound pool, rate model | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | matrix exponential, CW steady state, SciPy ODE (`test_exchange.py`); BMCTool (`validation/compare_bmctool.py`) |
 | bound pool, generalized Bloch | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | reference solver, Henkelman CW limit, rate-model limit (`test_generalized_bloch.py`) |
-| free pools (`Phantom.pools`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | SciPy ODE of the full system, McConnell two-site exchange (`test_pools.py`); BMCTool |
-| free pools + rate bound pool | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | as above (`test_pools.py`) |
+| free pools (`Phantom.pools`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | SciPy ODE of the full system, McConnell two-site exchange (`test_pools.py`); BMCTool |
+| free pools + rate bound pool | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | as above (`test_pools.py`) |
 | diffusion, free (isotropic or tensor) | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | Stejskal–Tanner, tensor, CPMG vs EPG with diffusion (`test_diffusion.py`) |
 | diffusion, restricted | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | planes (Tanner–Stejskal), sphere and cylinder long-time limits (`test_restriction.py`, through Metal) |
 | motion (flow, waveform, rigid) | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | phase contrast, rigid = moved phantom, inflow recursion (`test_motion.py`) |
@@ -40,6 +40,7 @@ last column; combinations of features are checked only engine against engine.
 | many coils (40) | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | signal linear in the sensitivities |
 | initial magnetization (`m_init`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | as the basic case |
 | bound pool + scanner field model | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | combination |
+| free pools + scanner field model | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | combination |
 | bound pool + diffusion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination |
 | generalized Bloch + diffusion | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination |
 | diffusion + leading-order concomitant fields | ✓ | ✓ | ✗ | ✗ | ✓ | ✗ | ✗ | ✗ | combination (coefficients at the start position) |
@@ -68,7 +69,7 @@ pool is tiny, so its own maximum is no scale). Observed: the worst case over the
 | fused, float64 | gradients vs the core's autograd | 1e-11 | 9.7e-14 (`rf_freq`) |
 | chunked, float64 | signal, magnetization | 1e-12 | 3.5e-16 |
 | chunked, float64 | gradients | 1e-12 | 1.2e-15 |
-| metal, float32 | signal, magnetization, static spins | 5e-5 | 1.5e-5 signal, 1.7e-5 m (leading-order concomitant fields: gradients 50× the base case's, many cycles of phase) |
+| metal, float32 | signal, magnetization, static spins | 5e-5 | 1.4e-5 signal, 1.6e-5 m (leading-order concomitant fields: gradients 50× the base case's, many cycles of phase); free pools ≤ 1e-6 |
 | metal, float32 | signal, walking spins | 2e-4 | 7.4e-5 (diffusion + gradient nonlinearity, spins up to 10 cm from isocentre) |
 | metal, float32 | per-spin magnetization, walking spins | 3e-3 | 1.1e-3 (5 µm cylinders up to 5 mm from isocentre) |
 
@@ -77,11 +78,21 @@ float32, so a spin 5 mm from isocentre is resolved to ~3e-10 m, and a compartmen
 r − centre) to that as well; the per-spin phase carries the rounding, the signal averages it. A
 walk in offsets from the start position would remove most of it.
 
+Long sequences (`tests/test_metal.py`): 1e4 CW RF segments agree to 1e-6 and a CEST train to
+3.5e-7 in Z (benchmark 9: 15015 segments). RF segments add their increments by two-sum; before
+that (until M1a) Metal drifted from the core by 1e-3 per 1e4 RF segments. Free segments are not
+compensated: a free run of 1e5 segments drifts by ~1.5e-5 in Mz.
+
 The core's own gradients match central differences (step 1e-6 relative to each input, the case
 rebuilt at both points) to 1e-6 relative.
 
 ## Limits that are not physics
 
+- Metal, free pools: at most five (`metal.MAX_POOLS`; one kernel per count), static spins only (as
+  the core). A segment costs Taylor sub-steps in proportion to |A| dt: an RF sample far off
+  resonance (a CEST M0 offset at −1500 ppm: ~80 per 100 µs) or fast exchange over a long free
+  segment (40 kHz over 5 ms: ~280). Spins are sorted by that cost before the dispatch, since a
+  simdgroup waits for its slowest lane (5× at 30k spins on benchmark 9), and returned in order.
 - Metal: `mma=False` (one `simd_sum` per coil and sample) takes at most 32 coils; the default for
   two or more coils is the matrix-product reduction, which has no limit. Moving spins in mapped
   coils (`FieldMaps.coils` with motion or diffusion) always use the direct reduction, so at most
