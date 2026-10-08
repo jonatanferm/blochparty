@@ -397,8 +397,16 @@ amide f 1.5-2.8e-3, k 210-880 Hz; the hydroxyl pool is poorly determined (bounds
 The prediction beats "no change" in every tube (median 0.022 vs 0.032) and the predicted change
 correlates 0.75 with the measured one over all tubes and offsets, but the CEST build-up from 1.5 to
 4 s is under-predicted 1.3-6x at 4.3 ppm. From one saturation time, T1 trades against the pool
-sizes; a T1 that is too short reaches the steady state too early, which is this pattern. Next: T1
-from the archive's IR Look-Locker scan as an independent input, then the same prediction.
+sizes; a T1 that is too short reaches the steady state too early, which is this pattern.
+
+**Independent T1 (in progress, `iohexol_t1.py`).** IR Look-Locker (3D stack-of-stars, 798 x 6 deg
+every 5.01 ms after one inversion; subspace NUFFT reconstruction, central slice; the edge slices
+see a lower flip and gave T1* above the 6 deg bound). T1 per tube from the flip angle (with B1):
+1.02 / 1.44 / 1.67 / 0.64 / 0.52 / 0.75 / 1.08 / 1.71 s; Deichmann 1.17 / 1.77 / 1.83 / 0.78 / 0.60 /
+0.94 / 1.23 / 2.14 s. The CEST calibration's T1 (0.47 / 0.90 / 0.73 / 0.39 / 0.42 / 0.67 / 0.54 /
+0.88 s) is 1.1-2.3x shorter in every tube, supporting the diagnosis. Not yet trusted: the
+Look-Locker fit residuals are 4-13 % of the amplitude (curves not inspected). Next: check the
+curves, refit at 1.5 s with T1 fixed to these values, predict 4 s again.
 
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
