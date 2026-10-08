@@ -248,9 +248,11 @@ def simulate_fused(
     block: int | None = None,
     checkpoint_every: int | None = None,
     scanner: Scanner | None = None,
+    maps=None,
 ) -> SimResult:
     """Run ``seq`` on ``phantom``: same arguments and result as ``blochparty.simulate``,
-    gradients included (``scanner``: the field model, as in ``simulate``).
+    gradients included (``scanner``: the field model, as in ``simulate``). ``maps``
+    (``FieldMaps``) is not supported here and raises.
 
     n_threads: worker threads (default: all logical CPUs).
     block: spins per block, one of ``BLOCK_SIZES`` (default: ``default_block``).
@@ -263,6 +265,8 @@ def simulate_fused(
         raise NotImplementedError("motion (Phantom.motion) is in blochparty.simulate and the Metal kernel")
     if getattr(phantom, "diffusion", None) is not None:
         raise NotImplementedError("diffusion (Phantom.diffusion) is in blochparty.simulate and the Metal kernel")
+    if maps is not None:
+        raise NotImplementedError("FieldMaps (maps=) are in blochparty.simulate and the Metal kernel")
     if getattr(phantom, "pools", None):
         return _simulate_pools(phantom, seq, coils, m_init=m_init, n_threads=n_threads,
                                checkpoint_every=checkpoint_every, scanner=scanner)

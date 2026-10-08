@@ -113,6 +113,9 @@ def simulate_chunked(
     *,
     spin_chunk: int = 4096,
     checkpoint_every: int | None = None,
+    m_init: Tensor | None = None,
+    scanner=None,
+    maps=None,
 ) -> SimResult:
     """Drop-in replacement for ``simulate`` whose backward pass needs memory for
     ``spin_chunk`` spins instead of all of them.
@@ -123,6 +126,7 @@ def simulate_chunked(
     ``adc_phase``, ``b0_offset``), the phantom (``pos``, ``pd``, ``t1``, ``t2``, ``db0``, ``b1``) and ``coils``,
     and through them whatever produced those tensors. Higher-order gradients are
     not supported. ``checkpoint_every`` is passed on to ``simulate`` inside each chunk.
+    ``m_init``, ``scanner`` and ``maps`` are not supported here and raise (``docs/ENGINES.md``).
 
     Example::
 
@@ -142,6 +146,9 @@ def simulate_chunked(
         raise NotImplementedError("diffusion (Phantom.diffusion) is in blochparty.simulate and the Metal kernel")
     if phantom.bound is not None or phantom.pools:
         raise NotImplementedError("exchange (Phantom.bound / pools) is not implemented here yet; use blochparty.simulate")
+    for name, value in (("m_init", m_init), ("scanner", scanner), ("maps", maps)):
+        if value is not None:
+            raise NotImplementedError(f"{name} is not implemented in simulate_chunked; use blochparty.simulate")
 
     if spin_chunk < 1:
         raise ValueError(f"spin_chunk must be positive, got {spin_chunk}")

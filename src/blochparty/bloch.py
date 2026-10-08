@@ -452,6 +452,8 @@ def simulate(
             raise NotImplementedError("free pools with diffusion or motion are not implemented")
         if phantom.bound is not None and phantom.bound.model == "generalized":
             raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
+        if maps is not None:  # static spins: fold the sampled maps into Phantom.db0 / b1 and the coils instead
+            raise NotImplementedError("free pools with FieldMaps are not implemented")
         return _simulate_exchange(phantom, seq, coils, m_init, scanner)
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)

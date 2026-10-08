@@ -26,6 +26,7 @@ positions, concomitant fields at leading order or exact) enters the off-resonanc
 
 from __future__ import annotations
 
+import dataclasses
 import math
 
 import numpy as np
@@ -758,15 +759,39 @@ def available() -> bool:
         return False
 
 
-@torch.no_grad()
+def _requires_grad(*objs) -> bool:
+    """Whether any tensor in ``objs`` (tensors, dataclasses such as Phantom, Sequence, Scanner,
+    FieldMaps and their pools, tuples) requires grad."""
+    for o in objs:
+        if isinstance(o, Tensor):
+            if o.requires_grad:
+                return True
+        elif dataclasses.is_dataclass(o) and not isinstance(o, type):
+            if _requires_grad(*(getattr(o, f.name) for f in dataclasses.fields(o))):
+                return True
+        elif isinstance(o, tuple) and _requires_grad(*o):
+            return True
+    return False
+
+
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
                    chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
                    seed: int = 0, maps=None) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
-    matrices (default from ``MMA_MIN_COILS`` coils) or one simd_sum per coil and sample."""
+    matrices (default from ``MMA_MIN_COILS`` coils) or one simd_sum per coil and sample.
 
+    No gradients yet (ROADMAP M2): with grad mode on and any input requiring grad it raises
+    ``NotImplementedError`` rather than return results detached from the graph."""
+    if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
+        raise NotImplementedError("gradients through simulate_metal are not implemented (ROADMAP M2); use "
+                                  "blochparty.fused.simulate_fused or blochparty.simulate, or run under torch.no_grad()")
+    with torch.no_grad():
+        return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps)
+
+
+def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps) -> SimResult:
     if getattr(phantom, "pools", None):
         raise NotImplementedError("free exchanging pools (Phantom.pools) are only in blochparty.simulate")
     dev, f32 = torch.device("mps"), torch.float32
@@ -877,6 +902,8 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
         gen_bufs = [dz, dz, torch.zeros(1, device=dev, dtype=torch.int32), 0]
     if phantom.motion is not None and (fields.mode or (scanner is not None and scanner.nonlinearity is not None)):
         raise NotImplementedError("motion with gradient nonlinearity or concomitant fields is not implemented")
+    if phantom.diffusion is not None and fields.mode == 2:
+        raise NotImplementedError("diffusion with exact concomitant fields is not implemented")
     if phantom.diffusion is not None:  # walkers start at the (encoding) positions; L L^T = D
         D = phantom.diffusion.detach().double().cpu()
         L = torch.diag_embed(torch.sqrt(D).unsqueeze(-1).expand(n, 3)) if D.dim() == 1 else torch.linalg.cholesky(D)
