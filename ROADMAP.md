@@ -205,7 +205,23 @@ acquires Bernstein's velocity-dependent phase for a moving one.
 - [x] Free pools with `FieldMaps` (2026-10-08), static and moving, core and Metal: equal to the
       same fields given per spin to 1e-14.
 
-## M2. Metal adjoint (5 to 7 days)
+## M2. Metal adjoint (5 to 7 days) — first version done 2026-10-09; speed and the fused kernel's retirement open
+
+Status. `simulate_metal` is differentiable for the planned scope (sequence `dt`, `rf`, `grad`,
+`adc_phase`, `b0_offset`, `rf_freq`; phantom `pos`, `pd`, `t1`, `t2`, `db0`, `b1`; coils; `m_init`;
+the rate-model bound pool; the scanner field model through the encoding positions and coefficients;
+static `FieldMaps`), raising for moving spins, free pools and the generalized bound pool. Checks:
+(1) against the core's float64 autograd per input, 1e-7 to 3e-6 on random sequences, 2e-5 on a
+1600-segment RF-spoiled GRE, ≤ 1.2e-4 with the bound pool; (2) as accurate as the fused float32
+adjoint or better (bound-pool `rf_freq`: 1.2e-4 against its 1.5e-3); (3) bit-identical for any
+`checkpoint_every` and every run; (4) the WM/GM optimum to 0.001° and the Ernst angle to 0.01°, but
+the DESPOT1 pair only to 0.05°: its bound differentiates float32 signals by finite differences
+(`rel_step` 1e-2; the default 1e-4 lands degrees off); (5) forward + backward 6-7x the forward on
+3d-48 / 3d-64 (target 5x; 3-4x on the small cases). Not done: the speed target; retiring the fused
+kernel, which still is the only fast float64 path with gradients (DESPOT1 to 0.001° needs float64):
+a decision, see the journal.
+
+The original plan:
 
 Goal: `simulate_metal` differentiable for the inputs the digital twin and sequence design need,
 at imaging scale, verified against the fused adjoint and the core.

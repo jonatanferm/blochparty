@@ -487,6 +487,19 @@ says where it came from so it can be re-checked.
 
 ## Performance
 
+- **Metal adjoint: memory traffic and occupancy, not arithmetic.** On 3d-48 the first backward took
+  4.2 s against a 0.49 s forward. Storing the state before every segment for the reverse sweep wrote
+  and read 12 B per spin and segment (~1 s); storing every 4th and recomputing blocks into
+  threadgroup memory cut that 4x. Register arrays for 8 coils' sensitivities cost more occupancy than
+  the reads they saved (1.9 s against 1.4 s), and the compiler deletes unused arrays, so a variant
+  with them only when coil gradients are asked for helped. A per-segment threadgroup reduction with
+  two barriers cost ~0.75 s: one simd_sum partial per simdgroup, summed later in order, has none.
+  Uploading a small parameter tensor per dispatch costs ~0.3 ms (300 intervals: 0.1 s); one upload
+  and a view per dispatch is free (`compile_shader` binds views at their offset). Source: M2.
+- **Benchmark only against something measured in the same session.** After hours of GPU work the M4
+  ran the 3d-64 forward in 3.4-3.6 s instead of 2.4 s; the M1c and current kernels, alternated in one
+  process, timed the same, so it was the machine. Source: M2, 2026-10-09.
+
 - **On the Apple GPU a runtime loop bound over per-thread arrays puts them in memory.** The free-pool
   kernel with the pool count as a runtime value ran 2.7x slower than with it as a template
   parameter (one kernel per count, loops unrolled). An array of pointers into the state, suspected
@@ -576,6 +589,18 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **Idle GPU threads alias spin 0: guard every write.** Threads past the last spin read spin 0's
+  inputs (index clamped) and must not write. One unguarded store in the adjoint's replay let 255 idle
+  threads overwrite spin 0's states with zeros: every gradient but λ and PD came out ~0, which looked
+  like broken calculus. Source: M2, 2026-10-09.
+- **Finite differences on float32 signals need big steps.** DESPOT1's CRB uses a central-difference
+  Jacobian (`rel_step` 1e-4): on float32 signals (~1e-6 rounding after 3700 segments) the bound is
+  ~1 % noise and the optimizer landed at (3.7°, 38°) instead of (4.1°, 23.6°); 1e-2 gives 0.05°.
+  Source: M2, `examples/design_despot1.py`.
+- **A test's random weights must not depend on the engine's output dtype.** `torch.randn(shape,
+  dtype=...)` with one generator gives different numbers in float32 and float64: every Metal gradient
+  cell of the matrix failed by ~100 % until the loss drew its weights in float64. Source: M2.
 
 - **`SequenceBuilder.rf(duration, ...)` splits a long pulse into raster steps by default.** A
   "single 0.5 s CW segment" made with `rf(0.5, amplitude=...)` was thousands of segments (30 s in
