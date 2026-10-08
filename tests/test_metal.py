@@ -171,3 +171,27 @@ def test_generalized_bloch_memory(memory):
     a, b = bp.simulate(ph, seq), metal.simulate_metal(ph, seq)
     assert float((a.signal - b.signal).abs().max() / a.signal.abs().max()) < 5e-5
     assert float((a.m_bound - b.m_bound.to(a.m_bound.dtype)).abs().max()) < 5e-6
+
+
+@pytest.mark.parametrize("model", [None, "rate", "generalized"])
+def test_long_rf_trains_do_not_drift(model):
+    # CW saturation as 10 us RF segments: rotating all of m by a small angle every segment rounded it
+    # every segment, and Mz drifted from the float64 core by ~1e-3 per 1e4 segments (1e-2 after 1e5)
+    # until the increments were added by two_sum
+    n = 32
+    one = torch.ones(n, dtype=torch.float64)
+    ph = bp.Phantom(torch.zeros(n, 3, dtype=torch.float64), one, one, 0.05 * one,
+                    -torch.linspace(-2000, 2000, n, dtype=torch.float64))
+    if model is not None:
+        from dataclasses import replace
+
+        ph = replace(ph, bound=bp.BoundPool(f=0.135 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-383.0 * one,
+                                            model=model))
+    n_seg = 3000 if model == "generalized" else 10_000
+    seq = bp.SequenceBuilder().rf(n_seg * 10e-6, amplitude=42.577 * 1.5, n_steps=n_seg).readout(4, 10e-6).build()
+    ref, out = bp.simulate(ph, seq), metal.simulate_metal(ph, seq)
+    assert float((out.m.double() - ref.m).abs().max()) < 1e-5
+    # the signal sums spins dephased by their offsets (|signal| ~ 0.2 of n): per spin, as m
+    assert float((out.signal.to(ref.signal.dtype) - ref.signal).abs().max()) < 1e-5 * n
+    if model is not None:
+        assert float((out.m_bound.double() - ref.m_bound).abs().max()) < 1e-5

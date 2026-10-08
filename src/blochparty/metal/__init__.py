@@ -3,7 +3,11 @@
 The same physics as the CPU paths (``bloch.py``, ``fused/kernel.h``): per segment exact
 free precession and relaxation (relaxation in the ``m += (m - m0) * expm1(-dt/T)`` form, which
 float32 needs), Strang-split Rodrigues rotations on RF segments, B1+ scaling and per-segment
-uniform B0 offsets; ADC samples at segment ends, demodulated by exp(-i psi); ideal spoils.
+uniform B0 offsets; ADC samples at segment ends, demodulated by exp(-i psi); ideal spoils. RF
+segments add their increments (rotation as m += s1 w x m + s2 w x (w x m), relaxation, exchange)
+by an exact two-sum into a per-spin low part: float32 otherwise rounds all of m every segment, and
+long RF trains (CW saturation, fine-raster shaped pulses) drifted from the core by 1e-2 after 1e5
+segments.
 
 One GPU thread per spin steps through the segments with its magnetization in registers. The
 coil sum at ADC samples has two implementations. With two or more coils (``bloch_chunk_mma``),
@@ -53,6 +57,16 @@ inline float expm1_(float x) {
     return precise::exp(x) - 1.0f;
 }
 
+// hi + lo += d, exactly up to the rounding of lo (Knuth's two-sum). RF segments add their increments
+// this way: float32 rounding of a slowly changing m otherwise accumulates, 1e-3 in Mz after 1e4 RF
+// segments of CW saturation and 1e-2 after 1e5 (the core is float64). Survives Metal's fast math.
+inline void two_sum(thread float& hi, thread float& lo, float d) {
+    d += lo;
+    const float t = hi + d, bp = t - hi;
+    lo = (hi - (t - bp)) + (d - bp);
+    hi = t;
+}
+
 inline void relax(thread float& mx, thread float& my, thread float& mz, float t, float pd, float r1, float r2) {
     float e1 = expm1_(-t * r1), e2 = expm1_(-t * r2);
     mx += mx * e2;
@@ -85,40 +99,42 @@ inline float offset(thread const Spin& p, thread const Conc& k, uint mode, const
 // check never diverges.
 struct Cache { float dt = -1.0f, gx = 0.0f, gy = 0.0f, gz = 0.0f, b0 = 0.0f, c = 1.0f, s = 0.0f, e1 = 0.0f, e2 = 0.0f; };
 
-// Rotation about the effective field of an RF segment q for a spin at offset bz [Hz].
-inline void rf_rotate(constant float* q, float bz, thread float& mx, thread float& my, thread float& mz,
-                      thread const Spin& p) {
-    const float w = -TWO_PI * q[0];
-    {
-        const float wx = w * p.b1 * q[1], wy = w * p.b1 * q[2], wz = w * bz;
-        const float phi2 = wx * wx + wy * wy + wz * wz, phi = sqrt(phi2);
-        float c, s1v, s2v;
-        if (phi < 1e-3f) {
-            c = 1.0f - 0.5f * phi2;
-            s1v = 1.0f - phi2 / 6.0f;
-            s2v = 0.5f - phi2 / 24.0f;
-        } else {
-            const float sh = precise::sin(0.5f * phi) / phi;
-            c = precise::cos(phi);
-            s1v = precise::sin(phi) / phi;
-            s2v = 2.0f * sh * sh;  // (1 - cos phi) / phi^2 without cancellation
-        }
-        const float dot = wx * mx + wy * my + wz * mz;
-        const float nx = c * mx + s1v * (wy * mz - wz * my) + s2v * wx * dot;
-        const float ny = c * my + s1v * (wz * mx - wx * mz) + s2v * wy * dot;
-        const float nz = c * mz + s1v * (wx * my - wy * mx) + s2v * wz * dot;
-        mx = nx; my = ny; mz = nz;
+// Rotation about the effective field of an RF segment q for a spin at offset bz [Hz], as an increment
+// m += s1 (w x m) + s2 w x (w x m) (Rodrigues with cos = 1 - s2 phi^2) added by two_sum into l.
+inline void rotate_inc(float wx, float wy, float wz, thread float& mx, thread float& my, thread float& mz,
+                       thread float& lx, thread float& ly, thread float& lz) {
+    const float phi2 = wx * wx + wy * wy + wz * wz, phi = sqrt(phi2);
+    float s1v, s2v;
+    if (phi < 1e-3f) {
+        s1v = 1.0f - phi2 / 6.0f;
+        s2v = 0.5f - phi2 / 24.0f;
+    } else {
+        const float sh = precise::sin(0.5f * phi) / phi;
+        s1v = precise::sin(phi) / phi;
+        s2v = 2.0f * sh * sh;  // (1 - cos phi) / phi^2 without cancellation
     }
+    const float cx = wy * mz - wz * my, cy = wz * mx - wx * mz, cz = wx * my - wy * mx;  // w x m
+    const float dx = wy * cz - wz * cy, dy = wz * cx - wx * cz, dz = wx * cy - wy * cx;  // w x (w x m)
+    two_sum(mx, lx, s1v * cx + s2v * dx), two_sum(my, ly, s1v * cy + s2v * dy), two_sum(mz, lz, s1v * cz + s2v * dz);
 }
 
+inline void rf_rotate(constant float* q, float bz, thread float& mx, thread float& my, thread float& mz,
+                      thread float& lx, thread float& ly, thread float& lz, thread const Spin& p) {
+    const float w = -TWO_PI * q[0];
+    rotate_inc(w * p.b1 * q[1], w * p.b1 * q[2], w * bz, mx, my, mz, lx, ly, lz);
+}
+
+// The low parts l of a run of RF segments are folded back at the next free segment.
 inline void step(constant float* q, int f, float bz, thread float& mx, thread float& my, thread float& mz,
-                 thread const Spin& p, thread Cache& k) {
+                 thread float& lx, thread float& ly, thread float& lz, thread const Spin& p, thread Cache& k) {
     const float dt = q[0];
-    if (f & 1) {  // RF: relax dt/2, rotate about the effective field, relax dt/2
-        relax(mx, my, mz, 0.5f * dt, p.pd, p.r1, p.r2);
-        rf_rotate(q, bz, mx, my, mz, p);
-        relax(mx, my, mz, 0.5f * dt, p.pd, p.r1, p.r2);
+    if (f & 1) {  // RF: relax dt/2, rotate about the effective field, relax dt/2 (increments compensated)
+        const float e1 = expm1_(-0.5f * dt * p.r1), e2 = expm1_(-0.5f * dt * p.r2);
+        two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2), two_sum(mz, lz, (mz - p.pd) * e1);
+        rf_rotate(q, bz, mx, my, mz, lx, ly, lz, p);
+        two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2), two_sum(mz, lz, (mz - p.pd) * e1);
     } else {  // free precession about z, exact relaxation
+        mx += lx, my += ly, mz += lz, lx = ly = lz = 0.0f;
         if (dt != k.dt || q[3] != k.gx || q[4] != k.gy || q[5] != k.gz || q[7] != k.b0) {
             const float phi = -TWO_PI * dt * bz;
             k.c = precise::cos(phi); k.s = precise::sin(phi);
@@ -187,23 +203,30 @@ inline void zapply(thread const ZStep& z, thread float& u, thread float& v) {
     u += n1, v += n2;
 }
 
+inline void zapply_c(thread const ZStep& z, thread float& u, thread float& v, thread float& lu, thread float& lv) {
+    const float d1 = u - z.z1, d2 = v - z.z2;
+    two_sum(u, lu, z.chm1 * d1 + z.sh * (z.h * d1 + z.a12 * d2)), two_sum(v, lv, z.chm1 * d2 + z.sh * (z.a21 * d1 - z.h * d2));
+}
+
 // step() with a bound pool; zc caches the unsaturated exchange step of free segments (key dt).
 struct ZCache { float dt = -1.0f; ZStep z; };
 
 inline void step_mt(constant float* q, int f, float bz, float f_rf, thread float& mx, thread float& my,
-                    thread float& mz, thread float& mb, thread const Spin& p, thread const Pool& b,
-                    constant float* line, constant float* log_f, thread Cache& k, thread ZCache& zc) {
+                    thread float& mz, thread float& mb, thread float& lx, thread float& ly, thread float& lz,
+                    thread float& lb, thread const Spin& p, thread const Pool& b, constant float* line,
+                    constant float* log_f, thread Cache& k, thread ZCache& zc) {
     const float dt = q[0];
-    if (f & 1) {
+    if (f & 1) {  // as step(): increments compensated, low parts folded back at the next free segment
         const float w1sq = TWO_PI * TWO_PI * p.b1 * p.b1 * (q[1] * q[1] + q[2] * q[2]);
         const ZStep z = zstep(0.5f * dt, p, b, w1sq * lineshape(f_rf - bz - b.dw, b.t2b, line, log_f));
         const float e2 = expm1_(-0.5f * dt * p.r2);
-        mx += mx * e2, my += my * e2;
-        zapply(z, mz, mb);
-        rf_rotate(q, bz, mx, my, mz, p);
-        mx += mx * e2, my += my * e2;
-        zapply(z, mz, mb);
+        two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2);
+        zapply_c(z, mz, mb, lz, lb);
+        rf_rotate(q, bz, mx, my, mz, lx, ly, lz, p);
+        two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2);
+        zapply_c(z, mz, mb, lz, lb);
     } else {
+        mx += lx, my += ly, mz += lz, mb += lb, lx = ly = lz = lb = 0.0f;
         if (dt != k.dt || q[3] != k.gx || q[4] != k.gy || q[5] != k.gz || q[7] != k.b0) {
             const float phi = -TWO_PI * dt * bz;
             k.c = precise::cos(phi); k.s = precise::sin(phi);
@@ -235,8 +258,9 @@ inline void mode_factor(constant float* modes, uint j, float t, float t2b, float
 }
 
 inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float& mx, thread float& my, thread float& mz,
-                     thread float& mb, thread Modes& md, thread const Spin& p, thread const Pool& b,
-                     constant float* modes, uint nj, thread Cache& k, thread ZCache& zc) {
+                     thread float& mb, thread float& lx, thread float& ly, thread float& lz, thread float& lb,
+                     thread Modes& md, thread const Spin& p, thread const Pool& b, constant float* modes, uint nj,
+                     thread Cache& k, thread ZCache& zc) {
     const float dt = q[0];
     const float dbz = bz + b.dw;
     if (f & 1) {
@@ -250,16 +274,8 @@ inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float
         for (uint s = 0; s < nsub; ++s) {
             for (uint hs = 0; hs < 2; ++hs) {
                 if (hs) {
-                    // the water about its effective field
-                    const float phi2 = wx * wx + wy * wy + wz * wz, phi = sqrt(phi2);
-                    float c, s1v, s2v;
-                    if (phi < 1e-3f) { c = 1.0f - 0.5f * phi2; s1v = 1.0f - phi2 / 6.0f; s2v = 0.5f - phi2 / 24.0f; }
-                    else { const float sh = precise::sin(0.5f * phi) / phi; c = precise::cos(phi); s1v = precise::sin(phi) / phi; s2v = 2.0f * sh * sh; }
-                    const float dot = wx * mx + wy * my + wz * mz;
-                    const float nx = c * mx + s1v * (wy * mz - wz * my) + s2v * wx * dot;
-                    const float ny = c * my + s1v * (wz * mx - wx * mz) + s2v * wy * dot;
-                    const float nz = c * mz + s1v * (wx * my - wy * mx) + s2v * wz * dot;
-                    mx = nx; my = ny; mz = nz;
+                    // the water about its effective field (compensated increments, as step())
+                    rotate_inc(wx, wy, wz, mx, my, mz, lx, ly, lz);
                     // the pool about the RF alone
                     float sx = 0.0f, sy = 0.0f;
                     for (uint j = 0; j < nj; ++j) sx += md.ur[j], sy += md.ui[j];
@@ -270,15 +286,15 @@ inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float
                     const float pdot = wx * sx + wy * sy;
                     const float tx = pc * sx + ps1 * (wy * mb) + ps2 * wx * pdot;
                     const float ty = pc * sy - ps1 * (wx * mb) + ps2 * wy * pdot;
-                    mb = pc * mb + ps1 * (wx * sy - wy * sx);
+                    two_sum(mb, lb, ps1 * (wx * sy - wy * sx) - ps2 * ph2 * mb);  // pc = 1 - ps2 ph^2
                     const float dx = tx - sx, dy = ty - sy;
                     for (uint j = 0; j < nj; ++j) {
                         const float cr = modes[4 * j + 2], ci = modes[4 * j + 3];
                         md.ur[j] += cr * dx - ci * dy, md.ui[j] += cr * dy + ci * dx;
                     }
                 }
-                mx += mx * e2, my += my * e2;
-                zapply(z, mz, mb);
+                two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2);
+                zapply_c(z, mz, mb, lz, lb);
                 for (uint j = 0; j < nj; ++j) {
                     const float x = md.ur[j], y = md.ui[j];
                     md.ur[j] = hr[j] * x - hi[j] * y, md.ui[j] = hr[j] * y + hi[j] * x;
@@ -286,6 +302,7 @@ inline void step_gen(constant float* q, int f, float bz, uint nsub, thread float
             }
         }
     } else {
+        mx += lx, my += ly, mz += lz, mb += lb, lx = ly = lz = lb = 0.0f;
         if (dt != k.dt || q[3] != k.gx || q[4] != k.gy || q[5] != k.gz || q[7] != k.b0) {
             const float phi = -TWO_PI * dt * bz;
             k.c = precise::cos(phi); k.s = precise::sin(phi);
@@ -392,6 +409,7 @@ struct Geom {
 // The per-spin state and segment step of both kernels: plain Bloch, or with the bound pool.
 struct State {
     float mx, my, mz, mb;
+    float lx = 0.0f, ly = 0.0f, lz = 0.0f, lb = 0.0f;  // low parts of a run of RF segments (two_sum)
     Spin p;
     Pool b;
     Cache cache;
@@ -453,10 +471,12 @@ inline void advance(thread State& st, thread Modes& md, thread Walk& wk, thread 
         st.cache.dt = -1.0f, md.k_dt = -1.0f;
     }
     const float bz = offset(st.p, st.conc, V == 0 ? 0u : mode, q);
-    if (V == 0) step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
-    else if (V == 2) step_gen(q, flags[s], bz, uint(nsub[s]), st.mx, st.my, st.mz, st.mb, md, st.p, st.b, modes, nj, st.cache, st.zc);
-    else if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.p, st.b, line, log_f, st.cache, st.zc);
-    else step(q, flags[s], bz, st.mx, st.my, st.mz, st.p, st.cache);
+    if (V == 0) step(q, flags[s], bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+    else if (V == 2) step_gen(q, flags[s], bz, uint(nsub[s]), st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, md, st.p,
+                              st.b, modes, nj, st.cache, st.zc);
+    else if (mt) step_mt(q, flags[s], bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line,
+                         log_f, st.cache, st.zc);
+    else step(q, flags[s], bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
 }
 
 inline void flush(threadgroup float* partial, threadgroup int* block_rows, device atomic_float* sig, uint nb, uint nv,
@@ -615,7 +635,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                     const float3 at = float3(st.p.px, st.p.py, st.p.pz);
                     sr = map_sample(maps, mg, 2u + v, at), si = map_sample(maps, mg, 3u + v, at);
                 }
-                const float re = mx * sr - my * si, im = mx * si + my * sr;
+                const float re = (mx + st.lx) * sr - (my + st.ly) * si, im = (mx + st.lx) * si + (my + st.ly) * sr;
                 const float tr = simd_sum(re * cp + im * sp), ti = simd_sum(im * cp - re * sp);
                 if (lane == 0) {
                     partial[(sg * block + nb) * nv + v] = tr;
@@ -625,12 +645,12 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
             if (tid == 0) block_rows[nb] = adc_row[s];
             if (++nb == block) { flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg); nb = 0; }
         }
-        if (f & 4) { mx = 0.0f; my = 0.0f; }
+        if (f & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
     }
     if (nb > 0) flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg);
     if (active) {
-        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
-        if (@V@ != 0 && mt) MB[j] = st.mb;
+        M[j] = mx + st.lx; M[n + j] = my + st.ly; M[2 * n + j] = mz + st.lz;
+        if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
     }
@@ -716,18 +736,18 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
         const int f = flags[s];
         advance<@V@, @DIFF@>(st, md, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
-            mine[8 * lane + nb] = mx;
-            mine[256 + 8 * lane + nb] = my;
-            mine[512 + 8 * lane + nb] = -my;
+            mine[8 * lane + nb] = mx + st.lx;
+            mine[256 + 8 * lane + nb] = my + st.ly;
+            mine[512 + 8 * lane + nb] = -(my + st.ly);
             if (tid == 0) { rows[nb] = adc_row[s]; psi[nb] = q[6]; }
             if (++nb == 8) { flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg); nb = 0; }
         }
-        if (f & 4) { mx = 0.0f; my = 0.0f; }
+        if (f & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
     }
     if (nb > 0) flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
     if (active) {
-        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
-        if (@V@ != 0 && mt) MB[j] = st.mb;
+        M[j] = mx + st.lx; M[n + j] = my + st.ly; M[2 * n + j] = mz + st.lz;
+        if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
     }
