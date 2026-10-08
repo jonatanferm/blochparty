@@ -33,18 +33,27 @@ for its slowest lane) and returned in the caller's order.
 
 The scanner field model (``fields.Scanner``: gradient nonlinearity through the encoding
 positions, concomitant fields at leading order or exact) enters the off-resonance as in
-``fused/kernel.h``. Not (yet) supported here: gradients; use ``blochparty.fused.simulate_fused``.
-What runs where: ``docs/ENGINES.md``.
+``fused/kernel.h``.
+
+Gradients: a hand-written adjoint (``_MetalSimulate``), the reverse sweep of fused/kernel.h on the GPU.
+The forward stores the state (hi and lo parts) before every ``checkpoint_every`` segments; per interval
+in reverse order, ``bloch_replay`` reruns the forward keeping every 4th state, and ``bloch_adjoint``
+recomputes each block of 4 into threadgroup memory and sweeps it backward. Per-spin gradients stay with
+their thread; per-segment ones are summed per simdgroup and then in order (``seg_reduce``), so the result
+is the same for any interval and every run. Not for moving spins, free pools or the generalized bound
+pool. What runs where: ``docs/ENGINES.md``.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
+from typing import NamedTuple
 
 import numpy as np
 import torch
 from torch import Tensor
+from torch.autograd.function import once_differentiable
 
 from .. import exchange
 from ..bloch import SimResult
@@ -775,6 +784,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                                 device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
                                 constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                 constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
+                                device float* L            [[buffer(28)]],  // (4, N) low parts of m, mb (two_sum), in/out
                                 uint i    [[thread_position_in_grid]],
                                 uint lane [[thread_index_in_simdgroup]],
                                 uint sg   [[simdgroup_index_in_threadgroup]],
@@ -792,6 +802,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     const uint j = active ? i : 0;
     State st;
     st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    if (active) st.lx = L[j], st.ly = L[n + j], st.lz = L[2 * n + j], st.lb = L[3 * n + j];  // dispatches continue exactly
     st.p = load_spin(spins, n, j);
     if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
         st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
@@ -867,8 +878,9 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
     }
     if (nb > 0) flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg);
     if (active) {
-        M[j] = mx + st.lx; M[n + j] = my + st.ly; M[2 * n + j] = mz + st.lz;
-        if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        L[j] = st.lx, L[n + j] = st.ly, L[2 * n + j] = st.lz, L[3 * n + j] = st.lb;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
         if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
@@ -903,6 +915,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
                                     constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                     constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
+                                    device float* L            [[buffer(28)]],  // (4, N) low parts of m, mb (two_sum), in/out
                                     uint i    [[thread_position_in_grid]],
                                     uint lane [[thread_index_in_simdgroup]],
                                     uint sg   [[simdgroup_index_in_threadgroup]],
@@ -919,6 +932,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     const uint j = active ? i : 0;
     State st;
     st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    if (active) st.lx = L[j], st.ly = L[n + j], st.lz = L[2 * n + j], st.lb = L[3 * n + j];  // dispatches continue exactly
     st.p = load_spin(spins, n, j);
     if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
         st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
@@ -982,8 +996,9 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     }
     if (nb > 0) flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
     if (active) {
-        M[j] = mx + st.lx; M[n + j] = my + st.ly; M[2 * n + j] = mz + st.lz;
-        if (@V@ != 0 && mt) MB[j] = st.mb + st.lb;
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        L[j] = st.lx, L[n + j] = st.ly, L[2 * n + j] = st.lz, L[3 * n + j] = st.lb;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
         if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
@@ -991,9 +1006,503 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
 }
 """
 
+_ADJOINT_COMMON = r"""
+// ==== Adjoint (reverse mode), as fused/kernel.h's Adjoint, one thread per spin. Segment s maps the
+// magnetization affinely, m_s = A_s m_{s-1} + b_s; with lambda = dL/dm after segment s (spoil
+// included) the sweep is lambda_{s-1} = A_s^T (P_s lambda + ADC term), and the parameter gradients of
+// segment s follow from lambda and m_{s-1}. The forward stores the state (hi and lo) before every K1
+// segments (one dispatch each); the backward replays one such interval into R and sweeps it in reverse.
+// Per-spin gradients are summed in registers and flushed into GS at every segment index that is a
+// multiple of 64 (K1 is one too), so the grouping, and the result, does not depend on K1. Segment
+// gradients are reduced over the threadgroup (simd_sum, threadgroup memory) into one partial per group
+// and segment, then summed over groups in order by seg_reduce: no atomics, the same result every run.
+
+struct Acc { float px, py, pz, db0, pd, r1, r2, b1, c[7], bf, bk, br1, bt2, bdw; };
+#define N_ACC 20
+#define RBLOCK 4  // segments per recomputed block (divides 64; tg: RBLOCK x 4 x 256 floats = 16 KB)
+
+inline void acc_flush(thread Acc& g, device float* GS, uint n, uint j) {
+    const float v[N_ACC] = {g.px, g.py, g.pz, g.db0, g.pd, g.r1, g.r2, g.b1, g.c[0], g.c[1], g.c[2], g.c[3], g.c[4],
+                            g.c[5], g.c[6], g.bf, g.bk, g.br1, g.bt2, g.bdw};
+    for (uint k = 0; k < N_ACC; ++k) GS[k * n + j] += v[k];
+    g = Acc{};
+}
+
+struct SegG { float dt, rx, ry, gx, gy, gz, off, frf; };
+
+// rotation factors c, s1, s2 of w and f1, f2 (fused rotation_derivatives); float32: the series below
+// phi^2 = 1, where (c - s1) / phi^2 and (s1 - 2 s2) / phi^2 cancel
+inline void rot_factors(float wx, float wy, float wz, thread float& c, thread float& s1, thread float& s2,
+                        thread float& f1, thread float& f2) {
+    const float p2 = wx * wx + wy * wy + wz * wz, phi = sqrt(p2);
+    if (phi < 1e-3f) {
+        c = 1.0f - 0.5f * p2, s1 = 1.0f - p2 / 6.0f, s2 = 0.5f - p2 / 24.0f;
+    } else {
+        const float sh = precise::sin(0.5f * phi) / phi;
+        c = precise::cos(phi), s1 = precise::sin(phi) / phi, s2 = 2.0f * sh * sh;
+    }
+    if (p2 < 1.0f) {
+        f1 = -1.0f / 3 + p2 * (1.0f / 30 + p2 * (-1.0f / 840 + p2 * (1.0f / 45360 + p2 * (-1.0f / 3991680))));
+        f2 = -1.0f / 12 + p2 * (1.0f / 180 + p2 * (-1.0f / 6720 + p2 * (1.0f / 453600 + p2 * (-1.0f / 47900160))));
+    } else {
+        f1 = (c - s1) / p2, f2 = (s1 - 2.0f * s2) / p2;
+    }
+}
+
+// n = R(w) m; given a = dL/dn: b = R^T a = dL/dm and gw = dL/dw (fused rodrigues_reverse)
+inline void rod_reverse(float c, float s1, float s2, float f1, float f2, float wx, float wy, float wz, float mx,
+                        float my, float mz, float ax, float ay, float az, thread float& bx, thread float& by,
+                        thread float& bz, thread float& gwx, thread float& gwy, thread float& gwz) {
+    const float wa = wx * ax + wy * ay + wz * az, dot = wx * mx + wy * my + wz * mz;
+    bx = c * ax - s1 * (wy * az - wz * ay) + s2 * wx * wa;
+    by = c * ay - s1 * (wz * ax - wx * az) + s2 * wy * wa;
+    bz = c * az - s1 * (wx * ay - wy * ax) + s2 * wz * wa;
+    const float am = ax * mx + ay * my + az * mz;
+    const float awm = ax * (wy * mz - wz * my) + ay * (wz * mx - wx * mz) + az * (wx * my - wy * mx);
+    const float k = -s1 * am + f1 * awm + f2 * wa * dot;
+    gwx = k * wx + s1 * (my * az - mz * ay) + s2 * (wa * mx + dot * ax);
+    gwy = k * wy + s1 * (mz * ax - mx * az) + s2 * (wa * my + dot * ay);
+    gwz = k * wz + s1 * (mx * ay - my * ax) + s2 * (wa * mz + dot * az);
+}
+
+// The off-resonance of segment q and its partials (fused Adjoint::field): d/d(lin) for lin = pos.g + db0 +
+// b0_offset, d/dg; exact mode also ex = tx / S, ey = ty / S and d/df0.
+struct OffD { float bz, dlin, dgx, dgy, dgz, ex, ey, ef0; };
+
+inline OffD offset_d(thread const Spin& p, thread const Conc& k, uint mode, constant float* q) {
+    const float gx = q[3], gy = q[4], gz = q[5];
+    const float lin = p.px * gx + p.py * gy + p.pz * gz + p.db0 + q[7];
+    OffD o;
+    o.ex = o.ey = o.ef0 = 0.0f, o.dlin = 1.0f;
+    if (mode == 0) {
+        o.bz = lin, o.dgx = p.px, o.dgy = p.py, o.dgz = p.pz;
+    } else if (mode == 1) {
+        o.bz = lin + (k.c[0] * (gx * gx) + k.c[1] * (gy * gy) + k.c[2] * (gz * gz) + k.c[3] * (gx * gy) + k.c[4] * (gx * gz) +
+                      k.c[5] * (gy * gz));
+        o.dgx = p.px + 2.0f * k.c[0] * gx + k.c[3] * gy + k.c[4] * gz;
+        o.dgy = p.py + 2.0f * k.c[1] * gy + k.c[3] * gx + k.c[5] * gz;
+        o.dgz = p.pz + 2.0f * k.c[2] * gz + k.c[4] * gx + k.c[5] * gy;
+    } else {
+        const float tx = k.c[0] * gx + k.c[1] * gy + k.c[2] * gz, ty = k.c[3] * gx + k.c[4] * gy + k.c[5] * gz;
+        const float t2 = tx * tx + ty * ty, u = k.c[6] + lin, S = sqrt(u * u + t2);
+        o.bz = lin + t2 / (S + u);
+        o.dlin = u / S, o.ex = tx / S, o.ey = ty / S, o.ef0 = -t2 / (S * (S + u));
+        o.dgx = o.dlin * p.px + o.ex * k.c[0] + o.ey * k.c[3];
+        o.dgy = o.dlin * p.py + o.ex * k.c[1] + o.ey * k.c[4];
+        o.dgz = o.dlin * p.pz + o.ex * k.c[2] + o.ey * k.c[5];
+    }
+    return o;
+}
+
+// gb = dL/d(offset) into the per-spin gradients and this spin's share of the segment gradients
+inline void offset_grads(float gb, thread const OffD& o, uint mode, constant float* q, thread Acc& g, thread SegG& sg) {
+    const float gx = q[3], gy = q[4], gz = q[5], gl = gb * o.dlin;
+    g.db0 += gl, g.px += gl * gx, g.py += gl * gy, g.pz += gl * gz;
+    sg.gx += gb * o.dgx, sg.gy += gb * o.dgy, sg.gz += gb * o.dgz, sg.off += gl;
+    if (mode == 1) {
+        g.c[0] += gb * gx * gx, g.c[1] += gb * gy * gy, g.c[2] += gb * gz * gz;
+        g.c[3] += gb * gx * gy, g.c[4] += gb * gx * gz, g.c[5] += gb * gy * gz;
+    } else if (mode == 2) {
+        const float a = gb * o.ex, b = gb * o.ey;
+        g.c[0] += a * gx, g.c[1] += a * gy, g.c[2] += a * gz, g.c[3] += b * gx, g.c[4] += b * gy, g.c[5] += b * gz;
+        g.c[6] += gb * o.ef0;
+    }
+}
+
+// the 2 x 2 exchange step with what its reverse needs (fused ZStep)
+struct ZR { float a11, a12, a21, a22, m, h, p, det, z1, z2, chm1, sh; };
+
+inline ZR zr_make(float t, thread const Spin& sp, thread const Pool& b, float w) {
+    ZR z;
+    const float kf = b.k * b.f;
+    z.a11 = -(sp.r1 + kf), z.a12 = b.k, z.a21 = kf, z.a22 = -(b.r1b + b.k + w);
+    const float c1 = sp.r1 * sp.pd, c2 = b.r1b * b.f * sp.pd;
+    z.m = 0.5f * (z.a11 + z.a22), z.h = 0.5f * (z.a11 - z.a22), z.p = z.h * z.h + z.a12 * z.a21;
+    const float q = sqrt(z.p);
+    z.det = z.a11 * z.a22 - z.a12 * z.a21;
+    z.z1 = -(z.a22 * c1 - z.a12 * c2) / z.det, z.z2 = -(z.a11 * c2 - z.a21 * c1) / z.det;
+    z.chm1 = 0.5f * (expm1_((z.m + q) * t) + expm1_((z.m - q) * t));
+    if (2.0f * q * t < 1.0f) {
+        const float lo = precise::exp((z.m - q) * t), e2q = expm1_(2.0f * q * t);
+        z.sh = q > 0.0f ? lo * 0.5f * e2q / q : t * precise::exp(z.m * t);
+    } else {
+        z.sh = 0.5f * (precise::exp((z.m + q) * t) - precise::exp((z.m - q) * t)) / q;
+    }
+    return z;
+}
+
+inline void zr_apply(thread const ZR& z, thread float& u, thread float& v) {
+    const float d1 = u - z.z1, d2 = v - z.z2;
+    const float n1 = z.chm1 * d1 + z.sh * (z.h * d1 + z.a12 * d2), n2 = z.chm1 * d2 + z.sh * (z.a21 * d1 - z.h * d2);
+    u += n1, v += n2;
+}
+
+// (l1, l2) = dL/dz' in, dL/dz out for input z = (u, v); y: dL/d(a11, a12, a21, a22, c1, c2), yt = dL/dt
+inline void zr_reverse(thread const ZR& z, float t, float u, float v, thread float& l1, thread float& l2,
+                       thread float& yt, thread float* y) {
+    const float ch = 1.0f + z.chm1, x2 = z.p * t * t;
+    const float sg = x2 < 0.25f
+        ? precise::exp(z.m * t) * 0.5f * t * t * t *
+              (1.0f / 3 + x2 * (1.0f / 30 + x2 * (1.0f / 840 + x2 * (1.0f / 45360 + x2 * (1.0f / 3991680)))))
+        : (t * ch - z.sh) / (2.0f * z.p);
+    const float d1 = u - z.z1, d2 = v - z.z2;
+    const float e1 = z.chm1 * l1 + z.sh * (z.h * l1 + z.a21 * l2), e2 = z.chm1 * l2 + z.sh * (z.a12 * l1 - z.h * l2);
+    const float ych = l1 * d1 + l2 * d2, ysh = l1 * (z.h * d1 + z.a12 * d2) + l2 * (z.a21 * d1 - z.h * d2);
+    float yh = z.sh * (l1 * d1 - l2 * d2), ya12 = z.sh * l1 * d2, ya21 = z.sh * l2 * d1;
+    const float ym = t * (ych * ch + ysh * z.sh), yp = ych * 0.5f * t * z.sh + ysh * sg;
+    yt = ych * (z.m * ch + z.p * z.sh) + ysh * (z.m * z.sh + ch);
+    yh += 2.0f * z.h * yp, ya12 += z.a21 * yp, ya21 += z.a12 * yp;
+    const float n1 = (z.a22 * e1 - z.a21 * e2) / z.det, n2 = (z.a11 * e2 - z.a12 * e1) / z.det;
+    y[0] = 0.5f * (ym + yh) + n1 * z.z1, y[3] = 0.5f * (ym - yh) + n2 * z.z2;
+    y[1] = ya12 + n1 * z.z2, y[2] = ya21 + n2 * z.z1, y[4] = n1, y[5] = n2;
+    l1 += e1, l2 += e2;
+}
+
+// dL/d(A, c) of the exchange step into the pool parameters; returns dL/dW (fused exchange_grads)
+inline float exchange_grads(thread const float* y, thread const Spin& sp, thread const Pool& b, thread Acc& g) {
+    const float f = b.f, k = b.k, rb = b.r1b, pd = sp.pd;
+    g.r1 += -y[0] + pd * y[4];
+    g.pd += sp.r1 * y[4] + rb * f * y[5];
+    g.bf += k * (y[2] - y[0]) + rb * pd * y[5];
+    g.bk += f * (y[2] - y[0]) + y[1] - y[3];
+    g.br1 += -y[3] + f * pd * y[5];
+    return -y[3];
+}
+
+// the lineshape (as lineshape()) and its partials d/dt2b, d/ddelta (fused Lineshape::eval)
+inline float lineshape_d(float delta, float t2b, constant float* line, constant float* log_f, thread float& g_t2,
+                         thread float& g_d) {
+    if (line[0] < 1.5f) {
+        const float x = TWO_PI * delta * t2b, den = 1.0f + x * x;
+        g_t2 = (1.0f - x * x) / (den * den), g_d = -t2b * 2.0f * x * TWO_PI * t2b / (den * den);
+        return t2b / den;
+    }
+    const float ad = fabs(delta);
+    const bool cut = ad < line[1];
+    const float d = cut ? line[1] : ad, x = TWO_PI * d * t2b;
+    if (x > 30.0f) { g_t2 = g_d = 0.0f; return 0.0f; }
+    const int n = int(line[5]);
+    const bool low = x < line[4];
+    float pos = (precise::log(low ? line[4] : x) - line[2]) / line[3];
+    const bool clamped = pos < 0.0f || pos > float(n - 1);
+    pos = clamp(pos, 0.0f, float(n - 1));
+    const int i = min(int(floor(pos)), n - 2);
+    const float a = pos - float(i);
+    const float val = precise::exp(log_f[i] * (1.0f - a) + log_f[i + 1] * a);
+    const float dval_dx = low || clamped ? 0.0f : val * (log_f[i + 1] - log_f[i]) / line[3] / x;
+    g_t2 = val + t2b * dval_dx * TWO_PI * d;
+    g_d = cut ? 0.0f : t2b * dval_dx * TWO_PI * t2b * (delta > 0.0f ? 1.0f : (delta < 0.0f ? -1.0f : 0.0f));
+    return t2b * val;
+}
+
+// Free-segment factors of the reverse sweep, kept across runs of identical segments (as the forward's Cache:
+// readout samples): cos, sin of the precession, expm1 of the relaxation, the unsaturated exchange step.
+struct RCache { float dt = -1.0f, gx = 0.0f, gy = 0.0f, gz = 0.0f, b0 = 0.0f, c, sn, d1, d2; float zdt = -1.0f; ZR zs; };
+
+// Reverse through segment q from the state (x0, y0, z0, v0) before it; lambda = dL/d(its output) in, dL/d(its
+// input) out. V 0: plain; V 1: the field model (mode) and / or the rate-model bound pool (mt).
+template <int V>
+inline void reverse_seg(constant float* q, int f, float f_rf, float x0, float y0, float z0, float v0,
+                        thread const Spin& p, thread const Pool& b, thread const Conc& cf, uint mode, bool mt,
+                        constant float* line, constant float* log_f, thread float& lx, thread float& ly,
+                        thread float& lz, thread float& lb, thread Acc& g, thread SegG& sg, thread RCache& rc) {
+    const float w_per_s = -TWO_PI, dt = q[0], w = w_per_s * dt;
+    const uint md = V == 0 ? 0u : mode;
+    const OffD o = offset_d(p, cf, md, q);
+    float gb, sdt;
+    if (f & 1) {
+        const float h = 0.5f * dt, rx = q[1], ry = q[2];
+        const float wx0 = w * rx, wy0 = w * ry, wx = wx0 * p.b1, wy = wy0 * p.b1, wz = w * o.bz;
+        float c, s1, s2, f1, f2;
+        rot_factors(wx, wy, wz, c, s1, s2, f1, f2);
+        const float d2 = expm1_(-h * p.r2), e2 = 1.0f + d2;
+        float gwx, gwy, gwz, srx = 0.0f, sry = 0.0f, sfrf = 0.0f, gb1x = 0.0f;
+        if (V == 0 || !mt) {
+            const float d1 = expm1_(-h * p.r1), e1 = 1.0f + d1;
+            const float m1x = x0 + x0 * d2, m1y = y0 + y0 * d2, m1z = z0 + (z0 - p.pd) * d1;
+            const float dot = wx * m1x + wy * m1y + wz * m1z;
+            const float nx = c * m1x + s1 * (wy * m1z - wz * m1y) + s2 * wx * dot;
+            const float ny = c * m1y + s1 * (wz * m1x - wx * m1z) + s2 * wy * dot;
+            const float nz = c * m1z + s1 * (wx * m1y - wy * m1x) + s2 * wz * dot;
+            float gd2 = lx * nx + ly * ny, gd1 = lz * (nz - p.pd), gpd = -lz * d1;
+            const float ax = lx + lx * d2, ay = ly + ly * d2, az = lz + lz * d1;
+            float bx, by, bz;
+            rod_reverse(c, s1, s2, f1, f2, wx, wy, wz, m1x, m1y, m1z, ax, ay, az, bx, by, bz, gwx, gwy, gwz);
+            gd2 += bx * x0 + by * y0, gd1 += bz * (z0 - p.pd), gpd -= bz * d1;
+            lx = bx + bx * d2, ly = by + by * d2, lz = bz + bz * d1;
+            g.r1 -= gd1 * h * e1, g.r2 -= gd2 * h * e2, g.pd += gpd;
+            gb = gwz * w;
+            sdt = w_per_s * gwz * o.bz - 0.5f * (gd1 * p.r1 * e1 + gd2 * p.r2 * e2);
+        } else {  // the exchange step on (z, mb) in place of longitudinal relaxation, saturated at W = kw G
+            float g_t2, g_d;
+            const float G = lineshape_d(f_rf - o.bz - b.dw, b.t2b, line, log_f, g_t2, g_d);
+            const float a2 = rx * rx + ry * ry, kw = TWO_PI * TWO_PI * p.b1 * p.b1 * a2;
+            const ZR zs = zr_make(h, p, b, kw * G);
+            const float m1x = x0 + x0 * d2, m1y = y0 + y0 * d2;
+            float m1z = z0, v1 = v0;
+            zr_apply(zs, m1z, v1);
+            const float dot = wx * m1x + wy * m1y + wz * m1z;
+            const float nx = c * m1x + s1 * (wy * m1z - wz * m1y) + s2 * wx * dot;
+            const float ny = c * m1y + s1 * (wz * m1x - wx * m1z) + s2 * wy * dot;
+            const float nz = c * m1z + s1 * (wx * m1y - wy * m1x) + s2 * wz * dot;
+            float gd2 = lx * nx + ly * ny;
+            const float ax = lx + lx * d2, ay = ly + ly * d2;
+            float az = lz, lv = lb, yt, ya[6], yb[6];
+            zr_reverse(zs, h, nz, v1, az, lv, yt, ya);
+            float yt_sum = yt;
+            float bx, by, bz;
+            rod_reverse(c, s1, s2, f1, f2, wx, wy, wz, m1x, m1y, m1z, ax, ay, az, bx, by, bz, gwx, gwy, gwz);
+            gd2 += bx * x0 + by * y0;
+            lx = bx + bx * d2, ly = by + by * d2;
+            zr_reverse(zs, h, z0, v0, bz, lv, yt, yb);
+            lz = bz, lb = lv;
+            yt_sum += yt;
+            for (int k = 0; k < 6; ++k) ya[k] += yb[k];
+            const float yw = exchange_grads(ya, p, b, g);
+            const float yd = yw * kw * g_d;  // delta = f_rf - offset - dw
+            g.bt2 += yw * kw * g_t2, g.bdw -= yd;
+            sfrf = yd;
+            const float ykw = yw * G * TWO_PI * TWO_PI;
+            gb1x = ykw * 2.0f * p.b1 * a2;
+            srx = ykw * (p.b1 * p.b1) * 2.0f * rx, sry = ykw * (p.b1 * p.b1) * 2.0f * ry;
+            g.r2 -= gd2 * h * e2;
+            gb = gwz * w - yd;
+            sdt = w_per_s * gwz * o.bz - 0.5f * gd2 * p.r2 * e2 + 0.5f * yt_sum;
+        }
+        const float swx = gwx * p.b1, swy = gwy * p.b1;
+        g.b1 += gwx * wx0 + gwy * wy0 + gb1x;
+        sg.dt += sdt + w_per_s * (rx * swx + ry * swy);
+        sg.rx += w * swx + srx, sg.ry += w * swy + sry, sg.frf += sfrf;
+    } else {
+        if (dt != rc.dt || q[3] != rc.gx || q[4] != rc.gy || q[5] != rc.gz || q[7] != rc.b0) {
+            const float phi = w * o.bz;
+            rc.c = precise::cos(phi), rc.sn = precise::sin(phi);
+            rc.d1 = expm1_(-dt * p.r1), rc.d2 = expm1_(-dt * p.r2);
+            rc.dt = dt, rc.gx = q[3], rc.gy = q[4], rc.gz = q[5], rc.b0 = q[7];
+        }
+        const float c = rc.c, sn = rc.sn, d2 = rc.d2, e2 = 1.0f + d2;
+        const float ux = c * x0 - sn * y0, uy = sn * x0 + c * y0;
+        const float gd2 = lx * ux + ly * uy, gphi = e2 * (ly * ux - lx * uy);
+        const float ax = c * lx + sn * ly, ay = c * ly - sn * lx;
+        lx = ax + ax * d2, ly = ay + ay * d2;
+        g.r2 -= gd2 * dt * e2;
+        gb = gphi * w;
+        sdt = w_per_s * gphi * o.bz - gd2 * p.r2 * e2;
+        if (V == 0 || !mt) {
+            const float d1 = rc.d1, e1 = 1.0f + d1;
+            const float gd1 = lz * (z0 - p.pd);
+            g.pd -= lz * d1;
+            lz = lz + lz * d1;
+            g.r1 -= gd1 * dt * e1;
+            sdt -= gd1 * p.r1 * e1;
+        } else {
+            if (dt != rc.zdt) rc.zs = zr_make(dt, p, b, 0.0f), rc.zdt = dt;
+            float yt, y[6];
+            zr_reverse(rc.zs, dt, z0, v0, lz, lb, yt, y);
+            exchange_grads(y, p, b, g);
+            sdt += yt;
+        }
+        sg.dt += sdt;
+    }
+    offset_grads(gb, o, md, q, g, sg);
+}
+
+kernel void seg_reduce(device const float* GSEG [[buffer(0)]],  // (simdgroups, K1, 8) partials of one interval
+                       device float* OUT         [[buffer(1)]],  // (S, 8) segment gradients
+                       constant uint* prm        [[buffer(2)]],  // simdgroups, K1, s0, segments in the interval
+                       uint t [[thread_position_in_grid]]) {
+    const uint G = prm[0], K = prm[1], s0 = prm[2], len = prm[3];
+    if (t >= 8 * len) return;
+    const uint slot = t / 8, k = t % 8;
+    float hi = 0.0f, lo = 0.0f;
+    for (uint gi = 0; gi < G; ++gi) two_sum(hi, lo, GSEG[(gi * K + slot) * 8 + k]);
+    OUT[(s0 + slot) * 8 + k] = hi + lo;
+}
+"""
+
+_ADJOINT_KERNEL = r"""
+// The forward again over one interval, from its checkpoint, keeping the full state (hi and lo) before every
+// RBLOCK-th segment in R; bloch_adjoint recomputes each block from there into threadgroup memory. Storing
+// every state was DRAM-bound (12 B per spin and segment written and read again: 1 s of 3d-48's 2.5 s).
+kernel void bloch_replay@SUFFIX@(device const float* CK  [[buffer(0)]],   // (8, N) state at the interval start: m, mb, lo
+                                 constant float* spins   [[buffer(1)]],
+                                 constant float* segs    [[buffer(2)]],
+                                 constant int* flags     [[buffer(3)]],
+                                 constant float* pool    [[buffer(4)]],
+                                 constant float* frf     [[buffer(5)]],
+                                 constant float* line    [[buffer(6)]],
+                                 constant float* log_f   [[buffer(7)]],
+                                 constant float* conc    [[buffer(8)]],
+                                 device float* R         [[buffer(9)]],   // (K1 / RBLOCK, 8, N) block-start states, out
+                                 constant uint* prm      [[buffer(10)]],  // as bloch_adjoint
+                                 uint i [[thread_position_in_grid]]) {
+    const uint n = prm[0], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5];
+    if (i >= n) return;
+    const uint j = i;
+    State st;
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) st.b = load_pool(pool, n, j);
+    if (@V@ != 0 && mode)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    st.mx = CK[j], st.my = CK[n + j], st.mz = CK[2 * n + j], st.mb = CK[3 * n + j];
+    st.lx = CK[4 * n + j], st.ly = CK[5 * n + j], st.lz = CK[6 * n + j], st.lb = CK[7 * n + j];
+    for (uint s = s0; s < s1; ++s) {
+        constant float* q = segs + 8 * s;
+        const int f = flags[s];
+        if ((s - s0) % RBLOCK == 0) {
+            device float* r = R + (s - s0) / RBLOCK * 8 * n;
+            r[j] = st.mx, r[n + j] = st.my, r[2 * n + j] = st.mz, r[3 * n + j] = st.mb;
+            r[4 * n + j] = st.lx, r[5 * n + j] = st.ly, r[6 * n + j] = st.lz, r[7 * n + j] = st.lb;
+        }
+        const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
+        if (@V@ != 0 && mt)
+            step_mt(q, f, bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line, log_f,
+                    st.cache, st.zc);
+        else
+            step(q, f, bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+        if (f & 4) st.mx = st.my = st.lx = st.ly = 0.0f;
+    }
+}
+
+// NC: coils held in registers (sensitivities, their gradients), padded with zero coils; 0: any count, from memory
+kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],   // (8, N) state at the interval start: m, mb, lo
+                                  constant float* spins   [[buffer(1)]],   // (8, N) px py pz pd r1 r2 db0 b1
+                                  device const float* sens [[buffer(2)]],  // (2C, N) per coil: real, imag
+                                  constant float* segs    [[buffer(3)]],   // (S, 8) dt rfx rfy gx gy gz psi b0
+                                  constant int* flags     [[buffer(4)]],   // (S,) 1 rf, 2 adc, 4 spoil
+                                  constant int* adc_row   [[buffer(5)]],   // (S,) signal row of an ADC segment
+                                  device const float* hb  [[buffer(6)]],   // (n_adc, C, 2) dL/d(raw coil sums)
+                                  constant float* pool    [[buffer(7)]],   // (5, N) f k r1b t2b dw (mt)
+                                  constant float* frf     [[buffer(8)]],   // (S,) RF frequency (mt)
+                                  constant float* line    [[buffer(9)]],   // (6,) lineshape (mt)
+                                  constant float* log_f   [[buffer(10)]],  // lineshape table (mt)
+                                  constant float* conc    [[buffer(11)]],  // (7, N) concomitant-field coefficients
+                                  device float* R         [[buffer(12)]],  // (K1 / RBLOCK, 8, N) block-start states
+                                  device float* LAM       [[buffer(13)]],  // (4, N) lambda, in/out
+                                  device float* GS        [[buffer(14)]],  // (20, N) per-spin gradients, in/out
+                                  device float* GC        [[buffer(15)]],  // (2C, N) coil gradients, in/out
+                                  device float* GSEG      [[buffer(16)]],  // (simdgroups, K1, 8) segment partials, out
+                                  constant uint* prm      [[buffer(17)]],  // n nc s0 s1 mt mode need_seg need_sens need_adc K1
+                                  uint i     [[thread_position_in_grid]],
+                                  uint lane  [[thread_index_in_simdgroup]],
+                                  uint sg    [[simdgroup_index_in_threadgroup]],
+                                  uint nsg   [[simdgroups_per_threadgroup]],
+                                  uint tid   [[thread_index_in_threadgroup]],
+                                  uint group [[threadgroup_position_in_grid]]) {
+    // need_seg: 2 every segment's gradients (dt, grad, b0_offset requested), 1 those of RF segments (rf, rf_freq)
+    const uint n = prm[0], nc = prm[1], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5], need_seg = prm[6],
+               need_sens = prm[7], need_adc = prm[8], K1 = prm[9];
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) st.b = load_pool(pool, n, j);
+    if (@V@ != 0 && mode)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    // reverse sweep, a block of RBLOCK segments at a time: the block's states recomputed from R into tg
+    float lx = active ? LAM[j] : 0.0f, ly = active ? LAM[n + j] : 0.0f, lz = active ? LAM[2 * n + j] : 0.0f;
+    float lb = active ? LAM[3 * n + j] : 0.0f;
+    Acc g = Acc{};
+    RCache rc;
+    threadgroup float tg[RBLOCK * 4 * 256];
+    const uint sgid = group * nsg + sg;  // this simdgroup's row of the segment partials
+    // coil gradients summed in registers (+ 1: no zero-length arrays); the sensitivities are read per sample: in
+    // registers too they cost more occupancy than the reads (3d-48, 8 coils: 1.9 s against 1.4 s)
+    float gcr[@NC@ + 1], gci[@NC@ + 1];
+    for (uint c = 0; c < @NC@; ++c) gcr[c] = 0.0f, gci[c] = 0.0f;
+    const uint nb = (s1 - s0 + RBLOCK - 1) / RBLOCK;
+    for (int blk = int(nb) - 1; blk >= 0; --blk) {
+        const uint b0 = s0 + uint(blk) * RBLOCK, b1 = min(b0 + RBLOCK, s1);
+        device const float* r = R + uint(blk) * 8 * n;
+        st.mx = active ? r[j] : 0.0f, st.my = active ? r[n + j] : 0.0f, st.mz = active ? r[2 * n + j] : 0.0f;
+        st.mb = active ? r[3 * n + j] : 0.0f;
+        st.lx = active ? r[4 * n + j] : 0.0f, st.ly = active ? r[5 * n + j] : 0.0f;
+        st.lz = active ? r[6 * n + j] : 0.0f, st.lb = active ? r[7 * n + j] : 0.0f;
+        st.cache = Cache{}, st.zc = ZCache{};
+        for (uint s = b0; s < b1; ++s) {
+            constant float* q = segs + 8 * s;
+            const int f = flags[s];
+            threadgroup float* t = tg + (s - b0) * 4 * 256;
+            t[tid] = st.mx, t[256 + tid] = st.my, t[512 + tid] = st.mz, t[768 + tid] = st.mb;
+            const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
+            if (@V@ != 0 && mt)
+                step_mt(q, f, bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line,
+                        log_f, st.cache, st.zc);
+            else
+                step(q, f, bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+            if (f & 4) st.mx = st.my = st.lx = st.ly = 0.0f;
+        }
+        for (int s = int(b1) - 1; s >= int(b0); --s) {
+            constant float* q = segs + 8 * s;
+            const int f = flags[s];
+            threadgroup float* t = tg + (uint(s) - b0) * 4 * 256;
+            const float x0 = t[tid], y0 = t[256 + tid], z0 = t[512 + tid], v0 = t[768 + tid];
+            if (f & 4) lx = ly = 0.0f;
+            if ((f & 2) && need_adc) {  // the sample: lambda += dL/dm, and the coil gradients from the output
+                device const float* h = hb + 2 * (@NC@ > 0 ? @NC@ : nc) * uint(adc_row[s]);
+                float ox = 0.0f, oy = 0.0f;
+                if (need_sens) {  // the segment's output (before the spoil), recomputed
+                    Cache kc;
+                    ZCache zc;
+                    float mx = x0, my = y0, mz = z0, mb = v0, ax = 0.0f, ay = 0.0f, az = 0.0f, ab = 0.0f;
+                    const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
+                    if (@V@ != 0 && mt)
+                        step_mt(q, f, bz, frf[s], mx, my, mz, mb, ax, ay, az, ab, st.p, st.b, line, log_f, kc, zc);
+                    else
+                        step(q, f, bz, mx, my, mz, ax, ay, az, st.p, kc);
+                    ox = mx + ax, oy = my + ay;
+                }
+                if (@NC@ > 0) {
+                    for (uint c = 0; c < @NC@; ++c) {
+                        const float hr = h[2 * c], hi = h[2 * c + 1];
+                        const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
+                        lx += hr * a + hi * b, ly += hi * a - hr * b;
+                        if (need_sens) gcr[c] += hr * ox + hi * oy, gci[c] += hi * ox - hr * oy;
+                    }
+                } else {
+                    for (uint c = 0; c < nc; ++c) {
+                        const float hr = h[2 * c], hi = h[2 * c + 1];
+                        const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
+                        lx += hr * a + hi * b, ly += hi * a - hr * b;
+                        if (need_sens && active) GC[2 * c * n + j] += hr * ox + hi * oy, GC[(2 * c + 1) * n + j] += hi * ox - hr * oy;
+                    }
+                }
+            }
+            SegG sgv = SegG{};
+            reverse_seg<@V@>(q, f, (@V@ != 0 && mt) ? frf[s] : 0.0f, x0, y0, z0, v0, st.p, st.b, st.conc, mode, mt != 0,
+                             line, log_f, lx, ly, lz, lb, g, sgv, rc);
+            // one partial per simdgroup and segment (no barriers; seg_reduce sums them in order)
+            device float* out = GSEG + (sgid * K1 + (uint(s) - s0)) * 8;
+            if (need_seg == 2 || (need_seg == 1 && (f & 1))) {
+                const float v[8] = {sgv.dt, sgv.rx, sgv.ry, sgv.gx, sgv.gy, sgv.gz, sgv.off, sgv.frf};
+                for (uint k = 0; k < 8; ++k) {
+                    const float tt = simd_sum(active ? v[k] : 0.0f);
+                    if (lane == 0) out[k] = tt;
+                }
+            } else if (need_seg == 1 && lane < 8) {  // the partials buffer is reused: this segment contributes nothing
+                out[lane] = 0.0f;
+            }
+            if (s % 64 == 0 && active) {
+                acc_flush(g, GS, n, j);
+                for (uint c = 0; need_sens && c < @NC@; ++c)
+                    GC[2 * c * n + j] += gcr[c], GC[(2 * c + 1) * n + j] += gci[c], gcr[c] = gci[c] = 0.0f;
+            }
+        }
+    }
+    if (active) {
+        acc_flush(g, GS, n, j);
+        for (uint c = 0; need_sens && c < @NC@; ++c) GC[2 * c * n + j] += gcr[c], GC[(2 * c + 1) * n + j] += gci[c];
+        LAM[j] = lx, LAM[n + j] = ly, LAM[2 * n + j] = lz, LAM[3 * n + j] = lb;
+    }
+}
+"""
+
+
 _LIB = None
 MAX_COILS = 32  # the direct (simd_sum) reduction; the matrix-product one has no limit
 MAX_POOLS = 5  # free exchanging pools (the shader's MAX_POOLS; one kernel per count)
+ADJOINT_COILS = (0, 1, 2, 4, 8, 16)  # adjoint kernels with the coils in registers (padded up); 0: any, from memory
 MMA_MIN_COILS = 2
 
 
@@ -1011,7 +1520,12 @@ def _lib():
         kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@DIFF@", diff)
                           .replace("@NP@", np_) for suffix, v, diff, np_ in variants)
         assert f"#define MAX_POOLS {MAX_POOLS} " in _SOURCE
-        _LIB = torch.mps.compile_shader(_SOURCE + kernels)
+        replay, adjoint = _ADJOINT_KERNEL.split("// NC: coils held in registers")
+        adjoint = "// NC: coils held in registers" + adjoint
+        for suffix, v in (("", "0"), ("_full", "1")):
+            kernels += replay.replace("@SUFFIX@", suffix).replace("@V@", v)
+            kernels += "".join(adjoint.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@NC@", str(c)) for c in ADJOINT_COILS)
+        _LIB = torch.mps.compile_shader(_SOURCE + _ADJOINT_COMMON + kernels)
     return _LIB
 
 
@@ -1039,19 +1553,212 @@ def _requires_grad(*objs) -> bool:
 
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
                    chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
-                   seed: int = 0, maps=None) -> SimResult:
+                   seed: int = 0, maps=None, checkpoint_every: int | None = None) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
     matrices (default from ``MMA_MIN_COILS`` coils) or one simd_sum per coil and sample.
 
-    No gradients yet (ROADMAP M2): with grad mode on and any input requiring grad it raises
-    ``NotImplementedError`` rather than return results detached from the graph."""
+    Gradients (when grad mode is on and an input requires grad) come from a hand-written adjoint on the GPU
+    (``bloch_adjoint``): to the sequence (dt, rf, grad, adc_phase, b0_offset), the phantom (pos, pd, t1, t2,
+    db0, b1, the rate-model bound pool), coils, m_init and, through the encoding positions and concomitant
+    coefficients, the scanner field model. The forward stores the state before every ``checkpoint_every``
+    segments (a multiple of 64; default about sqrt(segments)); the backward replays one interval at a time.
+    Not with diffusion, motion, free pools or the generalized bound pool (raises)."""
     if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
-        raise NotImplementedError("gradients through simulate_metal are not implemented (ROADMAP M2); use "
-                                  "blochparty.fused.simulate_fused or blochparty.simulate, or run under torch.no_grad()")
+        return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every)
     with torch.no_grad():
         return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps)
+
+
+def default_checkpoint_every(n_segments: int) -> int:
+    """About sqrt(segments), a multiple of 64 (the adjoint's per-spin gradients are flushed every 64
+    segments; with intervals of whole flushes the result does not depend on the interval)."""
+    return 64 * max(1, math.ceil(math.sqrt(max(n_segments, 1)) / 64))
+
+
+class _Opts(NamedTuple):
+    is_rf: list
+    adc: list
+    spoil: list
+    every: int
+    mode: int
+    mma: bool | None
+    lineshape: str
+    cutoff: float
+
+
+N_SPIN_GRADS = 20  # rows of the adjoint's per-spin gradients: pos (3), db0, pd, r1, r2, b1, conc (7), bound (5)
+
+
+class _MetalSimulate(torch.autograd.Function):
+    """The forward kernels with checkpoints; backward: bloch_adjoint, one dispatch per interval."""
+
+    @staticmethod
+    def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc,
+                bound, rf_freq):
+        ctx.set_materialize_grads(False)
+        d = lambda t: None if t is None else t.detach()
+        ph = Phantom(d(pos), d(pd), d(t1), d(t2), d(db0), b1=d(b1),
+                     bound=None if bound is None else exchange.BoundPool(*d(bound).unbind(-1), lineshape=opts.lineshape,
+                                                                         cutoff=opts.cutoff))
+        sq = Sequence(d(dt), d(rf), d(grad), d(adc_phase), opts.is_rf, opts.adc, opts.spoil, {}, d(b0_offset), d(rf_freq))
+        coils = torch.complex(coils_ri[..., 0], coils_ri[..., 1]).detach()
+        from ..fields import SpinFields
+
+        res, cx = _forward(ph, sq, coils, d(m0), opts.every, 256, None, opts.mma, 0, None, True,
+                           SpinFields(d(pos), d(conc), opts.mode), keep=True)
+        ctx.opts, ctx.cx = opts, cx
+        ctx.like = [None if t is None else (t.dtype, t.device) for t in
+                    (pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq)]
+        sig = torch.view_as_real(res.signal.T.contiguous())  # (n_adc, C, 2)
+        m = res.m if res.m_bound is None else torch.cat([res.m, res.m_bound[:, None]], 1)
+        ctx.save_for_backward(t1, t2, adc_phase, sig, bound, b1, conc)
+        return sig, m
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, g_sig, g_m):
+        opts, cx = ctx.opts, ctx.cx
+        t1, t2, adc_phase, sig, bound, b1, conc = ctx.saved_tensors
+        # pos, pd, t1, t2, db0, coils, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq
+        need = list(ctx.needs_input_grad[1:])
+        if g_sig is None:
+            need[5] = need[9] = False
+        if (g_sig is None and g_m is None) or not any(need):
+            return (None,) * 17
+        dev, f32 = torch.device("mps"), torch.float32
+        n, nc, S, every = t1.shape[0], cx["n_coils"], len(opts.is_rf), opts.every
+        adc_idx = torch.tensor(opts.adc).nonzero()[:, 0]
+        h = torch.zeros(max(cx["n_adc"], 1), nc, 2, dtype=f32)
+        if g_sig is not None and cx["n_adc"]:  # dL/d(raw coil sums): dL/dsignal rotated by exp(+i psi)
+            psi = adc_phase.detach().double().cpu()[adc_idx][:, None]
+            gr, gi = g_sig[..., 0].double().cpu(), g_sig[..., 1].double().cpu()
+            h = torch.stack([gr * torch.cos(psi) - gi * torch.sin(psi), gr * torch.sin(psi) + gi * torch.cos(psi)], -1).float()
+        lam = torch.zeros(4, n, dtype=f32)
+        if g_m is not None:
+            lam[: g_m.shape[1]] = g_m.detach().float().cpu().T
+        need_seg = 2 if any(need[i] for i in (6, 8, 12)) else (1 if need[7] or need[15] else 0)
+        need_sens = need[5]
+        lam = lam.to(dev).contiguous()
+        GS = torch.zeros(N_SPIN_GRADS, n, device=dev, dtype=f32)
+        GC = torch.zeros(2 * max(nc, 16) if need_sens else 1, n, device=dev, dtype=f32)
+        threads, sgs = cx["threads"], cx["threads"] // 32
+        R = torch.zeros(every // 4 * 8 * n, device=dev, dtype=f32)  # RBLOCK = 4
+        GSEG = torch.zeros(sgs * every * 8 if need_seg else 1, device=dev, dtype=f32)
+        # coil gradients in registers (padded with zero coils) only when they are wanted: the arrays cost occupancy
+        ncr = next((c for c in ADJOINT_COILS[1:] if c >= nc), 0) if need_sens else 0
+        sens = cx["sens"]
+        if ncr > nc:
+            sens = torch.cat([sens, torch.zeros(2 * (ncr - nc), n, device=dev, dtype=f32)]).contiguous()
+            h = torch.cat([h, torch.zeros(h.shape[0], ncr - nc, 2, dtype=f32, device=h.device)], 1)
+        SEG = torch.zeros(S * 8 if need_seg else 1, device=dev, dtype=f32)
+        lib = _lib()
+        h = h.to(dev).contiguous()
+        kernel = getattr(lib, f"bloch_adjoint{cx['suffix']}_c{ncr}")
+        replay = getattr(lib, "bloch_replay" + cx["suffix"])
+        n_int = len(cx["ckpts"])
+        u32 = lambda rows: torch.from_numpy(np.array(rows, dtype=np.uint32).view(np.int32)).to(dev)
+        prms = u32([[n, nc, c * every, min(S, (c + 1) * every), cx["mt"], cx["mode"], need_seg, need_sens,
+                     g_sig is not None, every] for c in range(n_int)])
+        reds = u32([[sgs, every, c * every, min(S, (c + 1) * every) - c * every] for c in range(n_int)])
+        for c in reversed(range(n_int)):
+            s0, s1 = c * every, min(S, (c + 1) * every)
+            prm = prms[c]
+            replay(cx["ckpts"][c], cx["spins"], cx["segs"], cx["flags"], cx["pool"], cx["frf"], cx["line"], cx["log_f"],
+                   cx["conc"], R, prm, threads=threads, group_size=256)
+            kernel(cx["ckpts"][c], cx["spins"], sens, cx["segs"], cx["flags"], cx["rows"], h, cx["pool"], cx["frf"],
+                   cx["line"], cx["log_f"], cx["conc"], R, lam, GS, GC, GSEG, prm, threads=threads, group_size=256)
+            if need_seg:
+                lib.seg_reduce(GSEG, SEG, reds[c], threads=8 * (s1 - s0))
+        torch.mps.synchronize()
+        GS, lam = GS.cpu().double(), lam.cpu().double()
+        out = [None] * 16
+        if need[0]:
+            out[0] = GS[0:3].T.contiguous()
+        if need[1]:
+            out[1] = GS[4]
+        if need[2]:
+            out[2] = -GS[5] / t1.detach().double().cpu() ** 2  # r1 = 1 / t1
+        if need[3]:
+            out[3] = -GS[6] / t2.detach().double().cpu() ** 2
+        if need[4]:
+            out[4] = GS[3]
+        if need_sens:
+            gc = GC.cpu().double()[: 2 * nc]
+            out[5] = torch.stack([gc[0::2].T, gc[1::2].T], -1)
+        if need_seg:
+            seg = SEG.cpu().double().view(S, 8)
+            out[6], out[7], out[8], out[12] = seg[:, 0], seg[:, 1:3], seg[:, 3:6], seg[:, 6]
+            out[15] = seg[:, 7]
+        if need[9]:  # signal = raw exp(-i psi): dsignal/dpsi = -i signal
+            g = torch.zeros(S, dtype=torch.float64)
+            sg, gs = sig.double(), g_sig.double().cpu()
+            g[adc_idx] = (gs[..., 0] * sg[..., 1] - gs[..., 1] * sg[..., 0]).sum(-1)
+            out[9] = g
+        if need[10]:
+            out[10] = lam[: 4 if bound is not None else 3].T.contiguous()
+        if need[11]:
+            out[11] = GS[7]
+        if need[13]:
+            out[13] = GS[8:8 + conc.shape[1]].T.contiguous()
+        if need[14]:  # f, k, t1b (r1b = 1 / t1b), t2b, dw
+            t1b = bound.detach().double().cpu()[:, 2]
+            out[14] = torch.stack([GS[15], GS[16], -GS[17] / t1b**2, GS[18], GS[19]], -1)
+        return (None, *[None if g is None or not need[i] else g.to(dtype=ctx.like[i][0], device=ctx.like[i][1]) for i, g in enumerate(out)])
+
+
+def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps, mma, every) -> SimResult:
+    """simulate_metal with gradients: the inputs as tensors of an autograd Function (_MetalSimulate)."""
+    for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
+                          ("free pools", bool(getattr(phantom, "pools", None))),
+                          ("the generalized Bloch bound pool", phantom.bound is not None and phantom.bound.model == "generalized")):
+        if present:
+            raise NotImplementedError(f"gradients through simulate_metal with {what} are not implemented; "
+                                      "use blochparty.simulate, or run under torch.no_grad()")
+    n, pd = len(phantom), phantom.pd
+    fields = spin_fields(scanner, phantom.pos)
+    db0, b1 = phantom.db0, phantom.b1
+    if maps is not None:  # static spins: the maps sampled at the true positions, differentiably
+        from ..maps import sample
+
+        if maps.coils is not None and coils is not None:
+            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
+        v = sample(maps.channels(pd.dtype), torch.as_tensor(maps.origin, dtype=pd.dtype),
+                   torch.as_tensor(maps.spacing, dtype=pd.dtype), phantom.pos)
+        db0 = db0 + v[:, 0]
+        b1 = v[:, 1] if b1 is None else b1 * v[:, 1]
+        if maps.coils is not None:
+            coils = torch.complex(v[:, 2::2], v[:, 3::2])
+    if coils is None:
+        coils = torch.ones(n, 1, dtype=torch.complex64 if pd.dtype == torch.float32 else torch.complex128)
+    bound, rf_freq, lineshape, cutoff = None, None, "superlorentzian", 0.0
+    if phantom.bound is not None:
+        pool = phantom.bound.expand(n, pd)
+        bound = torch.stack([pool.f, pool.k, pool.t1, pool.t2, pool.dw], -1)
+        rf_freq = exchange.rf_frequency(seq)
+        lineshape, cutoff = pool.lineshape, float(pool.cutoff)
+    if m_init is None:
+        m0 = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], -1)
+        if bound is not None:
+            m0 = torch.cat([m0, (bound[:, 0] * pd)[:, None]], -1)
+    else:
+        m0 = m_init
+        if bound is not None and m0.shape[-1] == 3:
+            m0 = torch.cat([m0, (bound[:, 0] * pd)[:, None]], -1)
+        elif bound is None and m0.shape[-1] == 4:
+            raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
+    every = every or default_checkpoint_every(len(seq))
+    if every % 64:
+        raise ValueError(f"checkpoint_every must be a multiple of 64, got {every}")
+    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff)
+    sig, m = _MetalSimulate.apply(opts, fields.pos, pd, phantom.t1, phantom.t2, db0, torch.view_as_real(coils),
+                                  seq.dt, seq.rf, seq.grad, seq.adc_phase, m0, b1, seq.b0_offset, fields.conc, bound,
+                                  rf_freq)
+    signal = torch.view_as_complex(sig.contiguous()).T
+    if bound is not None:
+        return SimResult(signal, m[:, :3], m[:, 3])
+    return SimResult(signal, m)
 
 
 def _field_model_buffer(scanner) -> Tensor:
@@ -1099,7 +1806,10 @@ def _take(phantom: Phantom, idx: Tensor) -> Phantom:
 
 
 def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-             ordered: bool = False) -> SimResult:
+             ordered: bool = False, fields_in=None, keep: bool = False):
+    """The forward kernels. ``fields_in``: the field model's inputs (``fields.SpinFields``) in place of
+    spin_fields(scanner, pos). ``keep``: also return what the adjoint needs, with the state before every
+    ``chunk`` segments (one dispatch each)."""
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as bloch.simulate
         if phantom.bound is not None and phantom.bound.model == "generalized":
@@ -1117,7 +1827,8 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     dev, f32 = torch.device("mps"), torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
-    fields = spin_fields(scanner, phantom.pos)  # encoding positions (nonlinearity), concomitant coefficients
+    # encoding positions (nonlinearity), concomitant coefficients
+    fields = fields_in if fields_in is not None else spin_fields(scanner, phantom.pos)
     moving = phantom.diffusion is not None or phantom.motion is not None
     db0 = phantom.db0
     mapped, map_bufs = 0, [torch.zeros(1, device=dev, dtype=f32), torch.zeros(9, device=dev, dtype=f32)]
@@ -1172,16 +1883,20 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
              (torch.tensor(seq.spoil, dtype=torch.int32) << 2)).to(dev)
     rows = (torch.cumsum(adc, 0) - 1).clamp_min(0).to(torch.int32).to(dev)
     n_adc = int(adc.sum())
+    # the state as float32 hi + lo (L), split exactly from float64: the kernels carry lo (two_sum) across dispatches
     if m_init is None:
-        M = torch.stack([torch.zeros(n), torch.zeros(n), phantom.pd.detach().cpu().float()])
+        M64 = torch.stack([torch.zeros(n, dtype=torch.float64), torch.zeros(n, dtype=torch.float64),
+                           phantom.pd.detach().double().cpu()])
     else:
-        M = m_init.detach().cpu().float().T
+        M64 = m_init.detach().double().cpu().T
+    mb64 = torch.zeros(n, dtype=torch.float64)
     pool = None if phantom.bound is None else phantom.bound.expand(n, phantom.pd)
     if pool is not None:  # magnetization transfer: the bound pool's Mz, parameters, RF frequency, lineshape
         mb = pool.f * phantom.pd if m_init is None or m_init.shape[-1] == 3 else m_init[:, 3]
+        mb64 = mb.detach().double().cpu()
         if m_init is not None and m_init.shape[-1] == 4:
-            M = M[:3]
-        mt_bufs = [mb.detach().to(dev, f32).contiguous(),
+            M64 = M64[:3]
+        mt_bufs = [mb64.float().to(dev).contiguous(),
                    torch.stack([pool.f, pool.k, 1 / pool.t1, pool.t2, pool.dw]).detach().to(dev, f32).contiguous()]
         gen_bufs = None
         if pool.model == "generalized":  # modes instead of the saturation lineshape
@@ -1209,7 +1924,9 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         dummy = torch.zeros(1, device=dev, dtype=f32)
         mt_bufs = [dummy, dummy, dummy, dummy, dummy, 0]
         gen_bufs = None
-    M = M.to(dev, f32).contiguous()
+    M = M64.float()
+    lo_buf = torch.cat([M64 - M.double(), (mb64 - mb64.float().double())[None]]).float().to(dev).contiguous()
+    M = M.to(dev).contiguous()
     if fields.mode:
         conc = torch.zeros(7, n, dtype=torch.float64)
         conc[: fields.conc.shape[1]] = fields.conc.detach().double().cpu().T
@@ -1298,19 +2015,23 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs,
             *map_bufs)
 
-    def prm(s0, n_tiles, n_pad):
-        v = np.array([n, n_coils, s0, min(S, s0 + chunk), n_tiles, n_pad, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
-                      kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped, int(fmove)],
-                     dtype=np.uint32)
-        return torch.from_numpy(v.view(np.int32)).to(dev)
+    starts = list(range(0, S, chunk))
+    tiles = (n_tiles, threads) if mma else (0, 0)
+    prms = torch.from_numpy(np.array([[n, n_coils, s0, min(S, s0 + chunk), *tiles, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
+                                       kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped,
+                                       int(fmove)] for s0 in starts], dtype=np.uint32).view(np.int32)).to(dev)
 
-    for s0 in range(0, S, chunk):
+    ckpts = []
+    mb_row = mt_bufs[0][None] if pool is not None else torch.zeros(1, n, device=dev, dtype=f32)
+    for c, s0 in enumerate(starts):  # one upload of every dispatch's parameters (prms[c]: a view)
+        if keep:  # the state before this dispatch: m (3), mb, their low parts (4)
+            ckpts.append(torch.cat([M, mb_row, lo_buf]).clone())
         if mma:
-            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, n_tiles, threads),
-                                                     *bm_bufs, fm_buf, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
+                                                     *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
         else:
-            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prm(s0, 0, 0),
-                                                 *bm_bufs, fm_buf, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
+                                                 *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
     torch.mps.synchronize()
     sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
@@ -1319,6 +2040,12 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         st = (st[:len(st) // 2] + st[len(st) // 2:]).float()
         m_pools = torch.stack([st[3 + 3 * k: 6 + 3 * k].T for k in range(len(pools))], 1).contiguous()
         return SimResult(signal, st[:3].T.contiguous(), st[-1].clone() if pool is not None else None, m_pools)
-    if pool is not None:
-        return SimResult(signal, M.cpu().T.contiguous(), mt_bufs[0].cpu())
-    return SimResult(signal, M.cpu().T.contiguous())
+    lo = lo_buf.cpu().double()
+    m = (M.cpu().double() + lo[:3]).float().T.contiguous()
+    res = SimResult(signal, m, (mt_bufs[0].cpu().double() + lo[3]).float() if pool is not None else None)
+    if not keep:
+        return res
+    sens_d = torch.stack([coils.real, coils.imag], -1).reshape(n, 2 * n_coils).T.to(dev, f32).contiguous()
+    return res, dict(ckpts=ckpts, spins=spins, sens=sens_d, segs=segs, flags=flags, rows=rows, pool=mt_bufs[1],
+                     frf=mt_bufs[2], line=mt_bufs[3], log_f=mt_bufs[4], mt=mt_flag, conc=conc_buf[0], mode=conc_buf[1],
+                     n_adc=n_adc, n_coils=n_coils, threads=threads, suffix=suffix, sig=sig)

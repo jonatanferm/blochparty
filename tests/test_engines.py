@@ -48,7 +48,8 @@ TOL = {"fused": 1e-12, "metal": 5e-5, "chunked": 1e-12}
 # Metal with walking spins (diffusion): the kernel walks absolute positions in float32, which
 # perturbs every spin's phase; the per-spin states feel it most, the signal averages it
 TOL_METAL_WALK = {"signal": 2e-4, "states": 3e-3}
-GRAD_TOL = {"core": 1e-6, "fused": 1e-11, "chunked": 1e-12}  # core: vs finite differences
+GRAD_TOL = {"core": 1e-6, "fused": 1e-11, "chunked": 1e-12, "metal": 2e-4}  # core: vs finite differences
+# metal: its float32 adjoint vs the core's float64 autograd
 
 
 # ---------------------------------------------------------------- the document
@@ -461,7 +462,7 @@ def loss(r: bp.SimResult) -> torch.Tensor:
     """Linear in every output, with fixed random weights."""
     total = 0
     for i, (k, v) in enumerate(sorted(outputs(r).items())):
-        x = torch.view_as_real(v) if v.is_complex() else v
+        x = (torch.view_as_real(v) if v.is_complex() else v).double()  # the same weights for float32 engines
         w = torch.randn(x.shape, dtype=x.dtype, generator=_g(10 + i))
         total = total + (w * x).sum()
     return total
