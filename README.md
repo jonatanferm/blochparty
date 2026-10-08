@@ -9,13 +9,15 @@ lessons: [docs/LESSONS.md](docs/LESSONS.md); project journal: [docs/JOURNAL.md](
 
 ```bash
 uv sync
-uv run pytest                              # ~480 verification tests, ~3.5 min on an M4
+uv run pytest                              # ~735 verification tests, ~3 min on an M4
+uv run pytest -m "not slow"                # the quick subset, under a minute
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--fused: C++ adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
-uv run python examples/gre3d_128.py        # full 3D 128^3 with the fused kernel, ~6 min
+uv run python benchmarks/bench.py --backend metal  # same, on the Apple GPU
 uv run python benchmarks/bench.py --backend fused  # same, with the fused C++ kernel
 uv run python benchmarks/bench.py --grad --backend fused  # forward + backward
+uv run python examples/gre3d_128.py        # full 3D 128^3 with the fused kernel, ~6 min
 ```
 
 ```python
@@ -33,6 +35,30 @@ image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
 (flip angles, TR, gradient amplitudes, T1/T2/PD/B0/B1⁺/T2′/fat maps, coil maps).
+
+## Engines
+
+Four entry points with the same arguments and result, one physics. Which features each one runs,
+with forward and gradients, is the matrix in [docs/ENGINES.md](docs/ENGINES.md), checked cell by
+cell by `tests/test_engines.py`.
+
+- `bp.simulate`: the reference. Plain PyTorch on any device, float32 or float64, differentiable
+  by autograd. Every new effect lands here first.
+- `blochparty.metal.simulate_metal`: the engine for imaging-scale work, on the Apple GPU. Float32,
+  forward only for now (it raises if an input requires grad). Runs everything the core runs except
+  free exchanging pools.
+- `blochparty.fused.simulate_fused`: a CPU kernel with a hand-written adjoint, float32 or float64;
+  the fast way to gradients until the Metal kernel has an adjoint (ROADMAP M2). Frozen: no
+  diffusion, motion or `FieldMaps`.
+- `bp.simulate_chunked`: the core with a backward pass that holds one chunk of spins at a time,
+  for gradients on large phantoms (no exchange, diffusion, motion, scanner model, `FieldMaps` or
+  `m_init`).
+
+```python
+from blochparty.metal import simulate_metal
+
+kspace = simulate_metal(phantom, seq, coils).signal   # (coils, n_adc) complex64, back on the CPU
+```
 
 ## Realistic phantoms
 
@@ -70,8 +96,8 @@ phantom = bp.phantom_from_maps(
   `b0_cylinder` (closed-form susceptibility fields, Lorentz corrected, B0 along z) return
   Hz at any positions; evaluate them at `phantom.pos` to sample the field at every spin.
 - **B1⁺**: `Phantom.b1` (`None` = 1) scales every RF pulse per spin (flip b1·α) in `simulate`,
-  `simulate_chunked`, `simulate_fused` (forward and adjoint: `b1` gets gradients) and
-  `reference.signal_equation`. `coils.birdcage_b1(pos, centre_brightening, radius)` is a CP
+  `simulate_chunked`, `simulate_fused` (forward and adjoint: `b1` gets gradients), `simulate_metal`
+  and `reference.signal_equation`. `coils.birdcage_b1(pos, centre_brightening, radius)` is a CP
   birdcage field, uniform or with J0(kρ) centre brightening.
 - **Fat** (`fat_fraction` map): water keeps PD·(1 − f); one fat spin per peak of `FAT_PEAKS`
   (−3.80 … +0.60 ppm, amplitudes normalised to 1) with PD·f·a_p, fat T1/T2 (`fat_t1`,
@@ -143,8 +169,9 @@ seq.meta["adc_per_readout"], seq.meta["kspace_trajectory"]  # samples per ADC; k
 ## Scanner field model
 
 Real gradients are not ideal. All of this is opt-in (`scanner=None`, no `b0_offset`: results
-unchanged bit for bit), runs in `simulate` and `simulate_fused` (forward and adjoint), and is
-differentiable in the hardware parameters, so a scanner's imperfections can be fitted:
+unchanged bit for bit), runs in `simulate`, `simulate_fused` (forward and adjoint) and
+`simulate_metal`, and is differentiable in the hardware parameters, so a scanner's imperfections
+can be fitted:
 
 ```python
 from blochparty.fields import GradientNonlinearity, Scanner
@@ -206,6 +233,7 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 
 
 ## Fast gradients: the fused kernel
 
+Until the Metal kernel has an adjoint, this is the fast way to gradients.
 `blochparty.fused.simulate_fused` takes the same arguments and returns the same result as
 `simulate`, ~10-15× faster on CPU, and is differentiable through a hand-written adjoint
 (reverse sweep in C++) instead of autograd:
@@ -273,10 +301,17 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `sequence.py` | `Sequence` (flat piecewise-constant segments), `SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
-| `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use) |
-| `metal/` | forward kernel on the Apple GPU (`simulate_metal`, float32, runtime-compiled Metal shader); 5.8× the CPU kernel on the real NIST TSE workload |
+| `fused/` | C++ kernel with a hand-written adjoint, same results and gradients ~10-15× faster than `simulate` on an M4 CPU: `simulate_fused()` (JIT-built on first use); frozen |
+| `metal/` | the engine: forward kernel on the Apple GPU (`simulate_metal`, float32, runtime-compiled Metal shader); 5.8× the CPU kernel on the real NIST TSE workload |
+| `exchange.py` | magnetization transfer: the bound pool (rate model), free exchanging pools (Bloch–McConnell), lineshapes |
+| `generalized_bloch.py` | the generalized Bloch model of the bound pool |
+| `motion.py`, `restriction.py`, `rng.py` | flow, deformation and rigid motion; restricted diffusion; the counter-based random numbers every engine's walks share |
+| `maps.py` | `FieldMaps`: scanner-frame B0, B1⁺ and coil maps sampled where each spin is |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
+| `anatomy.py`, `susceptibility.py` | BrainWeb / QSM / AHEAD anatomies with tissue properties and texture; susceptibility → B0, shimming |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
+| `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |
+| `receive.py`, `transmit.py` | the receive chain (oversampling, filtering); the RF amplifier |
 | `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`) |
 | `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |

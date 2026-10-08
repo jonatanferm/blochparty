@@ -24,9 +24,10 @@ hardware come when other machines exist (M8).
 
 Three conditions, each testable. The core is done when all three hold.
 
-1. **Parity.** The Metal kernel runs everything the PyTorch core runs. Today it refuses free
-   exchanging pools and motion under gradient nonlinearity or concomitant fields; everything
-   else is at parity (`docs/ENGINES.md`, M0).
+1. **Parity.** The Metal kernel runs everything the PyTorch core runs. Today it refuses only
+   free exchanging pools; both engines refuse motion under gradient nonlinearity or concomitant
+   fields, diffusion with exact concomitant fields, and free pools with the generalized bound
+   pool, diffusion, motion or `FieldMaps` (`docs/ENGINES.md`, M1).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
    design need (M2). Without it, "differentiable" holds only for the CPU reference and the
    frozen fused kernel.
@@ -82,24 +83,24 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
 
 ---
 
-## M0. Consolidate (about one day)
+## M0. Consolidate (about one day) — done 2026-10-08
 
 Goal: a stranger (or a fresh agent) can tell which engine does what, and the docs match the code.
 
-- [ ] `docs/ENGINES.md`: capability matrix of the three engines against every physics feature
-      (B1+, B0 maps, `FieldMaps`, bound pool rate / generalized, free pools, diffusion free /
-      restricted, motion, scanner field model leading / exact, nonlinearity, GIRF via sequence,
-      `b0_offset`, `rf_freq`, many coils, `m_init`) with forward / adjoint / float64 columns, and
-      the tolerance at which the engines agree.
-- [ ] `tests/test_engines.py`: for every "not supported" cell, assert the engine raises
-      `NotImplementedError` (so the matrix cannot silently go stale); for every supported cell
-      with no existing parity test, add one (small case, core vs engine).
-- [ ] README: engine section matching the matrix (today it sends gradient users to the fused
-      kernel and does not mention Metal); run commands that exist; test count.
-- [ ] `benchmarks/bench.py --backend metal` on the standard cases, recorded in
-      `benchmarks/history.jsonl`, so later shader changes have a baseline.
-- [ ] Mark slow tests; a `uv run pytest -m "not slow"` subset under one minute for use while
-      iterating on shaders.
+- [x] `docs/ENGINES.md`: capability matrix of the four entry points (core, fused, Metal,
+      chunked) × 31 features and combinations, forward and gradients, precision per engine, and
+      the measured agreement (fused 4e-14, Metal 2e-5 static / 7e-5 signal with walking spins).
+- [x] `tests/test_engines.py` parses the matrix and checks all 248 cells: ✓ = parity with the
+      core (forward; gradients vs the core's autograd, the core's autograd vs finite
+      differences), ✗ = `NotImplementedError`. It found two silent cases, now raising: the core
+      ignored `maps` with free pools, Metal ran diffusion with exact concomitant fields (no
+      reference). Metal now raises when an input requires grad instead of returning detached
+      results.
+- [x] README: engine section matching the matrix; commands; test count.
+- [x] `benchmarks/bench.py --backend metal` on the four cases, recorded in
+      `benchmarks/history.jsonl`.
+- [x] `slow` marker (21 tests over ~1 s, and the 4 crosscheck tests); `uv run pytest -m "not slow"`
+      runs 714 tests in 45 s.
 
 Verify: suite green; snapshot identical; the matrix agrees with the raises.
 
@@ -146,6 +147,11 @@ time-varying k·r, which is what the motion path already handles for ideal gradi
   evaluation (`fields.GradientNonlinearity`, solid harmonics to the file's order) and the
   concomitant quadratic form per segment under a flag; only when `moving && (mode || nonlin)`.
 
+- Diffusion under the field model today keeps the concomitant coefficients of the start position
+  and walks in encoding coordinates (negligible for µm walks), and raises with exact concomitant
+  fields; evaluate both per segment at the walked position too, so that row of
+  `docs/ENGINES.md` turns ✓.
+
 Verify: a spin moving at constant velocity through a nonlinear field equals a static spin placed
 at each segment's position (sequence of one-segment simulations with `m_init`) to 1e-10 (core)
 and 1e-5 (Metal); a Maxwell-compensated spin echo stays compensated for a static spin and
@@ -158,6 +164,9 @@ acquires Bernstein's velocity-dependent phase for a moving one.
       Verify against the core's two separate paths in their respective limits.
 - [ ] Free pools with diffusion or motion (core raises): compose the walk with the matrix
       step; verify against the single-pool path with f → 0.
+- [ ] Free pools with `FieldMaps` (core raises since M0; it used to ignore `maps`): for static
+      spins, sample the maps once into db0, b1 and the coils, as the single-pool path does;
+      verify against the same fields given per spin.
 
 ## M2. Metal adjoint (5 to 7 days)
 
@@ -390,4 +399,4 @@ full-wave coils; BrainWeb / QSM / AHEAD anatomy with texture and R2* separation;
 design penalties, losses, CRB and worked optima; MRzero and BMCTool crosschecks; nine real-data
 benchmarks (NIST IR-SE 1.5 %, NIST TSE 2.2 %, radial IR-bSSFP, BSA NMR, spiral TSE, radial
 timing, measured GIRF, Pulseq-CEST, iohexol CEST prediction); Monte Carlo estimators with
-jackknife error bars. 484 tests.
+jackknife error bars. 735 tests.

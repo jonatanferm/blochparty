@@ -7,6 +7,25 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **The restricted walk is discontinuous in D, and a lucky D sits on a jump.** Sub-steps per
+  segment are ceil(dt / tau_max) with tau_max = min over spins of R² / (200 D), so the walk (new
+  Philox draws per sub-step) changes discretely with D or R. With D = 2e-9 m²/s and R = 5 µm,
+  tau_max = 62.5 µs divides 1 ms and 9 ms segments exactly; a ±1e-6 relative perturbation of a
+  per-spin D raises max D either way, so both finite-difference points ran 17 sub-steps where the
+  base point ran 16. Autograd (exact for the 16-step walk) and the converged finite difference
+  (exact for the 17-step one) then disagreed by 10 %. Autograd through a walk is right at fixed
+  sub-step counts; pick parameters away from integer dt / tau_max when differencing. Source:
+  `tests/test_engines.py`, 2026-10-08.
+- **Metal walks absolute positions in float32.** A walker 5 mm from isocentre is resolved to
+  ~3e-10 m, and so is its offset from the compartment's centre: per-spin magnetization of 5 µm
+  cylinders agreed with the core to 1.1e-3, the signal to 1.4e-5; spins at 10 cm with a
+  gradient nonlinearity gave 7.4e-5 on the signal. Static spins agree to 2e-5. Walking in offsets
+  from the start position would remove most of it. Source: `docs/ENGINES.md` Agreement, 2026-10-08.
+- **Compare a saturated pool against the water's scale, not its own.** After a 10 µs hard 180°
+  the bound pool's Mz was 8.8e-5 of an equilibrium 0.12; Metal's error was 1.3e-8 (1e-7 of
+  equilibrium) but 1.5e-4 relative to the pool's own maximum. `test_metal.py` already divided by
+  max |m| of the water; `test_engines.py` does too. Source: `tests/test_engines.py`, 2026-10-08.
+
 - **Susceptibility units do not specify its reference.** QSM full-head chi is referenced
   to water (air around +9.2 ppm), while challenge chi is brain-only with zero exterior;
   neither should inherit the absolute-air value +0.36 ppm blindly. Preserve a separate
@@ -505,6 +524,22 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **A finite-difference check must rebuild its inputs.** Perturbing leaf tensors in place misses
+  everything derived from them when the case was built (`apply_girf` output, `subdivide_rf`
+  pieces, a tensor scaled by a leaf): the GIRF, `rf_freq` and diffusion-scale checks failed for
+  that reason alone. And a leaf computed from another leaf (a carrier from `rf_frequency(rf)`)
+  carries a dependence the rebuilt case sees and autograd does not. Build cases as functions of
+  independent leaves and rebuild at θ ± εv; give each run its own graph. Source:
+  `tests/test_engines.py`, 2026-10-08.
+- **`pytest -m EXPR` on the command line replaces the `-m` in `addopts`** (the last one wins), so
+  `pytest -m "not slow"` would have run the opt-in crosscheck tests: 4 collected with
+  `-m "not nothing"`, 0 without. The crosscheck tests are therefore also marked `slow`.
+  Source: M0, 2026-10-08.
+- **Perturb a symmetric matrix symmetrically.** A finite difference along an asymmetric
+  perturbation of a diffusion tensor disagreed with autograd by 8 %: the Cholesky factor reads
+  one triangle, its backward returns a symmetrized gradient. Perturb a per-spin scale (or
+  D + Dᵀ) instead. Source: `tests/test_engines.py`, 2026-10-08.
 
 - **QSM Challenge releases are not interchangeable.** Radboud's complete head package
   declares restricted access and RU-DI-HD-1.0, despite the initial spec's CC BY guess.
