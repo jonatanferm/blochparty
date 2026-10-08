@@ -599,7 +599,7 @@ says where it came from so it can be re-checked.
   SEs as though their reconstructed errors were independent. Shared water and reconstruction
   can correlate ROIs. Jackknife the mean sphere error directly, and pair seeds for model
   differences. A perfectly correlated ten-output check exposes a sqrt(10) underestimate;
-  the correction for the actual scanner benchmarks has not been measured.
+  on Benchmark 1 the historical bar was 1.65x too small (next entry).
 - **Repeated seeds cannot detect deterministic quantile bias.** For a uniform T2′ voxel,
   permutations preserve the same frequency set. At 256 spins over 0–3 T2′, the audit found
   maximum FID error 0.03818 with seed SD only 2.08e-16. Increase quadrature density separately
@@ -614,3 +614,10 @@ says where it came from so it can be re-checked.
   1.35–2.81x lower complex variance over three phase variances. This is an estimator proposal,
   not an implemented engine optimization; RF, reflecting walls and nonlinear spatial fields
   require separate treatment.
+- **An RMS error of Monte Carlo curves is biased upward by the MC noise, and error bars do not
+  show it**: the NIST shape error (RMS residual after a fitted scale) fell 1.90 → 1.80 → 1.73 %
+  as 2 → 4 → 8 seeds were averaged, at a jackknife SE of ~0.2. Compare model errors at equal
+  MC noise, or use the jackknife bias correction (`nist.mc_errors`), which removes the 1/K term.
+  Also: jackknife the final aggregate, not its parts (sqrt(Σ se²)/n underestimated by 1.65×),
+  and 4-seed SEs are themselves noisy (0.31 vs 0.19 on disjoint seed sets). Source: Benchmark 1
+  recheck, 2026-10-08.

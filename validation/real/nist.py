@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import replace
+from typing import NamedTuple
 
 import numpy as np
 import torch
@@ -217,14 +218,17 @@ def fill_phantom(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48
 # pixel (across the slab of +-1.5 slice thicknesses) with a scrambled Sobol set, randomised per
 # pixel by a Cranley-Patterson shift: unbiased, and lower-discrepancy than random or stratified
 # placement. Independent seeds give independent estimates of the complex image, whose spread
-# gives error bars and the magnitude-bias correction (see ``mc_magnitude``).
+# gives error bars and the power debiasing of the magnitude (see ``mc_power``, ``mc_errors``).
 
 
 def _sobol_points(n: int, n_pixels: int, seed: int) -> np.ndarray:
-    """(n_pixels, n, 3) points in [0, 1)^3: one scrambled Sobol set, shifted per pixel."""
+    """(n_pixels, n, 3) points in [0, 1)^3: one scrambled Sobol set, shifted per pixel. n must be
+    a power of two (Sobol's balance properties hold for those prefixes only)."""
     from scipy.stats import qmc
 
-    base = qmc.Sobol(d=3, scramble=True, seed=seed).random(n)
+    if n < 1 or n & (n - 1):
+        raise ValueError(f"Sobol point counts must be powers of two, got {n}")
+    base = qmc.Sobol(d=3, scramble=True, seed=seed).random_base2(n.bit_length() - 1)
     shift = np.random.default_rng(seed + 1).random((n_pixels, 1, 3))
     return (base[None] + shift) % 1.0
 
@@ -261,6 +265,8 @@ def fill_phantom_qmc(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256,
     sampling: pixels more than ``dense`` [m] from every sphere wall get ``sparse`` * n spins (a
     power-of-two fraction keeps the Sobol prefix balanced) with weights scaled up to match, so the
     estimate stays unbiased while spins go where the ROIs are sensitive."""
+    if not 0 < sparse <= 1:
+        raise ValueError(f"sparse must be in (0, 1], got {sparse}")
     half = 1.5 * SLICE
     centres = _sphere_centres(rois)
     r_out = np.broadcast_to(np.asarray(r_in, dtype=float), (len(rois),)) + wall
@@ -274,7 +280,7 @@ def fill_phantom_qmc(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256,
     for sel, n_pix in ((gap <= dense, n), (gap > dense, n_sparse)):
         if not sel.any():
             continue
-        u = _sobol_points(n, int(sel.sum()), seed * 1000 + 999)[:, :n_pix]
+        u = _sobol_points(n_pix, int(sel.sum()), seed * 1000 + 999)  # = the n_pix prefix of the n-point set
         p = np.stack([x0 + (2 * u[..., 0] - 1) * half, pix[sel][:, None, 0] + (u[..., 1] - 0.5) * PIXEL,
                       pix[sel][:, None, 1] + (u[..., 2] - 0.5) * PIXEL], -1).reshape(-1, 3)
         d = np.linalg.norm(p[:, None, 1:] - centres[None], axis=-1)  # (spins, 14)
@@ -294,24 +300,100 @@ def recon_complex(data: np.ndarray) -> np.ndarray:
     return np.fft.fftshift(np.fft.ifft2(data[:, 0, :]), axes=(-2, -1))
 
 
-def mc_magnitude(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Magnitude estimate from K independent complex-image estimates (K, ...): the seed-mean's
-    magnitude with its Monte Carlo bias removed. For zero-mean MC noise of variance s2 (of the
-    mean), E|mean|^2 = |true|^2 + s2, so |true| ~ sqrt(|mean|^2 - s2_hat), with s2_hat from the
-    seed spread. Returns (magnitude, s2_hat)."""
+def mc_power(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Unbiased estimate of |true|^2 from K >= 2 independent complex-image estimates (K, ...):
+    |mean|^2 - s2_hat, with s2_hat the seed spread's variance of the mean (E|mean|^2 = |true|^2 +
+    s2 for any i.i.d. finite-variance MC noise). Not clipped: it is negative where the noise
+    exceeds the signal, e.g. at an inversion null. Returns (power, s2_hat)."""
     k = images.shape[0]
+    if k < 2:
+        raise ValueError(f"need at least 2 independent estimates, got {k}")
     mean = images.mean(0)
     s2 = (np.abs(images - mean) ** 2).sum(0) / (k - 1) / k
-    return np.sqrt(np.clip(np.abs(mean) ** 2 - s2, 0, None)), s2
+    return np.abs(mean) ** 2 - s2, s2
 
 
-def jackknife(stat, samples: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Jackknife estimate and standard error of ``stat`` over the leading (seed) axis."""
+def mc_magnitude(images: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Power-debiased magnitude sqrt(max(mc_power, 0)) of K >= 2 complex-image estimates; returns
+    (magnitude, s2_hat). Only the power is unbiased: the clip and square root bias the magnitude
+    again, upward where the signal is below the MC noise (a floor at a null) and downward just
+    above it. ``mc_errors`` reports how many pixels are clipped."""
+    power, s2 = mc_power(images)
+    return np.sqrt(np.clip(power, 0, None)), s2
+
+
+def jackknife(stat, samples: np.ndarray, bias_corrected: bool = False) -> tuple[np.ndarray, np.ndarray]:
+    """``stat`` of all K seeds (the plug-in estimate; with ``bias_corrected`` the jackknife's
+    K full - (K - 1) mean(leave-one-out), which removes a bias ~ 1/K) and its leave-one-seed-out
+    standard error, over the leading (seed) axis. K >= 2, and ``stat`` must accept K - 1 seeds
+    (``mc_magnitude`` needs 2, so K >= 3). Jackknife the final scalar itself (e.g. a mean over
+    spheres) so covariance between its parts is included."""
     k = samples.shape[0]
+    if k < 2:
+        raise ValueError(f"the jackknife needs at least 2 seeds, got {k}")
     full = np.asarray(stat(samples))
     loo = np.array([stat(np.delete(samples, i, axis=0)) for i in range(k)])
     se = np.sqrt((k - 1) / k * ((loo - loo.mean(0)) ** 2).sum(0))
-    return full, se
+    return (k * full - (k - 1) * loo.mean(0) if bias_corrected else full), se
+
+
+class MCErrors(NamedTuple):
+    err: np.ndarray  # (14,) per-sphere shape errors of the power-debiased magnitude
+    se: np.ndarray  # (14,) their jackknife SEs
+    mean10: float  # mean error over spheres 1-10 ...
+    mean10_se: float  # ... and its jackknife SE (covariance between spheres included)
+    mean10_bc: float  # ... jackknife bias-corrected: MC noise in the curves inflates an RMS error
+    curves: np.ndarray  # (n_images, 14) ROI-mean curves of all seeds
+    clipped: np.ndarray  # (14,) fraction of each ROI's pixels (over all images) whose power was < 0
+
+
+def _mean10(imgs, rois, real, idx=None) -> float:
+    return float(shape_error(roi_means(mc_magnitude(imgs)[0], rois), real, idx)[:10].mean())
+
+
+def mc_errors(imgs: np.ndarray, rois, real: np.ndarray, idx=None) -> MCErrors:
+    """Shape errors of K >= 3 seeds' complex images (K, n_images, N, N) against the scanner's
+    ROI means, with jackknife SEs over seeds, per sphere and for the spheres-1-10 mean."""
+    def curves(x):
+        return roi_means(mc_magnitude(x)[0], rois)
+
+    err, se = jackknife(lambda x: shape_error(curves(x), real, idx), imgs)
+    m, m_se = jackknife(lambda x: _mean10(x, rois, real, idx), imgs)
+    m_bc, _ = jackknife(lambda x: _mean10(x, rois, real, idx), imgs, bias_corrected=True)
+    clipped = roi_means((mc_power(imgs)[0] < 0).astype(float), rois).mean(0)
+    return MCErrors(err, se, float(m), float(m_se), float(m_bc), curves(imgs), clipped)
+
+
+def mc_paired_difference(imgs_a: np.ndarray, imgs_b: np.ndarray, rois, real: np.ndarray, idx=None):
+    """Spheres-1-10 mean error of b minus that of a, with the paired jackknife SE (the same seed
+    left out of both). Meaningful when a and b share their seeds (common random numbers): the
+    covariance then cancels most of the MC noise of the difference. Returns (difference, se)."""
+    if imgs_a.shape != imgs_b.shape:
+        raise ValueError(f"paired runs need the same seeds and images, got {imgs_a.shape} and {imgs_b.shape}")
+    d, se = jackknife(lambda x: _mean10(x[:, 1], rois, real, idx) - _mean10(x[:, 0], rois, real, idx),
+                      np.stack([imgs_a, imgs_b], 1))
+    return float(d), float(se)
+
+
+def print_mc_table(rows, rois, real: np.ndarray, plain_rows=()):
+    """Markdown table of (name, err) rows without MC error and (name, MCErrors, seed images) rows,
+    then the clipped-pixel fractions and the paired differences between all MC rows."""
+    print("\n| model | spheres 1–10 | bias-corrected | per sphere 1..14 [%] (± jackknife SE) |\n|---|---|---|---|")
+    for name, err in plain_rows:
+        print(f"| {name} | {100 * err[:10].mean():.2f} % | | {' '.join(f'{100 * e:.1f}' for e in err)} |")
+    for name, r, _ in rows:
+        print(f"| {name} | {100 * r.mean10:.2f} ± {100 * r.mean10_se:.2f} % | {100 * r.mean10_bc:.2f} % | "
+              f"{' '.join(f'{100 * e:.1f}±{100 * d:.1f}' for e, d in zip(r.err, r.se))} |")
+    print("\nPixels with negative debiased power (clipped to 0), % of each ROI over all images:")
+    for name, r, _ in rows:
+        print(f"  {name}: {' '.join(f'{100 * c:.1f}' for c in r.clipped)}")
+    if len(rows) > 1:
+        print("\nPaired differences of the spheres-1–10 mean (same seeds; ± paired jackknife SE):")
+        for i, (name_a, _, imgs_a) in enumerate(rows):
+            for name_b, _, imgs_b in rows[i + 1:]:
+                if imgs_a.shape == imgs_b.shape:
+                    d, se = mc_paired_difference(imgs_a, imgs_b, rois, real)
+                    print(f"  {name_b} − {name_a}: {100 * d:+.2f} ± {100 * se:.2f} %")
 
 
 def coarsen_rf(seq: bp.Sequence, k: int) -> bp.Sequence:

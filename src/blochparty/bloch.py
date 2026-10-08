@@ -331,7 +331,7 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
                                          None if f_rf is None else f_rf[a])
             if seq.adc[a]:
-                samples.append(_sample(mx, my, seq.adc_phase[a], spins)[None])
+                samples.append(_sample(mx, my, seq.adc_phase[a], step_spins)[None])
         else:
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None

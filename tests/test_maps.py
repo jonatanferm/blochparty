@@ -63,6 +63,24 @@ def test_translated_object_under_mapped_coils():
     assert rel(moving.signal, moved.signal) < 1e-12
 
 
+def test_adc_during_rf_under_mapped_coils():
+    """An ADC sample at the end of an RF segment sees the mapped coils where the moving spin is
+    (it read the zero placeholders before)."""
+    origin, spacing, xx, yy, _ = grid()
+    coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.05), torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.05)])
+    maps = bp.FieldMaps(origin, spacing, coils=coils.to(torch.complex128))
+    ph = bp.shepp_logan(16)
+    seq = bp.gre_2d(16, n_dummy=2)
+    seq = replace(seq, adc=[a or r for a, r in zip(seq.adc, seq.is_rf)])
+    b = np.array([0.03, -0.02, 0.0])
+    rig = bp.Motion(rigid=lambda t: (np.broadcast_to(np.eye(3), (len(t), 3, 3)), np.broadcast_to(b, (len(t), 3))))
+    moving = bp.simulate(replace(ph, motion=rig), seq, maps=maps)
+    moved = bp.simulate(replace(ph, pos=ph.pos + torch.as_tensor(b)), seq, maps=maps)
+    rf_rows = torch.tensor([r for a, r in zip(seq.adc, seq.is_rf) if a])
+    assert moved.signal[:, rf_rows].abs().max() > 0
+    assert rel(moving.signal, moved.signal) < 1e-12
+
+
 def test_gpu_matches_core():
     import pytest
 

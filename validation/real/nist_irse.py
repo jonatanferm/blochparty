@@ -38,8 +38,8 @@ from scipy import ndimage
 import blochparty as bp
 from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
-from nist import (N, PIXEL, T1_NICL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, jackknife,
-                  mc_magnitude, phantom, phantom_qmc, recon, recon_complex, roi_means, shape_error, slice_position,
+from nist import (N, PIXEL, T1_NICL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, mc_errors,
+                  phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_position,
                   sphere_radius, t2_of_nicl2)
 
 if os.environ.get("BLOCHPARTY_BACKEND") == "metal":  # Apple GPU, forward only: same physics, float32
@@ -69,8 +69,9 @@ def sim_complex_image(signal: torch.Tensor) -> np.ndarray:
 
 def monte_carlo(real, rois, radii, x0, seqs, t1, t2, *, seeds=4, n=256, fill_margin=8, dense=3, sparse=0.25, wall=1e-3,
                 water=(WATER_T1 * 1e3, WATER_T2 * 1e3), real_img=None):
-    """Independent Sobol seeds of spheres (+ water fill), every inversion time; per-sphere shape
-    errors of the bias-corrected magnitude, with jackknife standard errors over seeds."""
+    """Independent Sobol seeds of spheres (+ water fill), every inversion time: shape errors of the
+    power-debiased magnitude with jackknife SEs over seeds (``nist.MCErrors``), and the seed images
+    (seeds, n_TI, N, N) for paired comparisons."""
     imgs = []
     for k in range(seeds):
         t0 = time.perf_counter()
@@ -82,9 +83,7 @@ def monte_carlo(real, rois, radii, x0, seqs, t1, t2, *, seeds=4, n=256, fill_mar
         imgs.append(np.stack([sim_complex_image(sum(simulate_fused(ph, s).signal for ph in phs)) for s in seqs]))
         print(f"  seed {k}: {' + '.join(str(len(ph)) for ph in phs)} spins, {time.perf_counter() - t0:.0f} s", flush=True)
     imgs = np.array(imgs)  # (seeds, n_TI, N, N)
-    curves = lambda x: roi_means(mc_magnitude(x)[0], rois)
-    err, se = jackknife(lambda x: shape_error(curves(x), real), imgs)
-    return err, se, curves(imgs)
+    return mc_errors(imgs, rois, real), imgs
 
 
 def sphere_rois() -> list[np.ndarray]:
@@ -181,8 +180,9 @@ def main(argv=None):
     p.add_argument("--fill-margin", type=float, default=0, help="water simulated within this many pixels of a sphere wall (0: none)")
     p.add_argument("--wall", type=float, default=1.0, help="sphere wall thickness [mm]")
     p.add_argument("--water", type=float, nargs=2, default=[WATER_T1 * 1e3, WATER_T2 * 1e3], help="water T1 T2 [ms]")
-    p.add_argument("--mc", type=int, default=0, help="Monte Carlo mode: this many Sobol seeds (bias-corrected, error bars)")
-    p.add_argument("--n", type=int, default=256, help="--mc: Sobol spins per pixel")
+    p.add_argument("--mc", type=int, default=0, help="Monte Carlo mode: this many Sobol seeds (power-debiased magnitude, error bars; >= 3)")
+    p.add_argument("--n", type=int, default=256, help="--mc: Sobol spins per pixel (a power of two)")
+    p.add_argument("--save", type=Path, help="--mc: save every row's seed images (.npz) for later paired comparisons")
     p.add_argument("--versions", nargs="+", default=list(T1_NICL2), help="T1 reference versions to run")
     p.add_argument("--figure", action="store_true", help="write nist_irse_curves.png (the figure RESULTS.md shows)")
     args = p.parse_args(argv)
@@ -199,19 +199,18 @@ def main(argv=None):
     train, test = [0, 2, 4, 6, 8], [1, 3, 5, 7, 9]
 
     if args.mc:
-        rows = []
+        plain, rows = [], []
         for ver in args.versions:
             t1, t2 = T1_REF[ver], args.t2 or T2_REF[ver]
-            rows.append((f"analytic IR formula, T1 {ver}", shape_error(analytic(t1, t2), real), np.zeros(14)))
+            plain.append((f"analytic IR formula, T1 {ver}", shape_error(analytic(t1, t2), real)))
             for margin in ([0, args.fill_margin] if args.fill_margin > 0 else [0]):
                 print(f"T1 {ver}: Monte Carlo, {args.mc} Sobol seeds x {args.n} spins/pixel, water margin {margin} px", flush=True)
-                err, se, _ = monte_carlo(real, rois, radii, x0, seqs, t1, t2, seeds=args.mc, n=args.n, fill_margin=margin,
-                                         wall=args.wall * 1e-3, water=args.water, real_img=real_img)
-                rows.append((f"Bloch MC{' + water fill' if margin else ''}, T1 {ver}", err, se))
-        print(f"\n| model | spheres 1–10 | per sphere 1..14 [%] (± jackknife SE) |\n|---|---|---|")
-        for name, err, se in rows:
-            print(f"| {name} | {100 * err[:10].mean():.2f} ± {100 * np.sqrt((se[:10] ** 2).sum()) / 10:.2f} % | "
-                  f"{' '.join(f'{100 * e:.1f}±{100 * d:.1f}' for e, d in zip(err, se))} |")
+                res, imgs = monte_carlo(real, rois, radii, x0, seqs, t1, t2, seeds=args.mc, n=args.n, fill_margin=margin,
+                                        wall=args.wall * 1e-3, water=args.water, real_img=real_img)
+                rows.append((f"Bloch MC{' + water fill' if margin else ''}, T1 {ver}", res, imgs))
+        print_mc_table(rows, rois, real, plain)
+        if args.save:
+            np.savez_compressed(args.save, names=[r[0] for r in rows], **{f"imgs{i}": r[2] for i, r in enumerate(rows)})
         return rows, None
     rows = []
     for ver, t1 in T1_REF.items():

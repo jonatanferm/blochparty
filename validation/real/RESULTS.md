@@ -533,3 +533,28 @@ The error bar shrinks 4× for 4× the spins, faster than the N^-0.75 Sobol rate 
 because at 256 spins it was dominated by the near-null bias of spheres 2–3. The result matches
 the brute-force 1.49 %. What remains is a model misfit on spheres 1–3 (the longest T1),
 not sampling noise.
+
+**Recheck of the error bars (2026-10-08).** The ± above combine the per-sphere SEs as if the
+spheres were independent, sqrt(Σ se²)/10. The scripts now jackknife the spheres-1–10 mean
+itself (`nist.mc_errors`), which keeps the covariance between spheres. The same 256-spin run
+was repeated with 8 seeds (T1 v2, spheres only, Apple GPU, 57 s per seed). Seeds 0–3
+reproduce the 4-seed row above exactly.
+
+| seeds | spheres 1–10 | old ± (independent) | jackknife of the mean | jackknife bias-corrected |
+|---|---|---|---|---|
+| 0–3 (the row above) | 1.77 % | 0.19 | **0.31** | 1.71 % |
+| 4–7 | 1.84 % | 0.28 | 0.19 | |
+| 0–7 | 1.73 % | 0.17 | 0.22 | 1.66 % |
+
+- The independence formula underestimated the historical bar by 1.65×. With 4 seeds the bar
+  itself is unreliable (0.31 vs 0.19 for two disjoint sets of 4 seeds), so the "4× smaller at
+  1024 spins" above compares two noisy numbers (the 1024-spin images were not kept, so its
+  bar cannot be recomputed).
+- Clipping of the debiased power is rare: ≤ 3 % of ROI pixels per sphere, at TI indices 6, 8
+  and 9 for spheres 1–2. It does not explain the 256 → 1024 shift. With 8 seeds, spheres 2–3
+  at 256 spins match 1024 spins (4.1 / 5.4 vs 4.0 / 5.2 %).
+- The shift is mostly a different bias: residual MC noise in the curves adds to an RMS shape
+  error. The spheres-1–10 mean falls with the number of seeds averaged (2, 4, 8 seeds:
+  1.90, 1.80, 1.73 %), and the jackknife bias correction (now printed) moves it to 1.66 %.
+  The remaining gap to 1.51 % is in spheres 5–10 (8 seeds: 0.4–0.9 vs 0.2–0.5 % at 1024
+  spins), whose small errors are the most noise-inflated.
