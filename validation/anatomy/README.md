@@ -109,7 +109,8 @@ metadata; spatial variability is M4 and is explicitly rejected for now.
 - 1.5/3 T T1/T2: Stanisz 2005 specimen measurements, marked as animal/ex-vivo proxies
   (blood is human). CSF, fat and PD include legacy BrainWeb priors; skin, connective
   tissue and dura use explicit muscle proxies. These are not calibrated human defaults.
-- 3 T WM/GM T2*: regional Wansapura 1999 measurements; 7 T WM/GM T1/T2*: Caan 2019,
+- 3 T WM/GM T2*: whole-brain Shin 2025 measurements (FreeSurfer GM/WM, 4 subjects, with SDs;
+  their protocol is `DEFAULT_R2STAR_ACQUISITION`); 7 T WM/GM T1/T2*: Caan 2019,
   with measured SDs. Other 7 T classes are absent, and 7 T T2 is explicitly a 3 T
   proxy. Missing values raise; there is no silent field interpolation.
 - Chi uses absolute SI: air +0.36 ppm, water-like soft tissue −9.05 ppm, bone a

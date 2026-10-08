@@ -87,6 +87,9 @@ _RO = ("Rooney et al. 2007, doi:10.1002/mrm.21122: CSF T1 ~4.4 s, nearly field-i
        "Spijkerman et al. 2018, ref. 13)")
 _SP = ("Spijkerman et al. 2018, doi:10.1007/s10334-017-0659-3: 3 T ventricular CSF T2 median 2.03 s "
        "(range 1.73-2.16 s; peripheral 1.79 s), T2-prepared, 7 volunteers")
+_SH = ("Shin et al. 2025, Table 3 average across 4 subjects (mean +- between-subject SD), doi:10.1002/mrm.30624: "
+       "human 3 T (Prisma), FreeSurfer GM/WM, 1 x 1 x 2 mm, TE 3-66.18 ms (43 echoes), mono-exponential, no "
+       "macroscopic-field correction; the abstract swaps the WM/GM labels")
 _DB = "de Bazelaire et al. 2004, doi:10.1148/radiol.2303021331: subcutaneous fat at 3 T, abdomen"
 _IT = ("IT'IS Foundation tissue database, relaxation times, SAT (subcutaneous fat) 1.5 T: mean of 2 studies "
        "(T1 288-343 ms, T2 58-165 ms); itis.swiss, checked 2026-10-07")
@@ -135,13 +138,13 @@ def _tables():
     for strength, index in ((1.5, 0), (3., 1)):
         for name, measurements in rows.items():
             t1, s1, t2, s2 = measurements[index]
-            # T2* at 1.5 T is a legacy model prior; at 3 T use the measured
-            # occipital value from Wansapura (regional proxy, unreported SD).
+            # T2* at 1.5 T is a legacy model prior; at 3 T WM/GM are whole-brain measurements
+            # (they replace occipital Wansapura 1999 values, GM 41.6 < WM 48.4 ms, which made cortex
+            # dark at long TE; Peters et al., ISMRM 2006 #926, also find GM 59.7 > WM 54.6 ms).
             star = min(bw[name].t2star.mean, t2)
             star_dist = _assumed(star, _BW + "; T2* proxy, clipped to T2; no measured SD")
             if strength == 3 and name in ("wm", "gm"):
-                star_dist = Distribution(.0484 if name == "wm" else .0416, None,
-                    "Wansapura et al. 1999, abstract FLASH T2* occipital WM/GM; PMID:10232510; regional proxy", True)
+                star_dist = Distribution(.0515, .0022, _SH) if name == "wm" else Distribution(.0559, .0018, _SH)
             default[strength][name] = replace(default[strength][name],
                 t1=Distribution(t1,s1,_ST + f"; {name}, {strength} T",True),
                 t2=Distribution(t2,s2,_ST + f"; {name}, {strength} T",True), t2star=star_dist)
@@ -619,8 +622,10 @@ def anatomy_field_maps(anatomy, table=DEFAULT_TISSUES, field_T=3., *, shim_order
 
 # The R2* measurement a T2* value or map came from (voxel (dz, dy, dx) [m], echo times [s]):
 # the macroscopic part of its decay is estimated at these, not at the simulation grid.
-# Default (table values whose protocols are not encoded): an assumption, 1 mm, 8 echoes 5-40 ms.
-DEFAULT_R2STAR_ACQUISITION = {"voxel": (1e-3, 1e-3, 1e-3), "te": tuple(5e-3 * k for k in range(1, 9))}
+# Default: the protocol of the 3 T WM/GM table values (Shin et al. 2025: 1 x 1 mm in plane, 2 mm
+# slices, assumed axial; 43 echoes TE 3 + 1.47 k ms to 66.18 ms). Other table T2* entries are
+# priors without a protocol of their own and use the same.
+DEFAULT_R2STAR_ACQUISITION = {"voxel": (2e-3, 1e-3, 1e-3), "te": tuple(3e-3 + 1.47e-3 * k for k in range(43))}
 # AHEAD (MP2RAGEME, Caan et al. 2019: second-inversion echoes 3 / 11.5 / 19 / 27.5 ms). Voxel 0.64 mm:
 # the commonly cited AHEAD resolution; the papers say "submillimetre" (unverified here).
 AHEAD_R2STAR_ACQUISITION = {"voxel": (.64e-3, .64e-3, .64e-3), "te": (3e-3, 11.5e-3, 19e-3, 27.5e-3)}

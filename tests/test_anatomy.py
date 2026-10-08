@@ -304,9 +304,9 @@ def test_float64_resampling_keeps_fractions_valid():
                 float(a.fractions[k].sum()) * .0005**3, rel=1e-6)
 
 
-@pytest.mark.parametrize("grad_hz_per_mm", [5.0, 8.0, 15.0])
+@pytest.mark.parametrize("grad_hz_per_mm", [3.0, 5.0, 8.0])
 def test_measured_r2star_round_trip_without_double_counting(grad_hz_per_mm):
-    # A tissue whose table T2* came from a 1 mm, 5-40 ms multi-echo fit, in a voxel-scale field
+    # A tissue whose table T2* came from a 1 mm (in plane), 3-66 ms multi-echo fit, in a voxel-scale field
     # gradient: the assembled phantom (microscopic R2' on the spins + the field at their positions)
     # must give back that measured R2* when "acquired" the same way. Without the separation the
     # field is counted twice ('table' with no macroscopic term); dropping R2' ('off') undercounts.
@@ -331,9 +331,9 @@ def test_measured_r2star_round_trip_without_double_counting(grad_hz_per_mm):
     assert float(est[1, 1, 1]) == pytest.approx(sinc_rate, rel=1e-9)  # the estimator is the closed form
     out = measured("auto")
     r2 = 1 / DEFAULT_TISSUES[3]["wm"].t2.mean
-    if sinc_rate < r2s_in - r2:  # consistent: 1.9 and 4.9 /s of the 6.2 /s R2* - R2
+    if sinc_rate < r2s_in - r2:  # consistent: 1.0 and 2.9 /s of the 4.9 /s R2* - R2
         assert out == pytest.approx(r2s_in, rel=0.02), (out, r2s_in)
         assert measured("table", macroscopic_r2prime=0.0) > r2s_in + 0.5 * sinc_rate  # double counted
         assert measured("off") < r2s_in - 1.0  # microscopic R2' lost
-    else:  # 15 Hz/mm alone dephases faster (19 /s) than the measured R2*: R2' clips at 0
+    else:  # 8 Hz/mm alone dephases faster (7.7 /s) than R2* - R2 allows: R2' clips at 0
         assert out == pytest.approx(measured("off"), rel=1e-12) and out > r2s_in

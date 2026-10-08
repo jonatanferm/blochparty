@@ -116,7 +116,8 @@ spins per tissue and full-head field construction cost more.
 
 Code records means, reported SDs, source/row and assumption flags. Unknown SD is
 `None`. Key sources are [Stanisz 2005, Table 1](https://doi.org/10.1002/mrm.20605)
-(ex-vivo tissue proxies at 1.5/3 T), Wansapura above (regional 3 T T2*), and
+(ex-vivo tissue proxies at 1.5/3 T), [Shin 2025, Table 3](https://doi.org/10.1002/mrm.30624)
+(whole-brain 3 T WM/GM T2*), and
 [Caan 2019, Table 1](https://pmc.ncbi.nlm.nih.gov/articles/PMC6590660/)
 (human 7 T WM/GM T1/T2*). Full 7 T tissue coverage, calibrated MT/diffusion,
 microstructure/iron susceptibility and spatial variability are not provided.
@@ -190,7 +191,25 @@ inside the brain is small except near air (median 0.07, 90th 0.41, 99th percenti
 0.00, 99th percentile 0.1 /s, so the measured R2* contrast now appears without manual R2' (figure
 above, regenerated).
 
-Known issue (flagged in the table, follow-up on the roadmap): the 3 T WM/GM T2* proxies are
-occipital values (Wansapura 1999: GM 41.6 < WM 48.4 ms), so long-TE GRE now shows cortex darker
-than white matter; whole-brain cortical T2* is reported longer than WM (Hoogenraad/Peters et al.
-2007, values not yet verified from the paper).
+Known issue at the time (fixed 2026-10-08, below): the 3 T WM/GM T2* proxies were occipital
+values (Wansapura 1999: GM 41.6 < WM 48.4 ms), so long-TE GRE showed cortex darker than white
+matter.
+
+## 3 T WM/GM T2*: whole-brain values (2026-10-08)
+
+The occipital Wansapura 1999 values (GM 41.6 < WM 48.4 ms) are replaced by
+[Shin et al. 2025](https://doi.org/10.1002/mrm.30624), Table 3, average across 4 subjects: GM
+55.9 +- 1.8, WM 51.5 +- 2.2 ms (3 T Prisma, FreeSurfer segmentation, 1 x 1 x 2 mm, 43 echoes 3-66 ms,
+mono-exponential, no macroscopic-field correction). The abstract states the two the other way
+round; the table and the single-subject rows (GM 54.6, WM 50.1 ms; reference mGRE 52.7 / 47.8 ms)
+put GM above WM. Independent: Peters et al., ISMRM 2006 #926, Table 1, 3 T, through-slice
+corrected: cortical GM 59.7, WM 54.6 ms (2 subjects for cortex; WM possibly raised by CSF).
+`DEFAULT_R2STAR_ACQUISITION` is now this protocol (2 mm slices assumed axial).
+
+- Round trip (WM, R2* 19.42 /s in): separated 19.42 / 19.46 at 3 / 5 Hz/mm, double counted
+  20.43 / 22.27, R2' dropped 15.51 / 17.36; at 8 Hz/mm the field alone (7.7 /s) exceeds
+  R2* - R2 (4.9 /s) and clips, as designed. The longer echo train makes clipping start at
+  lower gradients than with the old 5-40 ms assumption.
+- Long-TE GRE (TR 40 ms, 20 deg, TE 25 ms), signal equation with the table values: the T2*
+  factor GM/WM is 1.04 (was 0.92); the total GM/WM ratio 0.81 (was 0.72) stays below 1 from
+  T1 weighting (GM T1 1.82 vs WM 1.08 s). `anatomy_brain.png` regenerated.

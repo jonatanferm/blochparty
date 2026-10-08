@@ -339,6 +339,13 @@ says where it came from so it can be re-checked.
   registration check that survives near-symmetric maps: correlate the image ratio (B1 map on /
   off) with the sampled map and with its transpose and mirror (-0.995 vs -0.93 / -0.97).
 
+- **Read the table, not the abstract** (2026-10-08): Shin et al. 2025's abstract gives "white
+  matter and gray matter 55.9 ms and 51.5 ms"; Table 3 (columns GM, WM) and every per-subject row
+  give GM > WM. Values for the table come from tables, cross-checked against a second source
+  (Peters, ISMRM 2006, Table 1 in the PDF: GM 59.7 > WM 54.6 ms at 3 T). A tissue T2* also needs
+  its source's voxel size and echo times: the macroscopic part it contains depends on them, and a
+  longer echo train (3-66 vs 5-40 ms) clips R2' at gradients half as large.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

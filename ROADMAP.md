@@ -488,8 +488,9 @@ by Pulseq's own checks.
       get microscopic R2' per voxel, and make that the default; check against a multi-echo GRE
       of the same anatomy (simulated R2* fit vs the input map) and the static-dephasing limit.
       Done: round trip within 0.3 % (vs +9 to +24 % double counted, -6 to -21 % dropped).
-- [ ] 3 T WM/GM T2* in the tissue table: replace the occipital Wansapura proxies (GM < WM) with
-      whole-brain values (Hoogenraad/Peters 2007 reports cortical GM longer than WM; verify numbers).
+- [x] 3 T WM/GM T2* in the tissue table: replace the occipital Wansapura proxies (GM < WM) with
+      whole-brain values. Done: Shin 2025 (GM 55.9, WM 51.5 ms; Peters ISMRM 2006 agrees on GM > WM),
+      their protocol as the default R2* acquisition.
 - [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
       (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
 - [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
