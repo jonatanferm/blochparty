@@ -7,6 +7,19 @@ says where it came from so it can be re-checked.
 
 ## Physics and numerics
 
+- **Mid-segment positions are exact for G·r, not for the concomitant field.** Moving spins see each
+  segment at their mid-time position: exact for terms linear in t, but f_c is quadratic in r, so a
+  constant velocity leaves C dt³/12 per segment (6e-3 rad for 5 ms lobes at 2 m/s, 32 mT/m, 0.55 T).
+  Checked against the exact path integral (3-point Gauss-Legendre per segment): the error falls
+  4.0x per halving of the segments. Source: M1b, `test_fields_concomitant.py`, 2026-10-08.
+- **Float32 resolves a segment's phase increment to |φ| 2⁻²⁴.** A 5 ms lobe of 32 mT/m seen from
+  15 cm is ~6400 rad, so Metal and the core differed by 5e-4 rad on a moving-spin echo, with the
+  ideal scanner too: not the field model, the arithmetic. Source: M1b, 2026-10-08.
+- **FieldMaps are physical fields: sample them at true positions.** Static spins sampled the maps at
+  their encoding positions (`spin_fields(...).pos`), which differ under a gradient nonlinearity;
+  moving spins sampled at their (then encoding) positions too. Both now use true positions.
+  Source: M1b, 2026-10-08.
+
 - **Float32 drifts wherever a step rewrites the whole state.** Every Metal variant drifted from the
   float64 core by 1e-3 in Mz per 1e4 RF segments (1e-2 after 1e5 segments of 10 µs CW), because
   each RF segment rotated m by a tiny angle (cos φ ≈ 1 − 1e-5) and rounded all of it. Writing the
@@ -552,6 +565,12 @@ says where it came from so it can be re-checked.
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
 ## Process and tooling
+
+- **A finite difference can be noise-limited before it is truncation-limited.** On spins 10 cm out
+  under a gradient nonlinearity, a central difference with a 1e-6 relative step agreed with
+  autograd to only ~1e-6 (rounding of the loss / step), and a 1e-4 step to 8e-5 (truncation).
+  Richardson extrapolation of central differences at 1e-5 and 2e-5 (error O(h⁴)) fixed the check.
+  Source: `tests/test_engines.py`, M1b, 2026-10-08.
 
 - **A validation script's entry point goes last.** `compare_bmctool.py` defined `cest_comparison`
   after `if __name__ == "__main__": main()`, so running it as a script died with a NameError

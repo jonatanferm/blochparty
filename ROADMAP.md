@@ -25,9 +25,8 @@ hardware come when other machines exist (M8).
 Three conditions, each testable. The core is done when all three hold.
 
 1. **Parity.** The Metal kernel runs everything the PyTorch core runs (since M1a, free pools
-   too). Both engines refuse motion under gradient nonlinearity or concomitant fields, diffusion
-   with exact concomitant fields, and free pools with the generalized bound pool, diffusion,
-   motion or `FieldMaps` (`docs/ENGINES.md`, M1b, M1c).
+   too; since M1b, moving spins under the field model). Both engines refuse only free pools with
+   the generalized bound pool, diffusion, motion or `FieldMaps` (`docs/ENGINES.md`, M1c).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
    design need (M2). Without it, "differentiable" holds only for the CPU reference and the
    frozen fused kernel.
@@ -148,7 +147,20 @@ a random RF / gradient / off-resonance sequence and on a CEST saturation + reado
 ≤ 1e-5 relative; the BMCTool comparison (`validation/compare_bmctool.py`) through Metal within
 the float32 budget (the core is at 5.8e-7); benchmarks 8 and 9 reproduce their tables.
 
-### M1b. Motion under gradient nonlinearity and concomitant fields
+### M1b. Motion under gradient nonlinearity and concomitant fields — done 2026-10-08
+
+Done as planned, diffusion included: moving spins under the field model live in true coordinates
+(motion and walks), and every segment maps them to encoding positions and concomitant
+coefficients (core: `bloch._moving_fields`; Metal: `nl_displacement`, `conc_at` in the `_diff`
+kernels). Static spins untouched (snapshot bit-identical). A moving spin equals the chain of static
+one-segment simulations at each segment's position to 4e-15 (core) and 1e-5 per spin (Metal);
+in a Maxwell-compensated echo a moving spin keeps the exact path integral of Bernstein's field,
+the midpoint error falling 4x per halving (`tests/test_fields_concomitant.py`). Also: static
+`FieldMaps` are now sampled at true positions (they were at encoding positions under a
+nonlinearity). Metal's float32 resolves a segment's phase to |φ| 2⁻²⁴ (4e-4 rad for a 5 ms,
+32 mT/m lobe at 15 cm): see `docs/ENGINES.md`.
+
+The original plan:
 
 Both engines raise today (`bloch.py:483`, `metal/__init__.py:879`). With motion, the encoding
 position f(r(t)) and the concomitant coefficients (quadratic in the position) must be
