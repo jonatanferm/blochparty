@@ -308,6 +308,7 @@ magnitude set by an unreported pulse (`validation/RESULTS_INCIDENTAL_MT.md`).
       sequence transforms (`drift.py`)
 - [ ] Concomitant terms of nonlinear coils; b-matrix with nonlinearity; drift driven by
       gradient duty; mechanical resonance models; fitting a GIRF / eddy model to measured data
+      (measured transfer functions are applied and validated: benchmark 7, `validation/real/girf.py`)
 
 **Verified** (`tests/test_fields_*.py`, `tests/test_girf.py`, `tests/test_drift.py`, 48 tests, ~1 min):
 - Defaults unchanged: `scanner=None` and no `b0_offset` give bit-identical signals, final

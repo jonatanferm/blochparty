@@ -265,6 +265,53 @@ the estimator is biased by up to 0.4 us for the asymmetric ellipse at |dx - dy| 
 Not tested here: GIRF shape (eddy currents beyond a delay) and B0 terms. This scanner has no
 published GIRF; the GIRF dataset (Zenodo 6376737) comes from a different site.
 
+## Benchmark 7: a measured GIRF through `apply_girf`, Siemens Prisma (`girf.py`)
+
+Data: Wu et al., ISMRM 2022 #641, [Zenodo 6376737](https://zenodo.org/records/6376737) (3 T
+Prisma, Toronto; processing code github.com/BRAIN-TO/girfISMRM2022 at 92bc337). Thin-slice method:
+1 mm slices at +-17 mm per axis, 18 triangle blips (180 T/m/s, 9-39.6 mT/m) 2 ms into a 50 ms ADC
+(5 us), 50 repetitions; Meas1 positive blips, Meas2 eight months later both polarities. The
+released raw signals are coil-averaged.
+
+**Port.** Output gradients from the slice-pair phase derivatives (Python port of the authors'
+code). Our GIRF from Meas1 (H = sum O conj(I) / sum |I|^2, raised-cosine band limit 24-30 kHz):
+DC gain 1.0015 / 1.0002 / 1.0000 (x / y / z); it equals the authors' precomputed Meas1 GIRF (coils
+processed separately) to <= 0.054 below 10 kHz once their input frame (point samples) is moved
+half a dwell onto ours (cell averages); our delays 1.58 / 1.62 / 4.41 us are theirs (4.03 / 4.13 /
+6.90 us) minus that 2.5 us.
+
+**Held-out prediction.** Meas2's measured outputs predicted from Meas1 through blochparty
+(`GIRF` taps from the transfer function, a -0.5 .. +3.5 ms window keeping the DC gain to 7e-4,
+`apply_girf` on 5 us segments; agrees with a direct FFT convolution to 0.026 mT/m): rms error over
+1.9-3.5 ms relative to the blip peak, median over the 18 blips (max):
+
+| Axis | Polarity | Ideal | Pure delay (Meas1) | GIRF (Meas1) |
+|---|---|---|---|---|
+| x | + | 0.67 (1.71) % | 0.38 (1.29) % | **0.14 (0.53) %** |
+| x | - | 0.69 (1.92) % | 0.43 (1.55) % | **0.16 (0.55) %** |
+| y | + | 0.99 (2.26) % | 0.57 (1.65) % | **0.37 (0.73) %** |
+| y | - | 1.00 (2.26) % | 0.58 (1.64) % | **0.38 (0.70) %** |
+| z | + | 1.59 (3.58) % | 0.63 (1.64) % | **0.12 (0.34) %** |
+| z | - | 1.61 (3.63) % | 0.63 (1.68) % | **0.13 (0.42) %** |
+
+The GIRF from positive blips predicts the negative ones as well (linearity), eight months later.
+y keeps the largest residual: its delay itself moved by ~1 us between the measurements (authors'
+values 4.13 -> 5.18 us). Moment errors at the end of the window are <= 0.05 % for all models (DC
+gain ~1: the GIRF matters for the waveform shape, i.e. for k-space timing during the gradient, not
+for the area).
+
+**B0 term (not validated).** The common-mode phase of the slice pair accumulates <= 0.022 rad over
+10 ms in the part that flips with blip polarity (what a GIRF B0 row predicts; predicted <= 0.029,
+rms difference 0.011-0.029 rad), while the polarity-independent part reaches 0.6 rad (drift left
+after the reference correction, ~10 Hz). The B0 eddy term of this scanner is below what the
+released coil-averaged data resolve. Its DC part (-8 to -14 Hz per mT/m) is what a 0.2-0.3 mm
+asymmetry of the slice pair gives: geometry, not eddy currents.
+
+**Slice profile (finding, not modelled).** |S / ref| after the largest blip (8.7 mT/m ms, k = 371
+/m) is 0.53, after the middle one (3.0 mT/m ms) 0.906; a 1 mm rectangular profile would give 0.79
+and 0.973. The excited profile is wider than nominal (1.7 mm as a rectangle, 1.14 mm FWHM as a
+Gaussian; neither fits both), consistent with a sinc pulse's tails. The pulse is not published.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex

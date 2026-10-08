@@ -357,6 +357,18 @@ says where it came from so it can be re-checked.
   < 0.07 samples at 10 us): a "gradient delay" benchmark on such data checks the timing model and
   the estimator, not a visible artefact.
 
+- **A GIRF is defined in a sampling frame** (2026-10-08, benchmark 7): the thin-slice output is
+  the mean gradient between ADC samples, the authors' input point samples of the waveform; the
+  two frames are half a dwell apart, so delays (and the phase of H) differ by 2.5 us at 5 us
+  dwell. State the frame with any GIRF or delay, and convert before applying a published one.
+- **Thin-slice B0 terms are drift-limited**: the slice pair's common-mode phase picks up the drift
+  left after reference correction (~10 Hz here) and slice-position asymmetry (a DC term of
+  -8 to -14 Hz per mT/m from ~0.25 mm), so check a B0 eddy term with both blip polarities (only the
+  odd part is eddy current) and as accumulated phase, not per-sample frequency (noise ~70 Hz).
+- **Unit trap in `GIRF` B0 rows**: taps are Hz per (Hz/m) because blochparty gradients are Hz/m;
+  a B0 transfer function measured in Hz per (mT/m) must be divided by gamma_bar (here that slip
+  inflated the B0 term by 4e4 before it was caught).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
