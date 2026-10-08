@@ -76,7 +76,7 @@ simulators, forward and adjoint, opt-in and bit-identical to before when off. Ve
 Bernstein's analytic phase, a Maxwell-compensated echo, |B| in 50-digit arithmetic, gradunwarp's
 basis, Laplace's equation, point-grid images, closed-form eddy responses, an FFT
 transfer-function convolution, closed-form drift phases and finite differences (numbers in
-`ROADMAP.md`, Phase 2b). Not yet: measured GIRFs / field-camera data, b-matrix with
+`docs/ROADMAP_ARCHIVE.md`, Phase 2b). Not yet: measured GIRFs / field-camera data, b-matrix with
 nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 
 ### 3.2 Spin system

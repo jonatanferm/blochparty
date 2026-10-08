@@ -2,14 +2,14 @@
 
 A small, differentiable MRI simulator in PyTorch: phantom + coils + sequence → raw k-space.
 Everyone's invited, as long as they precess.
-Every feature is checked against an independent reference (see [ROADMAP.md](ROADMAP.md)).
+Every feature is checked against an independent reference (the record: [docs/ROADMAP_ARCHIVE.md](docs/ROADMAP_ARCHIVE.md); the plan: [ROADMAP.md](ROADMAP.md)).
 What other simulators do and the realism plan: [docs/REALISM.md](docs/REALISM.md); hard-won
 lessons: [docs/LESSONS.md](docs/LESSONS.md); project journal: [docs/JOURNAL.md](docs/JOURNAL.md); comparison with real scanner data:
 [validation/real/](validation/real/).
 
 ```bash
 uv sync
-uv run pytest                              # 281 verification tests, ~1 min
+uv run pytest                              # ~480 verification tests, ~3.5 min on an M4
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--fused: C++ adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)

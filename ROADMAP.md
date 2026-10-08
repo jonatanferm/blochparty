@@ -1,514 +1,393 @@
 # Bloch Party roadmap
 
-Goals, in order of how much they shape design decisions:
+Rewritten 2026-10-08. The phase-by-phase record of what was built and verified before this date
+is in [docs/ROADMAP_ARCHIVE.md](docs/ROADMAP_ARCHIVE.md); results against real scanners are in
+[validation/real/RESULTS.md](validation/real/RESULTS.md). This file is the plan.
 
-1. **A fun, understandable physics project** – small readable core, every feature verified.
-2. **Simulated training data** – realistic coils, noise and imperfections; high throughput.
-3. **Sequence development, including agentic** – differentiable w.r.t. sequence parameters,
-   Pulseq in/out, machine-readable metrics an agent can act on.
+## Vision
 
-**Physical realism**: what other simulators model, what nobody models, and the plan to go
-beyond them (real-data benchmark, calibrated digital twin) is in
-[docs/REALISM.md](docs/REALISM.md).
+The best MR simulator we can build, with the most faithful physics we can muster, judged against
+real scanners. Coupled to it, a generator of digital anatomies to run in it. Those two together
+are the product; they will later generate synthetic training data for ML models and support
+agentic development of MR sequences. A GUI to play with scans is a possible bonus, not a goal.
 
-**Digital phantoms**: generative, physically consistent phantoms, and lifting reconstructed
-scans (DICOM) to believable raw multi-coil k-space, are in [docs/PHANTOMS.md](docs/PHANTOMS.md).
+Order of priorities, now:
 
-**Ground rule: nothing is "done" without an independent check.** Each phase lists what it is
-verified against. References, from cheapest to strongest:
-closed-form physics → SciPy ODE integration → our own independent signal-equation /
-EPG models → other simulators (MRzero, KomaMRI) on identical Pulseq files → real scanner data.
+1. **The simulator core**, until we are satisfied with it (defined below).
+2. **Anatomy generation**, so the core has realistic objects to scan.
+3. Training-data generation and agentic sequence development, built on 1 and 2.
 
----
+We work on one Apple-silicon Mac for now. The Apple GPU kernel is the engine; ports to other
+hardware come when other machines exist (M8).
 
-## Phase 0 – MVP ✅
+## When is the core satisfactory?
 
-- [x] Sequence as flat piecewise-constant segments (`dt`, RF, gradients, ADC, ideal spoil);
-      continuous parts are tensors (differentiable), structure is plain Python (control flow)
-- [x] Isochromat Bloch core: exact free precession + relaxation, exact RF rotation with
-      Strang-split relaxation; `Sequence.subdivide_rf(k)` as the accuracy knob
-- [x] Phantom: tissue-labelled Shepp-Logan with 3 T PD/T1/T2, maps → spins
-- [x] Coils: analytic birdcage-like receive maps; complex noise with channel covariance
-- [x] 2D Cartesian spoiled GRE builder; centred iFFT, RSS, sensitivity-weighted combine
-- [x] Gradient checkpointing (`checkpoint_every`) for memory-bounded backprop
+Three conditions, each testable. The core is done when all three hold.
 
-**Verified by** (21 tests at the end of Phase 0, `uv run pytest`):
-- SciPy ODE on random RF/gradient/off-resonance sequences: 1e-9 without relaxation;
-  measured 2nd-order convergence (≈4× per RF-step halving) with relaxation
-- Closed form: flip angle, RF phase / signal sign convention, FID, spin echo refocusing,
-  inversion recovery, spoiled-GRE (Ernst) steady state
-- Independent signal-equation model: multi-coil k-space agrees to ~1e-13
-- Image domain: recon equals tissue-model image; RSS / coil combine; off-resonance
-  shift of exactly +2 px for 2 px of bandwidth (and ±1 px or the wrong sign fails)
-- Autograd vs finite differences (flip, TR, gradient, T1, T2, coil maps); checkpointing
-  gives identical gradients; gradient descent recovers the Ernst angle and the analytic
-  WM/GM contrast-optimal flip angle (`examples/optimize_contrast.py`, to 0.001°)
+1. **Parity.** The Metal kernel runs everything the PyTorch core runs. Today it refuses free
+   exchanging pools and motion under gradient nonlinearity or concomitant fields; everything
+   else is at parity (`docs/ENGINES.md`, M0).
+2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
+   design need (M2). Without it, "differentiable" holds only for the CPU reference and the
+   frozen fused kernel.
+3. **Physics no longer moves the benchmark table.** On at least one scanner with two sequences
+   (NIST benchmarks 1 and 2), the remaining errors are attributable to unknown inputs (B1+,
+   coil sensitivities, temperature, geometry) rather than to missing physics. The test is the
+   digital-twin loop (M3): fit the unknown inputs on one sequence, predict the other, and show
+   that adding physics changes the prediction less than the error bars.
 
-Known simplifications: one spin per voxel at voxel centres, ideal spoiling, hard pulses,
-instantaneous gradients, analytic (non-EM) coil maps.
+## Engines
 
----
-
-## Phase 1 – Performance and 3D
-
-Comes first: 3D imaging and most of the realism work (sub-voxel spins multiply the spin
-count) are impractical at current speed. 3D is the target workload for this phase.
-
-- [x] 3D: volumetric phantom (3D Shepp-Logan to start), `gre_3d` builder (second
-      phase-encode loop on Gz), `ifftnc` / `reconstruct` reconstruction
-
-- [x] Closed-form free runs: every stretch of RF-free segments (prephaser + readout +
-      spoiler) is one step; all its ADC samples come from blockwise spins × samples matrix
-      products (any gradient waveform, gradients flow to every segment). 3.5–9.5× faster;
-      `merge_free_runs=False` keeps the segment-wise path, agreement ~1e-14
-- [ ] Merge consecutive free-precession segments; skip spins outside excited slab
-- [ ] `torch.compile` of the free-run block: measured 1.4× (CPU) / 2× (MPS) on the 64³
-      per-TR math; not wired in yet (compile time, shape-dependent recompiles)
-- [ ] Apple MPS / CUDA devices: runs unchanged on MPS, but eager MPS is no faster than CPU
-      (elementwise exp/cos/sin and the K=3 matmul are slow there); revisit with fusion
-- [x] Two-pass, chunked-over-spins backward (`simulate_chunked`): forward without grad,
-      then per-chunk recompute + VJP; saved-tensor memory scales with the chunk (16× less
-      at N/16), gradients identical to ~1e-16, ~1.5–4× runtime depending on chunk size
-- [ ] Reverse sweep over segment blocks (store magnetization at block boundaries,
-      `simulate(..., m_init=...)` per block) to remove autograd's per-step bookkeeping
-      floor, which `checkpoint_every` does not
-- [x] Benchmarks tracked over time (spins × segments / s, memory):
-      `benchmarks/bench.py [--record]` → `benchmarks/history.jsonl`
-- [x] Fused compiled kernel, forward (`blochparty.fused.simulate_fused`): header-only C++17
-      kernel on raw arrays (`fused/kernel.h`, no PyTorch dependency), spin blocks in L1,
-      `std::thread` workers, per-segment factor caching, SIMD coil sums; JIT-built PyTorch
-      extension. Matches `simulate` to ~2e-14 (float64); float32 error ~1e-6 vs float64
-      (10× lower than the PyTorch float32 path, thanks to `expm1` relaxation)
-- [x] Fused kernel, backward (`simulate_fused` is now differentiable): hand-written adjoint
-      in `kernel.h` (reverse sweep λ ← Aᵀλ + ADC terms per segment, parameter gradients
-      from λ and the replayed m), checkpoints every ≈√S segments stored by the forward,
-      one interval replayed at a time; per-thread segment accumulators reduced in thread
-      order. Verified against autograd through `simulate` for every input (sequence dt /
-      RF / gradients / receiver phase, pos / PD / T1 / T2 / dB0, complex coils, `m_init`)
-      to ≤ 1e-10 (measured ~1e-14) on random RF / gradient / off-resonance sequences, 8-coil
-      2D GRE, 3D GRE with dB0, spoils and ADC right after RF, losses on signal and/or m;
-      gradcheck (finite differences) incl. complex coils; standalone C++17 build vs
-      finite differences; identical gradients for any checkpoint interval; gradient
-      descent through it recovers the WM/GM optimum (16.109°) to 0.002°.
-      Apple M4, float32, forward + backward: 2D 96² 0.08 s (PyTorch core 0.32 s); 3D 32³
-      0.46 s / 1 GB peak (PyTorch core 3.6 s / 3.5 GB); 3D 64³ 27.5 s.
-- [ ] Profile the adjoint on the M4: backward costs ~7× the forward there (3D 64³: 3.3 s
-      forward, 27.5 s total) vs ~3.8× on a Xeon; ADC λ-injection and coil-gradient loops
-      run at about half the forward sampling speed; the RF-segment loop is not vectorized
-      by Apple clang
-- [x] Metal forward kernel (`blochparty.metal.simulate_metal`): Apple GPU via
-      `torch.mps.compile_shader`, same physics as the CPU paths (float32), block-buffered
-      ADC reductions. Agrees with the float64 core like the CPU kernel does in float32 (tests:
-      `tests/test_metal.py`). 5.8× the CPU fused kernel on the real NIST TSE (85 k spins, 4.1 M
-      segments, 1 coil: 40 s vs 232 s); slower than the CPU on 8-coil GRE benchmarks, where the
-      per-sample coil reduction dominates
-- [x] Metal many-coil ADC reduction: the coil sum as complex matrix products on 8×8 simdgroup
-      matrices; cost nearly flat in the coil count (48³ GRE: 1 coil 0.41 s, 8 coils 0.42 s
-      (was 1.21 s; CPU 1.98 s), 64 coils 1.6 s), no coil limit
-- [x] Metal: scanner field model (gradient nonlinearity via encoding positions; concomitant fields,
-      leading order and exact) in the off-resonance, as the CPU kernel; matches the core to 1e-4
-- [ ] Metal: adjoint
-- [ ] CUDA port
-
-**Verify:** every optimization must reproduce the existing test outputs bit-for-bit
-(float64) or within float32 tolerance; benchmark table in this file. 3D: Bloch vs.
-signal-equation k-space and recon vs. tissue model, as for 2D; small 3D cases also against
-the unoptimized simulator.
-
-Targets (to be revisited once measured): 64³ 3D GRE in < 1 min on CPU; 128³ in
-< 30 min on CPU and a few minutes on GPU. The work is fundamentally spins × ADC samples
-(~4e12 for 128³), so the final factor comes from the fused kernel / GPU.
-
-Baseline (end of Phase 0, Apple M4 CPU, float32, 8 coils, 200 dummy TRs; PyTorch picks
-4 threads on this 10-core chip):
-
-| case | spins | segments | time | spin-segments/s |
-|---|---|---|---|---|
-| 2D 96² | 4 603 | 10 000 | 1.6 s | 2.8e7 |
-| 3D 32³ | 8 803 | 37 264 | 7.8 s | 4.2e7 |
-| 3D 48³ | 29 831 | 120 208 | 44 s | 8.2e7 |
-| 3D 64³ | 70 505 | 278 928 | 233 s | 8.4e7 |
-
-Projected 3D 128³: ~4 h.
-
-After closed-form free runs (same machine, CPU): 2D 96² 0.17 s (9.5×), 3D 32³ 1.2 s (6.3×),
-3D 48³ 10.9 s (4.0×), 3D 64³ 68 s (3.5×); projected 128³ ~70 min. Per 64³ TR (~12 ms):
-exp/cos/sin ~45 %, phase ~17 %, elementwise products ~20 %, matmuls ~17 %. ~20 µs fixed Python overhead per segment; memory-bandwidth
-bound at realistic sizes; ~92 % of segments are single ADC samples.
-
-Fused kernel (same machine, float32, 10 threads, idle; vs. the closed-form PyTorch core):
-
-| case | PyTorch core | fused | speed-up |
+| engine | role | gradients | policy |
 |---|---|---|---|
-| 2D 96² | 0.16 s | 0.012 s | ~13× |
-| 3D 32³ | 1.14 s | 0.07 s | 16× |
-| 3D 48³ | 9.3 s | 0.80 s | 12× |
-| 3D 64³ | 60 s | 5.4 s (float64: 12.6 s) | 11× |
+| `blochparty.simulate` (`src/blochparty/bloch.py`) | readable reference; every new effect lands here first, checked on small cases | autograd, `simulate_chunked` | keep small and readable; float64 |
+| `blochparty.metal.simulate_metal` (`src/blochparty/metal/__init__.py`) | the engine; all imaging-scale work | none yet (M2) | must agree with the core; float32 |
+| `blochparty.fused.simulate_fused` (`src/blochparty/fused/`) | frozen CPU kernel with a hand-written adjoint | adjoint | no new physics (it raises); retired once M2 is verified (see M2) |
 
-Gradients (forward + backward of Σ|signal|² w.r.t. flip angle, T1 map and coil maps; float32,
-8 coils, 200 dummy TRs; Intel Xeon Cascade Lake, 4 vCPUs, Linux, GCC 13; peak RSS of the
-whole process, ~0.5 GB of which is Python + PyTorch; `benchmarks/bench.py --grad`):
+## Working rules for whoever implements this
 
-| case | PyTorch core (autograd) | `simulate_chunked` | fused adjoint | fused forward only |
-|---|---|---|---|---|
-| 2D 96² | 1.65 s, 1.1 GB | 4.2 s, 1.2 GB | 0.15 s, 0.53 GB | 0.03 s |
-| 3D 32³ | 19.5 s, 5.1 GB | 41 s, 2.8 GB | 1.0 s, 0.57 GB | 0.27 s |
-| 3D 48³ | not run (~50 GB extrapolated) | 258 s, 7.9 GB | 9.1 s, 0.74 GB | 1.8 s |
-| 3D 64³ | not run (~300 GB extrapolated) | not run (~17 GB extrapolated) | 46 s, 1.2 GB | 9.4 s |
+The rules in `CLAUDE.md` apply. Concretely, for every item below:
 
-Targets: 64³ < 1 min ✅ (5.4 s); 128³ < 30 min on CPU ✅ — full run (565k spins × 2.16M
-segments, 8 coils, float32) in 6.3 min at 3.3e9 spin-segments/s (`examples/gre3d_128.py`).
+- **Independent check first.** Name the reference before writing code: a closed form, the SciPy
+  ODE (`tests/test_bloch_vs_ode.py: random_case`), EPG (`src/blochparty/epg.py`), the signal
+  equation (`src/blochparty/reference.py`), BMCTool (`validation/compare_bmctool.py`), MRzero
+  (`validation/compare_mrzero.py`), or real data (`validation/real/`). A feature without a
+  reference is not done.
+- **Defaults stay bit-identical.** Before the change: `uv run python tools/snapshot.py save
+  /tmp/before.pt`; after: `save /tmp/after.pt` and `compare`. New physics is opt-in (a `None`
+  default on `Phantom`, `Sequence`, `Scanner` or a builder keyword) and must not change the
+  snapshot. If an item needs the snapshot to grow (new engine, new default inputs), add to
+  `tools/snapshot.py` in a separate commit and say so in the journal.
+- **Core, then Metal, then parity test.** Physics goes into `bloch.py` with a test against the
+  reference, then into the Metal shader, then a test in `tests/test_metal.py` comparing the two
+  on the same inputs. Float32 tolerance for parity is ~1e-5 relative on signals (what the
+  existing tests use); say which tolerance and why.
+- **Metal variants.** The shader is compiled in three variants of `advance<V, DIFF>` (plain,
+  `_full` for the rate-model bound pool and the field model, `_gen` for generalized Bloch), each
+  with and without diffusion/motion (`_diff`). Per-thread state that only one feature needs goes
+  into its own variant; the plain kernels lost 10 to 30 % to register pressure when state was
+  shared. Measure the plain variant's speed before and after any shader change
+  (`benchmarks/bench.py`, record with `--record`).
+- **Fused kernel raises.** New `Phantom` or `Sequence` fields must make `simulate_fused` raise
+  `NotImplementedError` with a message naming where the feature lives (pattern at
+  `src/blochparty/fused/__init__.py:263`).
+- **Tests run on this Mac.** `uv run pytest` (about 3.5 min with GPU access). Mark anything over
+  ~30 s with a marker and keep the default suite under 5 min. GPU tests skip without MPS, so
+  check `blochparty.metal.available()` and do not let a skipped test pass for a GPU change.
+- **Record.** `docs/LESSONS.md` for anything that took more than a few minutes to understand.
+  `docs/JOURNAL.md`, dated, after each session: what, why, numbers, dead ends, commit hashes.
+  Results tables live in the `RESULTS.md` next to the script that produced them; the roadmap
+  gets one line and a link.
+- **Scripts never overwrite tracked outputs by default** (figures only with `--figure`).
 
-## Phase 2 – Physical realism
+---
 
-- [x] Sub-voxel isochromats (jittered), with guidance on spins-per-voxel vs. gradient moment
-      (`phantom_from_maps(spins_per_voxel=, jitter="stratified")`, PD split over the spins)
-- [x] T2′ via Lorentzian (Cauchy-quantile) intra-voxel frequency distribution (`t2prime` map;
-      quantiles shuffled per voxel, or seeded random draws)
-- [x] Real spoiling: gradient spoilers (net moment per TR in cycles per voxel, phase-encode
-      rewinders) + RF spoiling (117° quadratic phase, receiver follows), opt-in on the GRE
-      builders (`spoiling="gradient" | "rf"`); ideal spoiling stays the default
-- [x] Hardware limits (`System`: max gradient / slew per axis, gradient / RF / ADC rasters,
-      RF dead time and ringdown) and trapezoidal gradients with ramps (`trapezoid`: by area,
-      flat area or amplitude, minimum time or fixed duration, any axis or direction; the
-      minimum-time designs equal pypulseq's), arbitrary waveforms (`gradient_waveform`),
-      Pulseq-like blocks (`SequenceBuilder.block`) cut on the gradient raster with exact
-      per-segment average gradients; `ramps=True` on the GRE builders
-- [ ] Ramp-sampled readouts in the builders (ADC on ramps is already exact in k) + gridding recon
-- [x] Slice-selective windowed-sinc pulses (`sinc_pulse`: time-bandwidth product, apodization,
-      slice offset as a frequency offset) with slice-select gradient and ramp-aware rephaser;
-      `slice_thickness=` on the builders (slab in 3D)
-- [ ] Gaussian / SLR pulses
-- [x] B1⁺ (transmit) maps scaling the RF (`Phantom.b1`, in the PyTorch core, signal equation,
-      `simulate_chunked` and the fused kernel forward + adjoint; `coils.birdcage_b1`); B0 maps
-      (`b0_shim`, `b0_sphere`, `b0_cylinder`); chemical shift (6-peak fat model, `fat_fraction`)
-- [x] Spin-echo / turbo spin-echo / bSSFP / EPI builders (`se_2d`; `tse_2d` with arbitrary
-      refocusing flips, ETL, linear / centric ordering; `bssfp_2d` with α/2 preparation and
-      phase cycling; `epi_2d` single-shot blipped, blips on the readout ramps)
+## M0. Consolidate (about one day)
 
-**Verify:** spoiled-GRE steady state with real spoiling vs. Ernst (and vs. EPG for known
-deviations); slice profile vs. small-tip Fourier approximation and SLR; T2′: FID decays
-with T2*, spin echo with T2; bSSFP off-resonance banding profile vs. closed form;
-fat–water shift in pixels vs. bandwidth; EPI distortion vs. B0 map / echo spacing.
-✅ Independent EPG reference model (`epg.py`): matches closed forms to 1e-12–1e-15 and the
-isochromat simulator exactly once isochromats outnumber the dephasing orders present
-(CPMG 120°: K=17 → 3e-16; 117° RF-spoiled GRE: K=151 → 6e-16).
+Goal: a stranger (or a fresh agent) can tell which engine does what, and the docs match the code.
 
-**Verified** (realistic phantoms: `tests/test_phantom_*.py`, 53 tests, ~20 s):
-- Defaults unchanged: one spin per voxel centre, and the fused forward and adjoint are
-  bit-identical to before the B1⁺ change (float32 / float64, one thread, 6 sequences incl.
-  random RF/gradients/off-resonance, 2D/3D GRE, spoils; also `b1 = 1` vs `None`)
-- Sub-voxel spins: layout (one spin per sub-cell, PD conserved); k-space of 3×3 jittered spins
-  equals the signal equation for the same spins to 4e-15; gradient-spoiled GRE (no RF spoiling,
-  150 TRs, 1 cycle/voxel/TR) vs EPG: regular sub-grid 0.26 (K=2) → 3.7e-7 (64) → 1e-15 (151,
-  once K exceeds the orders present); stratified jitter 0.27 → 4e-3 (64) → 3.5e-4 (256), ~K^-1.3
-- T2′: spin offsets are the Cauchy quantiles (vs SciPy), random draws pass a KS test; FID vs
-  exp(−t/T2*) over 3 T2′ within 0.36/√K, 0.25/√K, 0.15/√K for K = 256, 1024, 4096 (bound
-  0.6/√K), T2′ alone within 2/√K out to K·T2′/4; deterministic quantiles beat random draws;
-  spin echo with 1024 spins follows exp(−TE/T2) to 1.4e-7 while the FID has decayed with T2*
-- B1⁺: Mz = cos(b1·α) to 9e-16 for b1 ∈ [0, 3.7] and any RF phase (core, fused, chunked);
-  2D GRE with a centre-brightened birdcage map equals the Ernst signal at b1·α per pixel to
-  4.5e-5; `b1` gradient (and all others) of the fused adjoint vs autograd 6e-15–2e-13
-  (≤ 1e-10 required), gradcheck through core and fused, chunked backward too; `birdcage_b1`
-  solves the Helmholtz equation with the k from SciPy's J0 (1e-5, finite differences)
-- B0: shim terms are harmonic (Laplacian 0); sphere and cylinder (θ = 0°, 30°, magic angle,
-  90°) vs a Fourier-domain dipole convolution of a partial-volume χ grid within 1 % / 0.5 % of
-  the peak field; a linear y shim shears a GRE image by exactly f(y)/bandwidth per row
-- Fat: PD / shift bookkeeping (−434.3 Hz main peak at 3 T); fat-only image moves −2 px at
-  bandwidth = |Δf|/2 (+2, −1, −3 fail); each peak modulates k-space by exp(−i2πf_p t) (1e-4,
-  0.1 µs pulses); water + fat FID at in-/opposed-phase and other TEs equals
-  i[(1−f)e^{−t/T2w} + f e^{−t/T2f} Σ a_p e^{−i2πf_p t}] to 2e-7 at 1.5 T and 3 T (fused
-  too); single peak gives the two-point Dixon values and fat at +90° at t = 1/(4|Δf|)
-- All of it together (sub-voxel + T2′ + fat + B1⁺ + shim + sphere, 2D and 3D, 6 coils): fused
-  vs core 1e-12 (float64) / 1e-5 (float32), chunked 1e-12; gradients of every input ≤ 4e-15,
-  and back through `phantom_from_maps` to the PD, T1, T2′, fat-fraction, fat-T2, B1⁺, B0 maps
-- Cost: 3D 64³ GRE (8 coils, float32, 200 dummies) with 8 spins per voxel (564k spins), fused
-  forward 61 s (59 s with T2′ and a B1⁺ map) vs 7.3 s at one spin per voxel, ~2.6e9
-  spin-segments/s either way (Intel Xeon, 4 vCPUs)
+- [ ] `docs/ENGINES.md`: capability matrix of the three engines against every physics feature
+      (B1+, B0 maps, `FieldMaps`, bound pool rate / generalized, free pools, diffusion free /
+      restricted, motion, scanner field model leading / exact, nonlinearity, GIRF via sequence,
+      `b0_offset`, `rf_freq`, many coils, `m_init`) with forward / adjoint / float64 columns, and
+      the tolerance at which the engines agree.
+- [ ] `tests/test_engines.py`: for every "not supported" cell, assert the engine raises
+      `NotImplementedError` (so the matrix cannot silently go stale); for every supported cell
+      with no existing parity test, add one (small case, core vs engine).
+- [ ] README: engine section matching the matrix (today it sends gradient users to the fused
+      kernel and does not mention Metal); run commands that exist; test count.
+- [ ] `benchmarks/bench.py --backend metal` on the standard cases, recorded in
+      `benchmarks/history.jsonl`, so later shader changes have a baseline.
+- [ ] Mark slow tests; a `uv run pytest -m "not slow"` subset under one minute for use while
+      iterating on shaders.
 
-**Verified** (realistic sequences; `tests/test_sequences_*.py`, 49 tests, ~1 min):
-- Gradient moments: trapezoid areas and k-space at every ADC sample of GRE (2D / 3D slab,
-  ramps, slice select, spoilers), SE / TSE (moment negated at each refocusing pulse), bSSFP
-  (zero net moment per TR, TE = TR/2 to 1e-12 s) and EPI equal the analytic values to ≤ 1e-9 /m;
-  an arbitrary waveform with off-raster ADC samples matches its integral. A pypulseq-written
-  RF-spoiled, slice-selective GRE (pypulseq's own sinc / readout designs) read with
-  `read_pulseq` gives the same moments as pypulseq's `calculate_kspace` (≤ 1e-9) and the same
-  simulated signal to 1e-9; the sinc pulse equals `make_sinc_pulse` sample by sample.
-- Slice profile: small-tip profiles equal the Fourier transform of the RF envelope up to the
-  expected α²/6 (2.5° / 5° / 10°: 3.2e-4 / 1.27e-3 / 5.07e-3); a 90° profile (also off-centre)
-  equals SciPy ODE integration to 2e-12; phase flat to 7e-4 rad after the rephaser at 5°
-  (dropping the fall ramp from it gives
-  the predicted linear phase to 1 %); the slice sits at +z0 for f = G·z0 (flipped sign: −z0).
-  At 90° the half-area rephaser leaves the physical ~0.2 rad odd residual phase the ODE shows.
-- Spoiling: RF + gradient spoiled GRE (ramps, 4 cycles per voxel per TR, 60 TRs) on K
-  isochromats across a voxel vs `epg_spoiled_gre`: K = 16 / 32 / 64 / 128 → 7e-2 / 2.5e-2 /
-  5.6e-3 / 2.6e-4, exact (≤ 1e-16) once K / 4 reaches the TR count (K = 240); gradient-only
-  spoiling (1 cycle): K = 16 / 32 / 48 → 1e-4 / 4e-5 / 4e-6, K = 64 → 2e-16. On
-  Shepp-Logan with 4 jittered isochromats per voxel, the full EPG field evaluated at each
-  isochromat predicts the multi-coil k-space to 1e-10.
-- TSE vs `epg_cpmg` (ETL 8, crushers of one cycle): 180° exact for any K (4e-15); 120°:
-  K = 4 / 8 / 12 / 16 → 0.13 / 0.11 / 7e-3 / 1.4e-5, K = 17 → 8e-16; a variable train
-  (60–170°): 0.32 / 1.3e-2 / 2e-4 / 5e-7, K = 17 → 9e-16. SE / TSE Shepp-Logan k-space vs a
-  closed-form Mz recursion + signal equation: < 1e-10.
-- bSSFP vs `epg_bssfp` with off-resonance 0–160 Hz: ≤ 2e-8 (1 ns pulses); α/2 prep vs EPG
-  < 1e-7, with ≥ 20× less transient oscillation; steady-state banding profile vs the closed
-  form < 1e-7; Shepp-Logan k-space vs per-tissue EPG < 1e-10. EPI k-space vs the signal
-  equation < 1e-10; a uniform offset of 2 PE pixels' bandwidth (1 / (N·esp)) shifts the
-  image by +2 rows (residual 0.75 %, from the 0.02 px readout shift; ±1 px or −2 px: ≥ 35 %).
-- Default builders: bit-identical sequences to before (sha256); autograd through flip angles
-  of the new blocks matches finite differences.
+Verify: suite green; snapshot identical; the matrix agrees with the raises.
 
-## Phase 2c – Spin system: exchange and magnetization transfer (`docs/REALISM.md` R2)
+## M1. Metal parity (3 to 4 days)
 
-- [x] Bound (semi-solid) pool: Henkelman two-pool model with Graham's rate W = ω1²G
-      (super-Lorentzian with a per-pool cut, Lorentzian), saturated at each spin's offset from
-      the RF's instantaneous frequency, so slice-selective pulses cause incidental MT
-      (`exchange.py`, `Phantom.bound`). In the PyTorch core, the fused CPU kernel (forward and
-      adjoint, 1.45× the plain cost) and the Apple GPU (+15 %)
-- [x] Free exchanging pools (`Phantom.pools`: CEST, myelin water): exact Bloch–McConnell
-      engine in the PyTorch core (one matrix exponential per segment)
-- [x] Generalized Bloch model of the bound pool (`generalized_bloch.py`, Assländer et al.):
-      a pulse-level reference solver
-- [x] Free pools in the fused kernel (`fused/bm.h`): the same exact engine per spin, forward and
-      adjoint (Fréchet derivative of the exponential by the block-matrix trick); ~1e-13 vs autograd
-- [ ] Free pools on Metal (a dense per-thread matrix exponential: little gain for the few-spin
-      workloads pools are used for); a faster engine for imaging with pools
-- [x] Generalized Bloch in the engines (`BoundPool(model="generalized")`): the Green's function as
-      complex exponential modes (super-Lorentzian with a 100 T2 memory taper: 30 modes, error
-      2.4e-5); under RF the pool rotates like a Bloch pool and each mode takes its share. In the
-      core, the fused kernel (forward and adjoint, ~1e-14 vs autograd) and on the Apple GPU (a
-      separate kernel variant, so the plain kernels keep their speed)
-- [ ] Incidental MT validated on data with a known fat-saturation pulse
+### M1a. Free exchanging pools on the GPU
 
-**Verified**: lineshape vs SciPy quadrature (1e-11); exchange step vs matrix exponential;
-two-pool ODE with second-order convergence; CW steady state; gradcheck; fused vs core
-(1e-15 forward, every gradient ≤ 7e-13); Metal vs core (2e-6). **BMCTool**
-(`validation/RESULTS_BMCTOOL.md`): Lorentzian Z-spectra to 5.8e-7 (2.1e-5 through the
-`.seq` file); its 5-pool CEST model to 8.3e-7; the super-Lorentzian differs only by the
-near-resonance convention (with BMCTool's lineshape ≤ 4e-7). Free pools vs the SciPy ODE
-(< 1e-8) and closed-form two-site exchange. Generalized Bloch: the Bloch equations for a
-Lorentzian (second order), Henkelman's steady state for three lineshapes (≤ 2e-4), the
-hard-pulse rotation. Incidental MT vs Shin et al. 2009: the mechanism and trend, with a
-magnitude set by an unreported pulse (`validation/RESULTS_INCIDENTAL_MT.md`).
+The core (`bloch._simulate_exchange`) builds one augmented Bloch–McConnell matrix per segment
+(`exchange._bm_matrix`, size d = 3(P+1) + nb + 1 for P free pools and nb ∈ {0, 1} bound pools)
+and applies `matrix_exp(A dt)` to the state. Reproduce that on the GPU.
 
-## Phase 2b – Scanner field model (`docs/REALISM.md` R1)
+- Design: a fourth `advance` variant `_bm` (its own state: the (d−1)-vector per spin, d ≤ 14,
+  i.e. up to three free pools plus a rate-model bound pool; raise above that). Per segment and
+  spin: build A·dt in registers or threadgroup memory, exponentiate by scaling-and-squaring with
+  a degree-6 Taylor or Padé(3,3) in float32 (choose by testing against `torch.linalg.matrix_exp`
+  in float64 on random A·dt with norms up to those a 100 µs RF segment produces at B1 = 20 µT;
+  target 1e-6 relative), apply, then sample Σ pools' Mxy at ADC segments, spoil by zeroing the
+  transverse rows. Cache the exponential across consecutive identical segments per thread (the
+  core keys on dt, rf, grad, b0_offset, rf_freq); CEST saturation trains are long runs of
+  identical segments, so this is where the time goes.
+- The bound pool's saturation rate during RF (`exchange.saturation_rate`) uses the lineshape
+  table already in the `_full` variant; reuse it.
+- `simulate_metal` returns `SimResult` with `m_pools` as the core does.
+- Benchmark on `validation/real/iohexol.py` (set `BLOCHPARTY_BACKEND=metal`; today its forward
+  of 58 offsets × 8 tubes × parameter sets takes 15 s in the core and a Levenberg–Marquardt
+  calibration about 7 min). Report core vs Metal time in `RESULTS.md`.
 
-- [x] Concomitant (Maxwell) fields, leading order as a per-spin quadratic form (free runs stay
-      closed form via cumulative ∫gᵢgⱼ dt) and exact |B| of the full vector field
-      (`fields.Scanner(field_strength=, concomitant="leading" | "exact", z_asymmetry=)`)
-- [x] Gradient nonlinearity: per-axis solid-harmonic deviation (gradunwarp's Siemens
-      convention), coefficient files (`A( n, m)` `.grad` / `.coef` lines, `alpha_x n m` lines),
-      encoding positions f(r) = r + d(r) (`fields.GradientNonlinearity`); ✗ b-matrix
-- [x] GIRF and eddy currents as a sequence transform (`girf.apply_girf`): delta-train impulse
-      responses on the raster or transfer functions, delays, cross terms and B0 rows;
-      multi-exponential eddy currents (amplitudes, time constants differentiable)
-- [x] Per-segment uniform field `Sequence.b0_offset` (None = zeros) in both kernels, forward and
-      adjoint, and in `simulate_chunked`
-- [x] Drift (linear, exponential) and respiratory fields (uniform + linear, periodic) as
-      sequence transforms (`drift.py`)
-- [ ] Concomitant terms of nonlinear coils; b-matrix with nonlinearity; drift driven by
-      gradient duty; mechanical resonance models; fitting a GIRF / eddy model to measured data
-      (measured transfer functions are applied and validated: benchmark 7, `validation/real/girf.py`)
+Verify: `tests/test_metal.py`: two-pool and three-pool phantoms with and without a bound pool on
+a random RF / gradient / off-resonance sequence and on a CEST saturation + readout, vs the core
+≤ 1e-5 relative; the BMCTool comparison (`validation/compare_bmctool.py`) through Metal within
+the float32 budget (the core is at 5.8e-7); benchmarks 8 and 9 reproduce their tables.
 
-**Verified** (`tests/test_fields_*.py`, `tests/test_girf.py`, `tests/test_drift.py`, 48 tests, ~1 min):
-- Defaults unchanged: `scanner=None` and no `b0_offset` give bit-identical signals, final
-  magnetization and gradients of every input vs `main` (184/184 tensors: core, checkpointed
-  core, fused at one thread; float64 / float32; random busy sequence with B1⁺ and coils, 2D
-  RF-spoiled GRE with ramps, 3D GRE); a zero-deviation coefficient file is bit-identical too.
-- Concomitant: the coil field obeys div B = curl B = 0 (autograd Jacobian traceless and
-  symmetric); the quadratic form equals Bernstein's formula to 2e-16 and is the 1/f0 term of
-  |B| − f0 − g·r evaluated in 50 digits; exact − leading falls as 1/B0² (ratio per doubling
-  3.998 / 3.999, 0.55 → 2.2 T) and equals −t²·(g·r)/(2f0²) to < 5 %; the stable |B| form
-  matches 50 digits to 2e-16. Bipolar (phase-contrast) pair on x and z at 0.55 T: phase =
-  Bernstein's analytic −2π f_c·2δ to 4e-12 (phases up to 21 rad, core and fused); trapezoids
-  equal the raster-staircase ∫g² to 5e-12 and the true ramps to 1e-3. A Maxwell-compensated
-  spin echo (equal area and ∫g² either side of the 180°) leaves 4e-13 rad; the uncompensated
-  one leaves up to 2.8 rad, equal to the analytic residual to 9e-12. Exact mode vs |B| in 50
-  digits 1e-13 at 0.05 / 0.1 T (exact − leading up to 0.33 rad, ratio 3.8–4.2 per halving).
-  Fused vs core 2e-14 (signal), gradients of B0, positions, db0, gradients, dt, b0_offset
-  ≤ 3e-14 (both modes); d/dB0 vs central differences 1e-9.
-- Nonlinearity: basis vs gradunwarp's `siemens_B` (spherical coordinates, SciPy `lpmv`,
-  Siemens normalisation) 9e-16 to n = 10; Laplacian of all 242 basis fields to n = 10 ≤ 1.5e-15
-  of their second derivatives; synthetic coefficient file in both layouts (R0 in m or mm);
-  linear terms act as exact gradient scale errors (1e-12); a 7×7 point grid at z = 4 cm with
-  up to 2.4 px distortion images at the analytically mapped positions to 0.002 px (core and
-  fused; the ideal scanner at the true grid); coefficient gradients fused vs core 5e-15, vs
-  central differences 2e-9 (with concomitant fields on as well).
-- GIRF / eddy: a per-axis delay (3 and 23.5 µs, also negative) gives k-space equal to the
-  nominal moment interpolated at t − d to 1e-11 /m (|k| ≤ 7000 /m); a single exponential on a
-  trapezoid equals the closed-form staircase response to 3e-15 (of a·G) and the true-ramp
-  response to 3e-4, the moment lost by the end of the plateau matches the closed form to 1e-6
-  relative and vanishes after decay (1e-12 of 896 /m); random taps with cross terms and B0
-  rows equal an FFT transfer-function convolution to 2e-14 (also via
-  `from_transfer_function`); a B0 eddy current gives the analytic uniform phase to 3e-14
-  (core and fused, up to 0.43 rad); eddy amplitude / time-constant / B0-term / delay gradients
-  fused vs core 7e-15, vs central differences 2e-6; the blocked scan equals the recurrence
-  to 1e-12; `simulate_chunked` carries `b0_offset` (1e-12).
-- Drift / respiration: phases equal the closed-form field integrals (uniform + linear terms) to
-  ≤ 3e-14 for linear drift (32 rad), exponential drift (16 rad) and respiration (3.4 rad), core
-  and fused; parameter gradients (amplitude, period, phase, rate, τ) vs central differences
-  1e-6 relative, fused vs core 1e-10.
-- Cost (fused, 3D 32³ GRE, 8 coils, float32, 200 dummies, 8.8k spins × 37k segments, 4 vCPUs):
-  ideal 0.21 s forward / ~0.9 s forward + backward; concomitant leading 0.20 / 0.87 s, exact
-  0.24 / 1.07 s; nonlinearity (order 5) 0.22 / 0.75 s (all within noise: the per-segment factors
-  are cached by gradient); time-varying `b0_offset` (respiration) 0.31 / 0.98 s (a uniform
-  offset is one rotation per segment on top of the cache); GIRF + eddy currents 1.4 / 4.8 s,
-  since every segment's gradient then differs (`apply_girf` itself 0.14 s).
+### M1b. Motion under gradient nonlinearity and concomitant fields
 
-## Phase 3 – Pulseq in/out and cross-simulator validation
+Both engines raise today (`bloch.py:483`, `metal/__init__.py:879`). With motion, the encoding
+position f(r(t)) and the concomitant coefficients (quadratic in the position) must be
+re-evaluated per segment from the moved position; the free-run closed form then has a
+time-varying k·r, which is what the motion path already handles for ideal gradients.
 
-- [x] Read `.seq` (via `pypulseq`) → `Sequence`, including block timing / raster
-      (`read_pulseq`): blocks split at every event, exact segment-average gradients, shaped
-      RF, trapezoids / arbitrary / extended gradients, frequency / phase / ppm offsets
-- [ ] Write `Sequence` → `.seq`, so optimized sequences can run on real scanners
-- [ ] Phantom export for KomaMRI (`.phantom` / HDF5) and MRzero (the harness builds
-      MRzero's `SimData` in memory from blochparty's maps)
-- [x] `validation/` harness, MRzero part: the same `.seq` + phantom through blochparty and
-      MRzero (`validation/compare_mrzero.py` → `validation/RESULTS.md`, opt-in
-      `pytest -m crosscheck`)
-- [ ] The same against KomaMRI (Julia); store reference outputs and diff them in CI
+- Core: in `_free_run` / `_rf_segment`, evaluate `fields.spin_fields` terms at the moved
+  position per segment (the per-spin `conc` and encoding offset become per segment). Keep the
+  static path untouched (snapshot).
+- Metal: the `_diff` variants already carry the moved position; add the nonlinearity basis
+  evaluation (`fields.GradientNonlinearity`, solid harmonics to the file's order) and the
+  concomitant quadratic form per segment under a flag; only when `moving && (mode || nonlin)`.
 
-**Verified** (`tests/test_pulseq.py`, 13 tests, ~5 s; `pytest -m crosscheck`, 4 tests):
-- Pulseq timing and units vs closed forms: FID samples at (i + ½)·dwell after the ADC start
-  (half a dwell off would fail by 300×), flip, RF/ADC phase, T2 decay, off-resonance;
-  ADC frequency offset tracks off-resonant spins; ppm offsets; ADC phase modulation
-- Phase convention pinned by Pulseq's own definition: a sinc pulse with freq_offset = G·z0
-  excites the slice at +z0, identical to the centred slice (to 1e-5) with the usual
-  zero-phase-at-centre offset; the "mrzero" reading is the exact mirror image (1e-12)
-- Gradient moment at every ADC sample vs pypulseq's `calculate_kspace`: GRE with slice
-  select 9e-11 /m, EPI with and without ramp sampling 6e-13 /m, arbitrary + extended
-  gradients ≤ 1e-9 /m (|k| up to 36 /m)
-- A pypulseq GRE equals the same GRE built with `SequenceBuilder` to 1e-10
-- pypulseq 2D GRE of Shepp-Logan, imported and reconstructed, equals the tissue-model image
-  to 1.1e-4 (T2 decay during the readout)
-- MRzero, 32×32, point isochromats, RF-spoiled GRE / spin echo / bSSFP / EPI: k-space
-  agreement 2e-6–4e-5, image NRMSE 2e-6–7e-5, after the convention factor −i (fitted to
-  1e-5). An exact matrix-exponential Bloch solution on sampled voxels puts the residual on
-  MRzero (float32, PDG state merging): blochparty is within 4e-9–6e-7 of it. MRzero's box
-  voxels vs. K×K jittered isochromats: 5e-4 k-space at 16×16 on EPI (falls as K⁻²)
+Verify: a spin moving at constant velocity through a nonlinear field equals a static spin placed
+at each segment's position (sequence of one-segment simulations with `m_init`) to 1e-10 (core)
+and 1e-5 (Metal); a Maxwell-compensated spin echo stays compensated for a static spin and
+acquires Bernstein's velocity-dependent phase for a moving one.
 
-**Verify:** k-space agreement with MRzero/KomaMRI on GRE, SE, TSE, bSSFP, EPI examples
-from the PyPulseq repo; round-trip read→write→read is lossless.
+### M1c. Leftovers
 
-## Realism benchmark against real scanners (docs/REALISM.md, R3)
+- [ ] Free pools with the generalized Bloch bound pool (core and Metal raise): the pool's
+      modes are already a column block; add them to the augmented matrix or run them alongside.
+      Verify against the core's two separate paths in their respective limits.
+- [ ] Free pools with diffusion or motion (core raises): compose the walk with the matrix
+      step; verify against the single-pool path with f → 0.
 
-- [x] Benchmark 1 (`validation/real/`): ISMRM/NIST phantom T1 plane, 3 T IR spin echo, the
-      scanner's own Pulseq files and raw data (Tong et al. 2022). With reference T1/T2 only
-      and nothing fitted, the inversion-recovery curves are predicted to 1.49 % (spheres
-      1–10) vs 25.9 % for the analytic formula; converged in spins per slice (`RESULTS.md`)
-- [x] Benchmark 2 (`nist_tse.py`): the T2 plane, 23-echo CPMG. Echo-train shapes predicted to
-      2.25 % (spheres 1–10) vs 10.5 % for mono-exponential decay, nothing fitted; reproduces
-      the stimulated-echo signature. A global B1⁺ fit does not improve held-out spheres
-- [x] Monte Carlo estimation (`validation/real/nist.py`): scrambled-Sobol spin placement
-      (error ∝ N^-0.75, ~12× fewer spins than stratified), seeds averaged in the complex
-      domain, the magnitude bias removed, jackknife error bars. Benchmark 1: 1.51 ± 0.05 %
-      (1024 spins/pixel); benchmark 2: 2.20 ± 0.04 %
-- [x] Fill fluid (water around the spheres) and sphere walls: halves the short-T2 spheres'
-      error in benchmark 2, no effect in benchmark 1; wall thickness scanned (0.5–1.5 mm)
-- [ ] Short-T2 spheres 11–14 (6.5–8.7 % in the first echoes): reference T2 values, wall and
-      noise ruled out; suspects are local B1⁺ and played-vs-written timing (needs a B1⁺ map)
-- [ ] Absolute (not just shape) agreement: coil sensitivities and B1⁺ fitted from the data
-      (digital twin, R7), fill fluid, temperature
-- [ ] More datasets: RRSG 2020 T1 challenge (multi-site NIST data), Pulseq-CEST phantom data,
-      a multi-slice acquisition with its fat-saturation pulse (incidental MT, below)
+## M2. Metal adjoint (5 to 7 days)
 
-## Phase 4 – Differentiable sequence design
+Goal: `simulate_metal` differentiable for the inputs the digital twin and sequence design need,
+at imaging scale, verified against the fused adjoint and the core.
 
-- [ ] Parameterized sequence API: which tensors are free, bounds, reparameterizations
-      (so far by hand, e.g. TR = TR_min + softplus(u) in `examples/design_contrast_tr.py`)
-- [x] Hardware constraints as smooth penalties (`blochparty.design`): Gmax and slew per axis,
-      peak B1 [µT], RF energy / windowed SAR proxy, approximate PNS (chronaxie-filtered dG/dt),
-      scan time; violations named by segment range, time and excess. Verified: units and B1 vs
-      closed forms; slew exact on a raster-sampled trapezoid, builders' instantaneous steps
-      flagged; windowed RF power vs closed form; PNS reproduces the IEC hyperbolic
-      strength–duration law (error < raster / ramp time, converging linearly); penalties zero
-      inside the limits, gradcheck outside
-- [ ] Timing raster checks; projections onto the constraints; Pulseq's own checks
-- [x] Losses: tissue contrast, CNR, SNR efficiency (noise from the coil model by pseudo-replicas:
-      σ/√N for the iFFT to 2 %), PSF FWHM / sidelobes (simulated point spin = Dirichlet kernel to
-      1e-9, FWHM 1.207 px / sidelobe 21.7 %; T2 blurring = closed-form readout weighting to
-      1e-9), Cramér–Rao bound from the simulated Jacobian (= closed-form DESPOT1 CRB to 1e-7, via
-      fused autograd, fused finite differences and `simulate` autograd)
-- [ ] Artifact energy loss
-- [x] Examples with known optima, through the fused kernel (gradients = `simulate`'s to 1e-10):
-      DESPOT1 flip pair by CRB (`examples/design_despot1.py`: 4.109° / 23.618° at TR 15 ms,
-      T1 1 s, = closed-form grid to 2e-4°, signals at 70.711 % of Ernst = 1/√2 to 1e-6, Deoni
-      2003: ≈ 71 %);
-      WM/GM contrast with TR free under a scan-time budget (`design_contrast_tr.py`: lands on
-      the budget's TR, 16.109° at 10 ms and 25.224° at 25 ms, = closed-form grid to 0.01°);
-      low-SAR TSE refocusing train with every echo ≥ 0.6 × the 180° echo
-      (`design_tse_flips.py`: 24 % of the RF energy of the cheapest constant train, echoes =
-      EPG to 2e-16, train = SciPy SLSQP on EPG to 2e-6°)
-- [ ] Examples: RF pulse design, MRF-style schedules
+Scope (first version): sequence `dt`, `rf`, `grad`, `adc_phase`, `b0_offset`; phantom `pos`,
+`pd`, `t1`, `t2`, `db0`, `b1`; complex `coils`; `m_init`; the rate-model bound pool
+(`f`, `k`, `t1`, `t2`); the scanner field model's `field_strength` and nonlinearity coefficients.
+Out of scope, raising clearly: diffusion, motion, generalized Bloch, free pools, `FieldMaps`
+sampled per segment. Losses on `signal` and on `m` (both, as the fused adjoint).
 
-**Verify:** recover known optima (Ernst ✅, WM/GM contrast ✅ (also with TR free ✅), DESPOT1
-CRB ✅, low-SAR VFA-TSE vs EPG + SLSQP ✅, SLR-designed pulses); constraint satisfaction checked
-by Pulseq's own checks.
+Design, following the fused adjoint (`src/blochparty/fused/kernel.h`, "Adjoint (reverse mode)"
+at line 794 and `reverse_mode` / `reverse_bound`): the reverse sweep
+λ_{s−1} = A_sᵀ (P_s λ_s + ADC term), with A_s the segment's linear map (rotation, relaxation,
+precession) and P_s the spoil projector; parameter gradients from λ_s and m_{s−1}.
 
-## Phase 5 – Agentic sequence development
+- **Checkpoints, two levels.** Forward stores m before every K₁ segments in a device buffer
+  (N × S/K₁ × 4 floats). Backward, per coarse interval in reverse order: replay K₁ segments
+  forward storing every state in a per-spin device buffer of K₁ states, then sweep backward
+  over them. Memory N × (S/K₁ + K₁) × 16 B. For benchmark 2 (85 k spins, 4.1 M segments),
+  K₁ = 2048 gives about 5.5 GB; expose K₁ as `checkpoint_every`. Same structure as the fused
+  kernel, so results must not depend on K₁ (test).
+- **Per-spin gradients** (pos, pd, t1, t2, db0, b1, coils, m_init) accumulate in per-thread
+  registers / device memory with no reduction. Coil gradients: dL/dsens_c = Σ_samples h_c·m,
+  per spin and coil, as `reverse_mode` does.
+- **Per-segment gradients** (dt, rf, grad, adc_phase, b0_offset) need a sum over spins per
+  segment. Reduce within the threadgroup (simd_sum, then threadgroup memory), write one partial
+  per threadgroup per segment to a buffer (groups × chunk × 9 floats), sum the partials in torch
+  in a fixed order. No float atomics: results must be deterministic run to run (test).
+- **Dispatch** mirrors the forward: one kernel launch per coarse interval; the ADC term needs
+  h = dL/d(raw coil sums) per sample, passed in as a (n_adc × coils × 2) buffer, computed by
+  autograd in torch from the loss (`torch.autograd.Function`: forward calls the Metal forward
+  and saves the checkpoints; backward receives grad of `signal` and `m`, runs the sweep,
+  returns gradients for every tensor input).
+- **The bound pool's exchange step** has its own reverse (`ZStep::reverse` in kernel.h); port it
+  with the `_full` variant. Keep the plain variant free of pool state.
+- **Rodrigues reverse** (`rodrigues_reverse`, kernel.h:844) ports directly; the `expm1`
+  relaxation note at kernel.h:1217 applies in float32 even more.
 
-- [ ] Tool-style API: JSON sequence spec in → structured report out (metrics, constraint
-      violations by block, images, PSF), deterministic and fast. Report out exists
-      (`design.design_report`, JSON, ~0.6 s for a 64² 8-coil GRE); spec in does not yet
-- [ ] Sequence linter with actionable messages ("slew exceeded in block 14 by 12 %"): the report
-      names segment ranges ("slew x exceeded in boundaries 2–20 (t = 1.010–1.190 ms) by 12 %");
-      mapping segments back to Pulseq blocks is still to do
-- [ ] Split of labour: agent chooses structure (sequence family, ordering, spoiling);
-      gradient descent tunes continuous parameters inside it
-- [ ] Benchmark task suite with scored targets (e.g. "T1w brain at 1 mm in < 2 min,
-      maximize WM/GM CNR"), to measure agent progress
+Verify, in this order:
+1. Tiny cases vs the core in float64 autograd (`tests/test_fused_grad.py` has the case list:
+   random RF / gradient / off-resonance, 8-coil 2D GRE, 3D GRE with dB0, spoils and ADC right
+   after RF, `m_init`, losses on signal and/or m). Float32 adjoint vs float64 autograd: expect
+   1e-4 relative on well-conditioned gradients; report per input.
+2. Vs the fused adjoint in float32 on the same cases (both float32: expect 1e-5 relative), and
+   on the bound-pool and field-model cases.
+3. Identical gradients for any `checkpoint_every`; identical across two runs (determinism).
+4. Gradient descent through it recovers the Ernst angle and the WM/GM optimum (16.109°) to 0.01°
+   (`examples/optimize_contrast.py`: add a `--metal` switch next to its `--fused`), and the
+   DESPOT1 CRB pair (`examples/design_despot1.py`, which uses the fused adjoint today).
+5. `benchmarks/bench.py --grad --backend metal` on the standard cases; record. Target: forward +
+   backward within 5× the forward (the fused adjoint is 4 to 7×).
 
-**Verify:** agent-produced sequences pass Pulseq checks and cross-simulator validation
-(Phase 2) before any score counts.
+Then retire the fused kernel: once 1 to 4 pass, move `src/blochparty/fused/` out of the package
+(`git rm`; the archive and git history keep it), drop its tests, remove it from
+`tools/snapshot.py` in a separate commit that re-saves the snapshot and explains why, and update
+`docs/ENGINES.md`, README and `CLAUDE.md`. Until then it stays frozen.
 
-## Phase 6 – Training-data generation
+## M3. The digital-twin loop on the NIST data (3 to 5 days)
 
-- [x] Anatomy M1: susceptibility maps → B0 with padded Fourier dipole convolution and
-      order 0–2 shimming (`susceptibility_to_b0`, `shim`); sphere inside/outside RMS
-      0.439/0.108 Hz at 3 T, long cylinders < 1.77 Hz, harmonic removal < 1e-12 Hz.
-      QSM forward-field validation follows in M3 of [the anatomy spec](docs/specs/ANATOMY.md).
-- [x] Anatomy M2: checksum-pinned BrainWeb loader, conservative resampling, cited/flagged tissue
-      priors and sub-voxel partial-volume spins; separate susceptibility/scanner shim maps.
-      PD conservation <1e-12, GPU/core error 3.23e-7; full 1-mm head RF/FID 7.77 M spins/s.
-      [Validation and limits](validation/anatomy/RESULTS.md); spatial variability remains M4.
-- [ ] Anatomy M3: QSM loader and public Sim1/Sim2 checks implemented (forward RMS
-      2.11e-16 / 3.76e-16 Hz vs independent Python reference). Full-source R1/R2*/M0
-      validation and original MATLAB check need authorized data; [details](validation/anatomy/QSM.md).
-- [x] Anatomy M3 (alternative): `load_ahead` for the open AHEAD v3 7 T templates (measured
-      R1/R2*/PD/QSM); units and geometry checked against Caan 2019 / MNI2009b.
-- [x] Anatomy M4: within-tissue texture (`variability`), statistics tested.
-- [x] Anatomy M5: `examples/anatomy_brain.py` (3 T BrainWeb: T1w GRE, T2w TSE, long-TE GRE) and
-      `validation/anatomy_ahead.py` (7 T measured maps).
-- [x] **T2* from measured R2* without double counting** (2026-10-07; `t2star="separate"`, the default with chi): a measured R2*
-      contains the macroscopic dephasing from the voxel-scale susceptibility field that the
-      simulation now computes itself, plus microscopic R2' (vessels, myelin, iron) that it
-      does not. Today `t2star="auto"` drops R2' when chi is on, so measured R2* contrast vanishes
-      (AHEAD at 7 T: no pallidal darkening until R2' was supplied by hand). Plan: estimate the
-      macroscopic part from the simulated field's within-voxel gradients (sinc-type decay,
-      Yablonskiy/Fernandez-Seara) at the acquisition's voxel size and TE range, subtract it to
-      get microscopic R2' per voxel, and make that the default; check against a multi-echo GRE
-      of the same anatomy (simulated R2* fit vs the input map) and the static-dephasing limit.
-      Done: round trip within 0.3 % (vs +9 to +24 % double counted, -6 to -21 % dropped).
-- [x] 3 T WM/GM T2* in the tissue table: replace the occipital Wansapura proxies (GM < WM) with
-      whole-brain values. Done: Shin 2025 (GM 55.9, WM 51.5 ms; Peters ISMRM 2006 agrees on GM > WM),
-      their protocol as the default R2* acquisition.
-- [ ] Further realistic phantoms: XCAT / MRXCAT; random augmentations
-      (generative plan: [docs/PHANTOMS.md](docs/PHANTOMS.md))
-- [ ] Raw k-space from reconstructed scans ("lift", PHANTOMS §5), validated on paired raw/DICOM data
-- [x] Physically based coils: Biot–Savart loop arrays (low field), imported EM maps (≥3 T)
-      (`loops.py`; `em.py` reads mariepy full-wave maps: B1+, receive weights, noise resistance;
-      BrainWeb 3 T birdcage + 8 loops in `validation/em/`)
-- [ ] Complex (pTx) B1+ in the engines: `FieldMaps.b1` is a real scale, so the transmit phase of
-      imported maps is dropped (exact for one transmit channel up to an image phase)
-- [ ] Motion (rigid, then deformable), flow, diffusion
-- [ ] Dataset writer (ISMRMRD / HDF5) with full provenance (sequence, phantom, seed)
-- [ ] Fast path: signal-equation forward model for cases where Bloch fidelity isn't needed
+Goal: condition 3 above. Benchmarks 1 (IR-SE, T1 plane) and 2 (23-echo TSE, T2 plane) are the
+same phantom on the same Prisma with the same 20-channel coil (Tong et al. 2022). Today both are
+compared by shape (one free scale per sphere) and both stop at a list of suspects. Close the loop.
 
-**Verify:** noise statistics (SNR maps, g-factor) vs. theory; motion artifacts vs.
-analytic ghosting for periodic motion; comparison with real fastMRI-style data statistics.
+- [ ] **Absolute metric.** Add to `validation/real/nist.py` an absolute comparison: measured vs
+      simulated complex coil images (or at least magnitude after the same coil combination),
+      with receive sensitivities estimated from the data's own M0-like image (smooth, per coil,
+      e.g. low-order polynomial fit of each coil image divided by the RSS inside the phantom)
+      and used in the simulation as `FieldMaps.coils`. Report both metrics.
+- [ ] **Fit on one plane, predict the other.** Parameters: a low-order B1+ map (solid harmonics
+      to order 2, 9 parameters, `b0_shim`-style basis), the receive maps as above (not fitted
+      through the simulator, estimated from data), the fill-fluid geometry (sphere positions
+      along the slice, wall thickness), the first refocusing interval's timing shift (one scalar,
+      benchmark 2's prime suspect). Fit by gradient descent through the Metal adjoint (M2) or,
+      if M2 is not ready, through the fused adjoint overnight (its forward on benchmark 2 is
+      232 s; a gradient step about 20 min). Reference T1 / T2 are held out: never fitted.
+- [ ] **Prediction with error bars.** Predict the other plane with the fitted scanner model.
+      Error bars by jackknife over Monte Carlo seeds (`nist.mc_errors`, which keeps covariance).
+- [ ] **Ablation table.** With the fitted inputs fixed, switch physics off one at a time (slice
+      profile, crushers' dephasing, incidental MT of the sinc pulses with a literature bound
+      pool for NiCl₂/MnCl₂ water, which should be ~0, fill fluid, concomitant fields, measured
+      GIRF of a Prisma from benchmark 7 as a proxy) and report the change in prediction error
+      against the error bar. Condition 3 holds when every row is within the bar or explained.
+- [ ] Write it up in `validation/real/RESULTS.md` ("Digital twin") and in `docs/REALISM.md` R7.
 
-## Ideas parking lot
+Verify: the prediction on the held-out plane beats the nothing-fitted number (1.49 % / 2.25 %
+shape; absolute: establish the baseline first) and the twin's parameters are physically plausible
+(B1+ within ±20 % at 3 T, timing shift below 100 µs). If the short-T2 spheres 11 to 14 stay at
+6 to 9 % with B1+ and timing fitted, that is a physics result: record which physics is missing.
 
-Phase distribution graph (PDG) backend for speed; magnetization transfer / multi-pool;
-non-Cartesian trajectories + NUFFT recon (gradient non-linearity, eddy currents and
-concomitant fields: done, Phase 2b).
+## M4. Pulseq out (1 to 2 days)
+
+Goal: anything built or optimized here runs on a scanner, and the round trip is lossless. This is
+the precondition for sequence development and for a linter that talks about Pulseq blocks.
+
+- [ ] Block provenance. `SequenceBuilder.block` records the segment span of every block in
+      `seq.meta["blocks"]`; `read_pulseq` records the source block index per segment. Transforms
+      (`subdivide_rf`, `apply_girf`, drift) carry `meta` through.
+- [ ] `pulseq.write_pulseq(seq, path, system=None)` via pypulseq: for sequences with block
+      provenance emit one Pulseq block per recorded block (RF shapes on the RF raster, trapezoids
+      where the segments form one, arbitrary gradients otherwise, ADC with the recorded dwell and
+      phase); for flat sequences without provenance, emit segment runs between RF and ADC
+      boundaries as arbitrary-gradient blocks. Ideal spoil flags cannot be written: raise unless
+      `spoil="drop"` is passed, and say so in the docstring.
+- [ ] Round-trip tests (`tests/test_pulseq.py`): write → `read_pulseq` → simulate equals the
+      original to 1e-9 on GRE (ramps, slice select, RF spoiling), TSE, bSSFP, EPI and an imported
+      scanner `.seq` from `validation/real/data`; pypulseq's `check_timing` passes; k-space at every
+      ADC sample equals pypulseq's `calculate_kspace` for the written file.
+
+## M5. Anatomy generation v0 and the dataset writer (5 to 8 days)
+
+Goal: a sampler that produces a new, physically consistent head phantom on every call, carrying
+every input the engine can use, and a writer that stores what was simulated with full
+provenance. This is P0 and P1 of [docs/PHANTOMS.md](docs/PHANTOMS.md) §9 and the start of the
+anatomy pillar. The learned parts (P4, P5) come after M6.
+
+- [ ] **Schema (P0).** A `DigitalPhantom` container above `Phantom`: label fractions on an
+      anatomy grid (what `anatomy.Anatomy` holds), per-tissue property distributions
+      (`anatomy.TissueProperties`), field-strength-dependent tables, and the inputs today's
+      engine needs but the tissue table lacks: bound-pool fraction / exchange rate / T2b per
+      tissue (literature qMT values at 3 T for WM, GM, CSF, muscle, fat; cite each as the tissue
+      table does), diffusivity per tissue, fat fraction. `to_phantom` fills `Phantom.bound`,
+      `diffusion` and `fat_fraction` from them, opt-in. Round trip with today's maps bit-identical.
+- [ ] **Procedural sampler (P1).** `anatomy.sample(seed, *, subject=None, field_T, voxel)`:
+      choose a BrainWeb subject (the 20-subject set is loaded and pinned), apply a random smooth
+      diffeomorphic deformation (B-spline displacement field with a magnitude prior; check the
+      Jacobian stays positive), sample tissue properties from the cited distributions, apply the
+      within-tissue texture (`variability`, exists), compute χ → B0 and shim (exists), and the
+      R2* policy (`t2star="separate"`, exists). Deterministic in the seed; metadata records every
+      draw.
+- [ ] **Outside the brain.** PHANTOMS §6 says what gives synthetic brains away: scalp fat with
+      chemical shift, skull and dura, sinuses, eyes. BrainWeb's fuzzy classes cover fat, skull,
+      skin, dura, marrow, vessels and CSF; make sure each gets a cited property set and that fat
+      classes get `fat_fraction` so the 6-peak model acts on them.
+- [ ] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
+      noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
+      trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group
+      with the sequence as JSON plus the `.seq` from M4, the sampler seed and every property
+      draw, the engine and git hash). Reader for round trip.
+- [ ] **First realism number (P2 start).** A classifier two-sample test, real vs simulated,
+      on fastMRI brain raw k-space through the same reconstruction: a small CNN on magnitude
+      images; report AUC. This is the anatomy pillar's benchmark the way `validation/real/` is
+      the engine's. Expect a high AUC at first; the point is to have the number move.
+
+Verify: PD conservation and bit-identity of `to_phantom` defaults (existing tests); tissue
+statistics within 5 % of their targets over 100 samples; deformation Jacobian > 0 everywhere;
+dataset round trip; a 3 T T1w / T2w / T2*w triplet of ten sampled heads in `examples/`.
+
+## M6. Physics backlog, in order (each 1 to 3 days)
+
+Ordered by what training data and sequence design will hit first. Each item ships with the
+phantom input that feeds it (M5 schema) and its reference. Each is opt-in, core first, Metal
+second, parity test third, fused raises.
+
+1. **J-coupled fat.** Bright fat in TSE (fat T2 appears longer at short echo spacing; SE vs TSE
+   fat ratio up to ~2). Model: per fat peak, a small spin-system (two or three coupled spins per
+   peak group, J ≈ 7 Hz for the methylene chain) evolved by a density-matrix step under the
+   same RF and gradient events, sampled as its transverse coherence; cheapest form is a
+   precomputed echo-spacing-dependent apparent T2 per peak from that model, applied in
+   `phantom_from_maps` when `j_coupling=True`. Verify: the density-matrix model against
+   published SE/TSE fat ratios and the Stables et al. echo-spacing curves; the tabulated
+   shortcut against the model; `test_phantom_fat.py` defaults unchanged.
+2. **Deformable and physiological motion.** `Motion` today: velocity, displacement × waveform,
+   rigid. Add a displacement *field* over time: per-spin trajectories as a sum of basis motions
+   (respiratory: a smooth field with a breathing waveform; cardiac: later, with M5's heart).
+   Spin history is automatic; the maps are sampled where the spin is (exists). Verify: ghosting
+   of periodic motion vs the analytic ghost positions (period / TR), constant-velocity phase vs
+   the first moment, a POSSUM-style spin-history case against the core at fine steps.
+3. **Complex B1+ and pTx.** `Phantom.b1` is a real scale; `FieldMaps.b1` likewise, so imported
+   full-wave maps (`em.py`) lose the transmit phase. Make `b1` complex (phase adds to the RF
+   phase per spin) with a per-channel option: `b1` (C_tx, N) complex and `Sequence.rf_shim`
+   (S, C_tx) complex drive weights; the effective field is Σ_c w_c b1_c. Default remains a real
+   scalar and bit-identical. Verify: Mz = cos(|b1|α) for any phase; a two-channel shim that
+   cancels at a point gives zero flip there; the imported mariepy maps' phase (the quadrature
+   birdcage's spatial phase) vs the rotating-field phase test in `tests/test_em.py`.
+4. **Contrast agents and perfusion.** Time-varying T1 (and T2*, χ) per spin from tracer kinetics
+   (Tofts: Ktrans, ve, vp, an AIF) at the per-segment time; `Phantom` gets a `kinetics` field,
+   `to_phantom` fills it from a lesion / parenchyma model (M5). Verify: the signal of a spoiled
+   GRE vs the closed-form steady state with the instantaneous T1(t) at each TR when T1 changes
+   slowly; the concentration-to-R1 relation (relaxivity) by construction.
+5. **Orientation-dependent R2\*.** R2*(θ) per tissue from fibre orientation (a diffusion-tensor
+   principal direction from M5's anatomy, or a synthetic field) and B0 direction; literature
+   curves for WM (Lee et al.) as the model. Verify: the published curve; isotropic tissue
+   unchanged.
+6. **Smaller items, when touched anyway:** incidental MT validated on data with a known
+   fat-saturation pulse; b-matrix with gradient nonlinearity; duty-driven drift; ramp-sampled
+   readouts in the builders with gridding reconstruction; SLR pulses; respiration coupled to a
+   low-order field model from a breathing phantom (M6.2 and `drift.respiration` together).
+
+## M7. Training data and agentic design (after M5 and M6.1 to 6.3)
+
+The two downstream goals. Only what their first users need; details when we get there.
+
+- [ ] Generation driver: sample anatomy (M5) → sample a protocol family (builders, or a `.seq`
+      from a library) → sample scanner imperfections (B1+, B0 shim, GIRF from benchmark 7, coil
+      array from `loops.py` / `em.py`, noise covariance) → simulate on Metal → `write_dataset`.
+      Throughput target and a nightly run that records spins·segments/s.
+- [ ] Sequence spec in: JSON → builder calls (`design.design_report` already produces the report
+      out). Linter messages mapped to Pulseq blocks (M4 provenance). Parameterized sequence API
+      (which tensors are free, bounds, reparameterizations), hardware projections.
+- [ ] A benchmark task suite with scored targets (e.g. "T1w brain at 1 mm in < 2 min, maximize
+      WM/GM CNR") so agent progress is a number; every scored sequence must pass Pulseq's checks
+      and the M4 round trip.
+
+## M8. Other hardware (when machines exist)
+
+- [ ] CUDA port of the Metal kernel (forward and adjoint), verified against the core and the
+      Metal results in float32.
+- [ ] CPU fallback for users without a GPU: the PyTorch core is it; `simulate_chunked` for memory.
+- [ ] KomaMRI crosscheck and phantom export, if cross-simulator agreement becomes a question
+      again.
+
+## Not planned now
+
+Phase-distribution-graph backend; non-Cartesian NUFFT reconstruction inside the package (the
+validation scripts have what they need); XCAT / MRXCAT (licensing; prefer open shape models, M5);
+a model-based reconstruction for benchmark 3 (tests the reconstruction, not the simulator); a
+GUI (the three.js anatomy viewer in `examples/` is a prototype if wanted later).
+
+## Done so far (summary; details in the archive)
+
+Reference core with closed-form free runs and chunked backward; fused CPU kernel with adjoint;
+Metal forward with many-coil matrix-product reductions and the field model; sub-voxel spins,
+T2′, real spoiling, ramps, slice selection, B1+/B0 maps, 6-peak fat; SE / TSE / bSSFP / EPI
+builders; bound pool (rate and generalized Bloch), free pools in core and fused; concomitant
+fields, gradient nonlinearity, GIRF / eddy currents, drift and respiration; diffusion (free,
+restricted), motion and flow, scanner-frame maps; receive and transmit chains; Biot–Savart and
+full-wave coils; BrainWeb / QSM / AHEAD anatomy with texture and R2* separation; Pulseq import;
+design penalties, losses, CRB and worked optima; MRzero and BMCTool crosschecks; nine real-data
+benchmarks (NIST IR-SE 1.5 %, NIST TSE 2.2 %, radial IR-bSSFP, BSA NMR, spiral TSE, radial
+timing, measured GIRF, Pulseq-CEST, iohexol CEST prediction); Monte Carlo estimators with
+jackknife error bars. 484 tests.
