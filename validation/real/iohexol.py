@@ -14,6 +14,7 @@ Test: per tube, water T1 / T2 and the iohexol pool(s) calibrated on the 1.5 s Z-
 4 s Z-spectrum predicted by blochparty with nothing refitted.
 
     uv run python validation/real/iohexol.py [recon|...]
+    BLOCHPARTY_BACKEND=metal uv run python validation/real/iohexol.py predict   # on the Apple GPU
 """
 
 from __future__ import annotations
@@ -32,6 +33,19 @@ DATA = Path(__file__).with_name("data") / "iohexol"
 SEQ15 = DATA / "Ref_00_3D_res128_alpha_4_OC_15_100ms_1ms_4ppm_Phantom_Trec_3p5.seq"
 RAW = {1.5: DATA / "meas_MID00127_FID56966_Ref_Tsat_1p5.dat", 4.0: DATA / "meas_MID00131_FID56970_Ref_Tsat_4.dat"}
 N, NPAR, NOFF = 128, 3, 58
+
+
+def simulator():
+    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    import os
+
+    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
+        from blochparty.metal import simulate_metal
+
+        return simulate_metal
+    from blochparty import simulate
+
+    return simulate
 
 
 def offsets_ppm() -> np.ndarray:
@@ -221,8 +235,8 @@ def spectra(par: dict, db0_hz, b1, n_pulses: int, passes: int = 2, step: float =
     for _ in range(passes):
         m0 = torch.zeros(nt * nf, 3, dtype=torch.float64)
         m0[:, 2] = start
-        pre = bp.simulate(ph, prep, m_init=m0).m
-        after = bp.simulate(ph, ro, m_init=pre).m[:, 2].reshape(nt, nf)
+        pre = simulator()(ph, prep, m_init=m0).m
+        after = simulator()(ph, ro, m_init=pre).m[:, 2].reshape(nt, nf)
         # next offset starts after Trec from this one's readout; the M0 scan after Trec_M0 from the last
         prev = torch.roll(after, 1, dims=1)
         trec = torch.full((nt, nf), TREC, dtype=torch.float64)

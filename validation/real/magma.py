@@ -161,6 +161,19 @@ def rf_frame(seq):
     return replace(seq, rf=torch.stack([c2.real, c2.imag], -1), rf_freq=None), f
 
 
+def simulator():
+    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    import os
+
+    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
+        from blochparty.metal import simulate_metal
+
+        return simulate_metal
+    from blochparty import simulate
+
+    return simulate
+
+
 def simulate_z(model, db0_hz, rb1, trec_from=None, rf_step=100, frame=True):
     """(33, n) simulated Z per spin (voxel: its WASABI dB0 [Hz] and relative B1) for the APTw .seq:
     Mz at each pseudo-ADC over Mz at the M0 scan. ``trec_from`` None: every offset starts at
@@ -196,8 +209,8 @@ def simulate_z(model, db0_hz, rb1, trec_from=None, rf_step=100, frame=True):
             block, f = rf_frame(block)
             block = coarsen_rf(block, rf_step)
             p = replace(ph, db0=ph.db0 - f)
-        r = bp.simulate(p, block, m_init=m_init)
-        mz.append(r.m[:, 2].numpy())
+        r = simulator()(p, block, m_init=m_init)
+        mz.append(r.m[:, 2].double().numpy())
         start = k + 1
     mz = np.array(mz)
     return mz[1:] / mz[0]

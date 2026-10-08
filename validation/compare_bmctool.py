@@ -1,6 +1,7 @@
 """Cross-validation of magnetization transfer: blochparty vs. BMCTool (pulseq-cest) Z-spectra.
 
     uv run --with bmctool==1.0.3 python validation/compare_bmctool.py [--quick]
+    BLOCHPARTY_BACKEND=metal uv run --with bmctool==1.0.3 python validation/compare_bmctool.py   # on the Apple GPU
 
 BMCTool solves the Bloch-McConnell equations with a Pade matrix exponential per RF sample;
 its MT pool is the same two-pool model (Henkelman/Graham rate W = w1^2 G) as
@@ -117,6 +118,17 @@ def bound_pool(lineshape: str) -> bp.BoundPool:
     return bp.BoundPool(f=MT["f"], k=MT["k"], t1=MT["t1"], t2=T2B[lineshape], dw=hz(MT["dw_ppm"]), lineshape=lineshape)
 
 
+def simulator():
+    """``bp.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    import os
+
+    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
+        from blochparty.metal import simulate_metal
+
+        return simulate_metal
+    return bp.simulate
+
+
 def spin(db0: float | torch.Tensor, lineshape: str) -> bp.Phantom:
     db0 = torch.as_tensor(db0, dtype=torch.float64).reshape(-1)
     n = len(db0)
@@ -140,7 +152,7 @@ def blochparty_from_seq(path: Path, lineshape: str) -> np.ndarray:
             sl = slice(start, a)
             part = replace(seq, dt=seq.dt[sl], rf=seq.rf[sl], grad=seq.grad[sl], adc_phase=seq.adc_phase[sl],
                            is_rf=seq.is_rf[sl], adc=[False] * (a - start), spoil=seq.spoil[sl], meta={})
-            out.append(float(bp.simulate(spin(0.0, lineshape), part).m[0, 2]))
+            out.append(float(simulator()(spin(0.0, lineshape), part).m[0, 2]))
             start = b
     return np.array(out)
 
@@ -150,7 +162,7 @@ def blochparty_as_spins(offsets_ppm, lineshape: str) -> np.ndarray:
     n = round(T_SAT / RF_RASTER)
     seq = bp.SequenceBuilder().rf(T_SAT, amplitude=amp, n_steps=n).delay(5e-3).spoil().build()
     ph = spin(-hz(torch.tensor(offsets_ppm, dtype=torch.float64)), lineshape)
-    return bp.simulate(ph, seq).m[:, 2].numpy()
+    return simulator()(ph, seq).m[:, 2].double().numpy()
 
 
 def check_replica() -> None:
@@ -213,10 +225,6 @@ def main(argv=None):
                       f"{np.abs(patched / patched[0] - ref / m0).max():.1e}")
 
 
-if __name__ == "__main__":
-    main()
-
-
 # ---------------------------------------------------------------- CEST: free exchanging pools
 
 
@@ -245,7 +253,7 @@ def cest_comparison(quick: bool = False) -> str:
         ph = bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=torch.ones(n, dtype=torch.float64),
                         t1=torch.full((n,), water["t1"], dtype=torch.float64),
                         t2=torch.full((n,), water["t2"], dtype=torch.float64), db0=db0, pools=pools)
-        return bp.simulate(ph, seq).m[:, 2].numpy()
+        return simulator()(ph, seq).m[:, 2].double().numpy()
 
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "cest.seq"
@@ -269,3 +277,7 @@ def cest_comparison(quick: bool = False) -> str:
              "| offset [ppm] | BMCTool | blochparty | difference |", "|---|---|---|---|"]
     lines += [f"| {o:g} | {r:.6f} | {b:.6f} | {b - r:+.1e} |" for o, r, b in zip(offsets, z_ref, z_ours)]
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    main()
