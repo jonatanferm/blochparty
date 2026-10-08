@@ -383,6 +383,19 @@ says where it came from so it can be re-checked.
   2.894 T; offsets are played in Hz (ppm x 127.73), pool shifts must be placed in Hz at the real
   frequency (raw header lFrequency).
 
+- **Prefer the raw data over a dataset's prepared arrays when the bookkeeping does not add up**
+  (2026-10-08, benchmark 9): the iohexol archive's prepared Z-spectra had 57 columns for 58
+  offsets, a zero normalisation column and the water minimum one column apart between files; a
+  60-line twix reader and the .seq's own trajectory gave unambiguous spectra. MATLAB-saved maps
+  and masks are column-major: their 2D arrays are the transpose of numpy images (registration
+  found it; their masks then still did not match our tubes and were not used).
+- **One saturation time does not pin T1 in a CEST fit**: calibrated at 1.5 s, the model predicted
+  the 4 s spectra better than "no change" but under-predicted the build-up 1.3-6x; T1 needs an
+  independent measurement (or several Tsat) before a Tsat prediction tests the engine.
+- **Batch parameter sets as spins**: a Levenberg-Marquardt Jacobian by forward differences costs
+  one simulation if every perturbed parameter set is a spin (here 8 tubes x 8 sets x 58 offsets);
+  ~7 min per iteration on the CPU core with exchange pools.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

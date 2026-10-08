@@ -349,6 +349,57 @@ changes the rms by <= 0.005. As the engine matches BMCTool on the same .seq, thi
 about the models (described in their files as simplified, partly tuned), not the simulator. A
 predictive CEST test needs held-out conditions: benchmark 9.
 
+## Benchmark 9: CEST saturation-time prediction, iohexol phantom, Siemens Vida (`iohexol.py`)
+
+Data: Huemer et al., MRM 2025 ([Zenodo 17244380](https://zenodo.org/records/17244380), members
+range-read by `fetch_iohexol.py`): two conventional CEST reference scans of one phantom (Falcon
+tubes of iohexol with Gadovist; concentrations not published) at 123.26 MHz, 28 min apart, 3D
+Cartesian GRE (128 x 128 x 3, 4 deg, TR 5.2 ms, centric: the k-space centre is the first of 384
+lines), Trec 3.5 s, M0 at -1500 ppm after 10 s, 57 offsets -5..6 ppm; saturation by 15 (1.514 s)
+and 40 (4.04 s) optimal-control pulses of 100 ms with 1 ms gaps. The 40-pulse .seq is not in the
+archive (the raw header names it) and is rebuilt from the 15-pulse one.
+
+**Reconstruction.** Raw data with our own twix reader (`twix.py`): 22272 ADCs x 16 coils x 128,
+k-space positions from pypulseq's trajectory of the .seq, 3D FFT, coil combination with M0
+sensitivities; central partition. (The archive's prepared `.mat` spectra were not used: 57 columns
+for 58 offsets, a zero normalisation column and a water minimum at different columns in the two
+files.) Eight tube ROIs from the +1 ppm image (hydroxyl exchange: every tube, not the bath). The
+authors' WASABI B0 / B1 maps are transposed relative to our images (edge registration: 0.74 vs
+<= 0.67 for the other orientations). Field drift since WASABI from the bath's water dip: +13.0 Hz
+(1.5 s scan) and +18.3 Hz (4 s scan).
+
+**Simulation.** Per offset: Trec, the saturation train in its RF frame, ideal spoiling, then the
+readout as 384 spoiled 4 deg hard pulses (centric: Z = Mz before the first line over the M0
+scan's), offsets coupled through readout and recovery (iterated). All 58 offsets x tubes x
+parameter sets are spins of one simulation: each offset's per-pulse RF phase step moved into the
+gaps as a rotation (a gap gradient, spins at x = dpsi / (2 pi G t_gap)); equal to explicit
+per-offset simulation to 3e-5. Water + amide pool (4.3 ppm, T2 10 ms) + hydroxyl pool (free shift).
+
+**Calibration at 1.5 s** (Levenberg-Marquardt, Jacobian by batched finite differences, 200 us RF
+steps, 10 iterations): rms 0.006-0.022 per tube (median 0.013); T1 0.39-0.90 s, T2 0.09-0.23 s,
+amide f 1.5-2.8e-3, k 210-880 Hz; the hydroxyl pool is poorly determined (bounds in 5 tubes).
+
+**Prediction at 4 s** (nothing refitted; the 4 s scan's own drift; 100 us steps):
+
+| Tube | rms fit 1.5 s | rms predicted 4 s | rms "no change" | change at 4.3 ppm measured / predicted |
+|---|---|---|---|---|
+| 1 | 0.013 | 0.024 | 0.042 | -0.031 / -0.005 |
+| 2 | 0.015 | 0.027 | 0.043 | -0.042 / -0.023 |
+| 3 | 0.016 | 0.025 | 0.035 | -0.030 / -0.013 |
+| 4 | 0.006 | 0.014 | 0.020 | -0.014 / -0.003 |
+| 5 | 0.008 | 0.009 | 0.015 | -0.008 / -0.004 |
+| 6 | 0.008 | 0.013 | 0.024 | -0.023 / -0.012 |
+| 7 | 0.013 | 0.020 | 0.029 | -0.023 / -0.006 |
+| 8 | 0.022 | 0.026 | 0.048 | -0.028 / -0.022 |
+
+![iohexol prediction](iohexol_prediction.png)
+
+The prediction beats "no change" in every tube (median 0.022 vs 0.032) and the predicted change
+correlates 0.75 with the measured one over all tubes and offsets, but the CEST build-up from 1.5 to
+4 s is under-predicted 1.3-6x at 4.3 ppm. From one saturation time, T1 trades against the pool
+sizes; a T1 that is too short reaches the steady state too early, which is this pattern. Next: T1
+from the archive's IR Look-Locker scan as an independent input, then the same prediction.
+
 ## Monte Carlo estimation (`nist.py`: `*_qmc`, `mc_magnitude`, `jackknife`)
 
 Spins are a Monte Carlo sample of the continuous object. Magnitude images turn the complex
