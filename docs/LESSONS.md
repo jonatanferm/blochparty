@@ -841,6 +841,12 @@ says where it came from so it can be re-checked.
   "a b c" strings gave one argument, and a chain of background jobs failed at once. Write the
   commands out, or use `${=var}`.
 
+- **A wait loop must also end when its run dies** (2026-10-09): six `until grep ...; do sleep; done`
+  loops outlived their runs by hours, because each waited only for success: a run stopped by hand,
+  a `time` that prints "total" (zsh) instead of "real", a grep for a line that never follows the
+  one it anchored on. Wait on the process (`while kill -0 PID`) or match failure and success alike,
+  give the loop a deadline, and stop the loops when the result is in.
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts
