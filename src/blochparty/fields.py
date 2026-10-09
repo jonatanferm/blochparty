@@ -1,6 +1,6 @@
 """Scanner field model: what the spins see beyond the ideal B0 + G.r (REALISM.md, R1).
 
-``Scanner`` is an opt-in argument of ``simulate`` and ``simulate_fused``; ``None`` keeps
+``Scanner`` is an opt-in argument of ``simulate`` and ``simulate_metal``; ``None`` keeps
 the ideal model. Everything here is a differentiable function of its tensors, so the
 hardware parameters (field strength, harmonic coefficients) get gradients through both
 simulators.
@@ -192,7 +192,7 @@ class SpinFields(NamedTuple):
     conc: None; (N, 6) quadratic-form coefficients (mode "leading"); or (N, 7) transverse
         coefficients and f0 (mode "exact"); see ``concomitant_coefficients`` and
         ``transverse_coefficients``.
-    mode: 0 none, 1 leading order, 2 exact (as in the fused kernel).
+    mode: 0 none, 1 leading order, 2 exact (as in the Metal kernel).
     """
 
     pos: Tensor

@@ -1,6 +1,7 @@
 """B1+ (transmit) maps: ``Phantom.b1`` scales the RF of every pulse, per spin, in the
-PyTorch core, the signal equation, ``simulate_chunked`` and the fused kernel (forward and
-adjoint); ``coils.birdcage_b1`` is an analytic transmit field."""
+PyTorch core, the signal equation, ``simulate_chunked`` (forward and backward) and the Metal
+kernel (the spoiled-GRE image; agreement with the core in ``test_engines.py``);
+``coils.birdcage_b1`` is an analytic transmit field."""
 
 import math
 from dataclasses import replace
@@ -8,7 +9,7 @@ from dataclasses import replace
 import pytest
 import torch
 from test_bloch_vs_ode import random_case
-from test_fused import head_3d, rel, with_readout
+from helpers import rel, with_readout
 
 import blochparty as bp
 from blochparty import Phantom, SequenceBuilder, simulate
@@ -16,16 +17,7 @@ from blochparty.chunked import simulate_chunked
 from blochparty.coils import birdcage_b1
 from blochparty.reference import signal_equation, spoiled_gre_signal
 
-fused = pytest.importorskip("blochparty.fused")
-SIMS = {"core": simulate, "fused": fused.simulate_fused, "chunked": lambda *a, **k: simulate_chunked(*a, spin_chunk=7, **k)}
-
-
-@pytest.fixture(scope="module", autouse=True)
-def extension():
-    try:
-        fused._ext()
-    except Exception as e:  # no compiler / ninja: nothing to test
-        pytest.skip(f"fused extension unavailable: {e}")
+SIMS = {"core": simulate, "chunked": lambda *a, **k: simulate_chunked(*a, spin_chunk=7, **k)}
 
 
 def random_b1(n, seed=0, lo=0.5, hi=1.4):
@@ -58,7 +50,7 @@ def test_signal_equation_uses_b1():
     assert rel(signal_equation(replace(ph, b1=None), seq), ref) > 0.05
 
 
-@pytest.mark.parametrize("sim", ["core", "fused"])
+@pytest.mark.parametrize("sim", ["core", "metal"])
 def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
     # 2D GRE with a centre-brightened birdcage B1+ map: every pixel is the ideal spoiled-GRE
     # steady state at its own flip angle b1 * alpha
@@ -68,7 +60,14 @@ def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
     ph = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], fov, b1=b1_map)
     assert ph.b1.min() < 0.7 and ph.b1.max() == 1.0
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, dwell=1e-6, rf_duration=1e-6, n_dummy=300)
-    img = bp.ifft2c(bp.kspace_grid(SIMS[sim](ph, seq).signal, seq))[0]
+    if sim == "metal":
+        metal = pytest.importorskip("blochparty.metal")
+        if not metal.available():
+            pytest.skip("no Apple GPU (MPS)")
+        signal = metal.simulate_metal(ph, seq).signal.to(torch.complex128)
+    else:
+        signal = SIMS[sim](ph, seq).signal
+    img = bp.ifft2c(bp.kspace_grid(signal, seq))[0]
     mask = maps["pd"] > 0
     expected = 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"],
                                        b1_map * math.radians(flip))
@@ -80,37 +79,14 @@ def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
     assert (img - nominal).abs().max() > 0.05 * expected.abs().max()
 
 
-@pytest.mark.parametrize("dtype", [torch.float64, torch.float32])
-def test_fused_forward_matches_core(dtype):
-    phantom, seq = random_case(1)
-    ph = replace(phantom, b1=random_b1(len(phantom), 1))
-    coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
-    seq = with_readout(seq.subdivide_rf(2))
-    cd = torch.complex64 if dtype == torch.float32 else torch.complex128
-    out = fused.simulate_fused(ph.to(dtype=dtype), seq.to(dtype=dtype), coils.to(cd))
-    ref = simulate(ph.to(dtype=dtype).to(dtype=torch.float64), seq.to(dtype=dtype).to(dtype=torch.float64),
-                   coils.to(cd).to(torch.complex128))
-    tol = 1e-12 if dtype == torch.float64 else 1e-5
-    assert rel(out.signal.to(torch.complex128), ref.signal) <= tol and rel(out.m.double(), ref.m) <= tol
-    # 3D GRE with B1+, off-resonance and 8 coils, several block sizes and threads
-    ph3, c3 = head_3d(n=8, n_coils=8)
-    ph3 = replace(ph3, b1=birdcage_b1(ph3.pos, 0.5, radius=0.08))
-    seq3 = bp.gre_3d(8, n_dummy=5)
-    ref = simulate(ph3, seq3, c3)
-    for block, threads in [(16, 1), (64, 3), (256, 2)]:
-        out = fused.simulate_fused(ph3, seq3, c3, block=block, n_threads=threads)
-        assert rel(out.signal, ref.signal) <= 1e-12 and rel(out.m, ref.m) <= 1e-12
-
-
 def test_unit_b1_changes_nothing():
-    # b1 = 1 multiplies the RF exactly by one: same bits as no B1+ map (one thread: fixed sum order)
+    # b1 = 1 multiplies the RF exactly by one: same bits as no B1+ map
     phantom, seq = random_case(2)
     seq = with_readout(seq)
     coils = bp.birdcage_sensitivities(phantom.pos, n_coils=2)
     ones = replace(phantom, b1=torch.ones(len(phantom), dtype=torch.float64))
-    for sim in (simulate, lambda *a: fused.simulate_fused(*a, n_threads=1)):
-        a, b = sim(phantom, seq, coils), sim(ones, seq, coils)
-        assert torch.equal(a.signal, b.signal) and torch.equal(a.m, b.m)
+    a, b = simulate(phantom, seq, coils), simulate(ones, seq, coils)
+    assert torch.equal(a.signal, b.signal) and torch.equal(a.m, b.m)
 
 
 # --- gradients ----------------------------------------------------------------------------
@@ -128,30 +104,28 @@ def grads(sim, ph, seq, coils, names=("b1", "rf", "dt", "t1", "db0", "pos")):
 
 
 @pytest.mark.parametrize("seed", [0, 1])
-def test_b1_gradient_fused_matches_autograd(seed):
+def test_b1_gradient_chunked_matches_autograd(seed):
     phantom, seq = random_case(seed)
     ph = replace(phantom, b1=random_b1(len(phantom), seed))
     coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
     for sq in (with_readout(seq), with_readout(seq.subdivide_rf(3))):
         ref = grads(simulate, ph, sq, coils)
-        for kw in ({}, {"block": 16, "n_threads": 3, "checkpoint_every": 5}):
-            out = grads(lambda *a: fused.simulate_fused(*a, **kw), ph, sq, coils)
-            errs = {k: rel(out[k], ref[k]) for k in ref}
-            assert ref["b1"].abs().min() > 0 and max(errs.values()) <= 1e-10, errs
-    # 2D GRE, 8 coils, B1+ map; and the chunked backward
+        out = grads(SIMS["chunked"], ph, sq, coils)
+        errs = {k: rel(out[k], ref[k]) for k in ref}
+        assert ref["b1"].abs().min() > 0 and max(errs.values()) <= 1e-10, errs
+    # 2D GRE, 8 coils, B1+ map
     ph = bp.shepp_logan(12)
     ph = replace(ph, b1=birdcage_b1(ph.pos, 0.6, radius=0.1))
     coils = bp.birdcage_sensitivities(ph.pos, n_coils=8)
     sq = bp.gre_2d(12, flip_deg=30.0, rf_phase=0.3, n_dummy=10)
     ref = grads(simulate, ph, sq, coils)
-    for sim in (fused.simulate_fused, SIMS["chunked"]):
-        out = grads(sim, ph, sq, coils)
-        errs = {k: rel(out[k], ref[k]) for k in ref}
-        assert max(errs.values()) <= 1e-10, errs
+    out = grads(SIMS["chunked"], ph, sq, coils)
+    errs = {k: rel(out[k], ref[k]) for k in ref}
+    assert max(errs.values()) <= 1e-10, errs
 
 
 def test_b1_gradcheck():
-    # finite differences, through the PyTorch core and through the fused adjoint
+    # finite differences, through the PyTorch core
     phantom, seq = random_case(0)
     phantom = Phantom(*(getattr(phantom, f)[:5] for f in ("pos", "pd", "t1", "t2", "db0")))
     seq = with_readout(seq)
@@ -160,12 +134,11 @@ def test_b1_gradcheck():
     scale = torch.tensor(1.1, dtype=torch.float64, requires_grad=True)  # of every RF pulse
     g = torch.Generator().manual_seed(1)
     w = torch.randn(2, len(coils[0]), seq.n_adc, dtype=torch.complex128, generator=g)
-    for sim in (simulate, fused.simulate_fused):
-        def f(b1, scale):  # a few random projections of signal and m keep it quick
-            r = sim(replace(phantom, b1=b1), replace(seq, rf=seq.rf * scale), coils)
-            return torch.stack([(r.signal * w[0]).real.sum(), (r.signal * w[1]).imag.sum(), r.m.sum()]), r.m[:, 2]
+    def f(b1, scale):  # a few random projections of signal and m keep it quick
+        r = simulate(replace(phantom, b1=b1), replace(seq, rf=seq.rf * scale), coils)
+        return torch.stack([(r.signal * w[0]).real.sum(), (r.signal * w[1]).imag.sum(), r.m.sum()]), r.m[:, 2]
 
-        assert torch.autograd.gradcheck(f, [b1, scale], eps=1e-6, atol=1e-6, rtol=1e-4)
+    assert torch.autograd.gradcheck(f, [b1, scale], eps=1e-6, atol=1e-6, rtol=1e-4)
 
 
 def test_b1_map_gradient_through_helper():
@@ -175,8 +148,7 @@ def test_b1_map_gradient_through_helper():
     seq = bp.gre_2d(8, flip_deg=60.0, n_dummy=5)
 
     def f(cb):
-        return torch.view_as_real(fused.simulate_fused(replace(ph, b1=birdcage_b1(ph.pos, cb, radius=0.09)),
-                                                       seq).signal)
+        return torch.view_as_real(simulate(replace(ph, b1=birdcage_b1(ph.pos, cb, radius=0.09)), seq).signal)
 
     assert torch.autograd.gradcheck(f, [cb], eps=1e-6, atol=1e-6, rtol=1e-4)
 

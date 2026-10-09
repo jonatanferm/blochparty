@@ -276,7 +276,7 @@ realised SD and correlation length within 10 % of the request on a large grid; d
   update the three REALISM rows and `ROADMAP.md`.
 - Conventions: Pulseq units; arrays (z, y, x); positions (x, y, z) in m; `GAMMA_BAR` from
   `constants.py`; float64 in references, float32 allowed on the GPU.
-- `uv run pytest` must pass (fused tests need a C++ compiler + ninja); add tests, never loosen
+- `uv run pytest` must pass (GPU tests skip without MPS); add tests, never loosen
   existing ones.
 
 ## 8. Coordination (two agents on one repo)
@@ -289,7 +289,7 @@ realised SD and correlation length within 10 % of the request on a large grid; d
   `ROADMAP.md`, `pyproject.toml` (new optional extras only, e.g. `nibabel` for NIfTI; keep the
   core dependency-free of them).
 - **Do not edit**: `validation/real/` (another agent is working there), the engines
-  (`bloch.py`, `metal/`, `fused/`), `phantom.py` beyond a re-export, `maps.py` beyond helpers
+  (`bloch.py`, `metal/`), `phantom.py` beyond a re-export, `maps.py` beyond helpers
   you need (ask first).
 - Work on a branch or worktree; commit per milestone with a message describing the check and
   its numbers; rebase on `main` before pushing; never force-push `main`. End commit messages with

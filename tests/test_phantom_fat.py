@@ -65,14 +65,11 @@ def test_with_subvoxel_spins_t2prime_b1_and_maps():
     assert torch.all(ph.t1[fat] == 0.3) and torch.all(ph.t2[fat] == 0.08)
 
 
-@pytest.mark.parametrize("sim", ["core", "fused"])
-def test_chemical_shift_displacement(sim):
+def test_chemical_shift_displacement():
     # Fat-only phantom, main peak only, readout bandwidth = |shift| / 2 per pixel: the fat
     # image is the water image moved by exactly 2 pixels towards -x (negative frequency;
     # +2 bandwidth-pixels of off-resonance move it to +x, see tests/test_imaging.py).
-    if sim == "fused":
-        simulate_fused = pytest.importorskip("blochparty.fused").simulate_fused
-    run = simulate if sim == "core" else simulate_fused
+    run = simulate
     n, fov, b0 = 32, 0.22, 3.0
     m = bp.shepp_logan_maps(n)
     df = -3.4e-6 * GAMMA_BAR * b0
@@ -118,14 +115,13 @@ def test_in_and_opposed_phase(b0):
     for te in times.tolist():  # one ADC sample (1 ns dwell) centred at te after the pulse centre
         b.delay(te - prev - 0.5e-9).readout(1, 1e-9)
         prev = te + 0.5e-9
-    for sim in (simulate, pytest.importorskip("blochparty.fused").simulate_fused):
-        s = sim(ph, b.build()).signal[0]
-        f = PPM * 1e-6 * GAMMA_BAR * b0
-        fat = (AMP[:, None] * torch.exp(-2j * math.pi * f[:, None] * times)).sum(0)
-        expected = 1j * ((1 - ff) * torch.exp(-times / t2w) + ff * torch.exp(-times / t2f) * fat)
-        assert (s - expected).abs().max() < 2e-7  # first order in (fat shift x pulse length)
-        # the multi-peak spectrum is never fully in phase: |sum a_p e^{..}| < 1 at the "in-phase" TE
-        assert abs(fat[1]) < 0.95 and abs(s[1]) > abs(s[0])
+    s = simulate(ph, b.build()).signal[0]
+    f = PPM * 1e-6 * GAMMA_BAR * b0
+    fat = (AMP[:, None] * torch.exp(-2j * math.pi * f[:, None] * times)).sum(0)
+    expected = 1j * ((1 - ff) * torch.exp(-times / t2w) + ff * torch.exp(-times / t2f) * fat)
+    assert (s - expected).abs().max() < 2e-7  # first order in (fat shift x pulse length)
+    # the multi-peak spectrum is never fully in phase: |sum a_p e^{..}| < 1 at the "in-phase" TE
+    assert abs(fat[1]) < 0.95 and abs(s[1]) > abs(s[0])
     # single peak: the textbook two-point Dixon values, and the sign: Mxy ~ exp(-i 2 pi f t) with
     # f < 0, so at t = 1/(4|f|) fat's phasor is +90 deg from water's (a positive shift gives -90)
     ph1 = bp.phantom_from_maps(one(1.0), one(1e9), one(1e9), 1e-3, fat_fraction=one(ff), field_strength=b0,

@@ -1,8 +1,8 @@
 # Bloch Party
 
 Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
-implementation), an Apple-GPU kernel (`src/blochparty/metal/`, the main fast engine) and a fused
-C++ kernel with a hand-written adjoint (`src/blochparty/fused/`, frozen).
+implementation) and an Apple-GPU kernel with a hand-written adjoint (`src/blochparty/metal/`, the
+fast engine). The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
 Goal: the most physically realistic simulator, judged against real scanners
 (`docs/REALISM.md`); roadmap in `ROADMAP.md`.
 
@@ -13,9 +13,9 @@ Goal: the most physically realistic simulator, judged against real scanners
 - **Defaults stay bit-identical.** New physics is opt-in. Before and after a core change run
   `uv run python tools/snapshot.py save <file>` and `compare <before> <after>`.
 - **One fast engine: Apple GPU (`blochparty.metal`).** New physics goes into the PyTorch core
-  (the readable reference, checked on small cases) and the Metal kernel, which must agree with
-  it. The fused CPU kernel is frozen (it keeps its forward and adjoint for what it has; new
-  physics raises there). Other engines, GPU gradients and the CPU+GPU hybrid come later.
+  (the readable reference, checked on small cases) and the Metal kernel (forward, and the adjoint
+  where calibration or design needs it), which must agree with it. Other engines and the CPU+GPU
+  hybrid come later.
 - **`docs/ENGINES.md` is the capability matrix**, checked cell by cell by `tests/test_engines.py`:
   when an engine gains or refuses a feature, change its cell (and add a row and a case for a new
   feature).
@@ -33,10 +33,10 @@ Goal: the most physically realistic simulator, judged against real scanners
 
 ```bash
 uv sync --extra pulseq --extra mrzero
-uv run pytest                      # full suite (fused tests need a C++ compiler + ninja)
+uv run pytest                      # full suite (GPU tests skip without MPS)
 uv run pytest -m "not slow"        # quick subset (< 1 min) while iterating
 uv run pytest -m crosscheck        # opt-in MRzero agreement
-uv run python benchmarks/bench.py [--backend fused] [--record]
+uv run python benchmarks/bench.py [--backend metal] [--grad] [--record]
 uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py
 ```
 

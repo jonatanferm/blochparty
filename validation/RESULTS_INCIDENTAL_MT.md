@@ -10,6 +10,10 @@ about **30 % loss** (and a 20 % T1 underestimate). Setup and tissue parameters: 
 docstring. The paper gives neither the fat-saturation pulse's duration nor its flip angle, so they are
 scanned. "Bound pool: no" is the same run without MT: direct saturation of the water only.
 
+Computed with the fused CPU kernel in float64; since its retirement (2026-10-09) the script runs on
+the Apple GPU (float32), which reproduces the table but for one cell on a rounding boundary (WM,
+10 ms 110°, no bound pool, 9 slices: 97.2504 %, printed 97.3 %).
+
 | tissue | fat sat | bound pool | 1 sl. | 3 sl. | 5 sl. | 7 sl. | 9 sl. | loss 1→9 |
 |---|---|---|---|---|---|---|---|---|
 | WM | 10 ms, 90° | yes | 99.2 % | 97.6 % | 96.1 % | 94.6 % | 93.2 % | 6.1 % |

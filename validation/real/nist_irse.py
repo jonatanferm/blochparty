@@ -36,14 +36,15 @@ import torch
 from scipy import ndimage
 
 import blochparty as bp
-from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
 from nist import (N, PIXEL, T1_NICL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, mc_errors,
                   phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_position,
                   sphere_radius, t2_of_nicl2)
 
-if os.environ.get("BLOCHPARTY_BACKEND") == "metal":  # Apple GPU, forward only: same physics, float32
-    from blochparty.metal import simulate_metal as simulate_fused  # noqa: F811
+if os.environ.get("BLOCHPARTY_BACKEND") == "core":  # the float64 reference (slow at this size)
+    engine = bp.simulate
+else:  # the Apple GPU (float32); until 2026-10-09 the fused CPU kernel, with the same tables
+    from blochparty.metal import simulate_metal as engine
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "IRSE_T1_mapping"
 TI = [50, 75, 100, 125, 150, 250, 1000, 1500, 2000, 3000]  # [ms]
@@ -80,7 +81,7 @@ def monte_carlo(real, rois, radii, x0, seqs, t1, t2, *, seeds=4, n=256, fill_mar
             phs.append(fill_phantom_qmc(rois, fill_mask(real_img, rois, max(radii) + wall), radii, wall, x0,
                                         margin=fill_margin * PIXEL, t1_ms=water[0], t2_ms=water[1], n=n,
                                         dense=dense * PIXEL, sparse=sparse, seed=k))
-        imgs.append(np.stack([sim_complex_image(sum(simulate_fused(ph, s).signal for ph in phs)) for s in seqs]))
+        imgs.append(np.stack([sim_complex_image(sum(engine(ph, s).signal for ph in phs)) for s in seqs]))
         print(f"  seed {k}: {' + '.join(str(len(ph)) for ph in phs)} spins, {time.perf_counter() - t0:.0f} s", flush=True)
     imgs = np.array(imgs)  # (seeds, n_TI, N, N)
     return mc_errors(imgs, rois, real), imgs
@@ -111,7 +112,7 @@ def simulate_all(phantoms, seqs, b1=None) -> list[torch.Tensor]:
         for ph in phantoms:
             if b1 is not None:
                 ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=b1 if b1.numel() == len(ph) else b1[:1].expand(len(ph)))
-            total = total + simulate_fused(ph, s).signal
+            total = total + engine(ph, s).signal
         out.append(total)
     return out
 
@@ -129,7 +130,7 @@ def torch_roi_means(signals, rois) -> torch.Tensor:
 
 def fit_b1(ph, seqs, real, rois, train) -> float:
     """Global B1+ scale minimising the shape error on the training TIs, by gradient descent
-    through the fused kernel's adjoint."""
+    through the Metal adjoint."""
     b = torch.tensor(1.0, requires_grad=True)
     r = torch.as_tensor(real[train], dtype=torch.float32)
     opt = torch.optim.LBFGS([b], lr=1, max_iter=15, line_search_fn="strong_wolfe")

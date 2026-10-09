@@ -3,8 +3,8 @@
 Checked against: gradunwarp's ``siemens_B`` formula (spherical coordinates and SciPy's
 associated Legendre functions, written out here), Laplace's equation for every basis
 field, a synthetic coefficient file in both layouts, the image of a point grid (each
-point must appear at its analytically mapped position), finite differences for the
-coefficient gradients, and between the two simulators.
+point must appear at its analytically mapped position) and finite differences for the
+coefficient gradients (Metal agrees with the core in ``test_engines.py`` and ``test_metal_grad.py``).
 """
 
 import math
@@ -19,19 +19,10 @@ import blochparty as bp
 from blochparty import Phantom, simulate
 from blochparty.fields import GradientNonlinearity, Scanner, solid_harmonics
 from test_free_runs import busy_sequence, random_phantom
-from test_fused import rel
+from helpers import rel
 
-fused = pytest.importorskip("blochparty.fused")
-SIMS = {"core": simulate, "fused": fused.simulate_fused}
+SIMS = {"core": simulate}
 R0 = 0.25
-
-
-@pytest.fixture(scope="module", autouse=True)
-def extension():
-    try:
-        fused._ext()
-    except Exception as e:  # no compiler / ninja: nothing to test
-        pytest.skip(f"fused extension unavailable: {e}")
 
 
 def gradunwarp_displacement(alpha, beta, pos, r0):
@@ -161,9 +152,8 @@ def test_zero_deviation_is_bit_identical(sim, tmp_path):
     scanner = Scanner(nonlinearity=GradientNonlinearity.from_file(tmp_path / "lin.grad"))
     ph = random_phantom(40)
     seq = busy_sequence(torch.tensor(800.0, dtype=torch.float64), torch.tensor(1500.0, dtype=torch.float64))
-    kw = {"n_threads": 1} if sim == "fused" else {}
-    a = SIMS[sim](ph, seq, scanner=scanner, **kw)
-    b = SIMS[sim](ph, seq, **kw)
+    a = SIMS[sim](ph, seq, scanner=scanner)
+    b = SIMS[sim](ph, seq)
     assert torch.equal(a.signal, b.signal) and torch.equal(a.m, b.m)
 
 
@@ -252,20 +242,15 @@ def nl_loss(sim, alpha, beta, field_strength=None, **kw):
 @pytest.mark.parametrize("field_strength", [None, 0.55])
 def test_coefficient_gradients(field_strength):
     alpha, beta = random_coefficients(6, seed=3, scale=0.2)
-    grads = {}
-    for sim in SIMS:
-        a, b = alpha.clone().requires_grad_(), beta.clone().requires_grad_()
-        kw = {"checkpoint_every": 7} if sim == "fused" else {}
-        grads[sim] = torch.autograd.grad(nl_loss(sim, a, b, field_strength, **kw), [a, b])
-    for ga, gb in zip(grads["core"], grads["fused"]):
-        assert rel(gb, ga) < 1e-10
-    # central differences on a few coefficients, through the fused kernel
+    a, b = alpha.clone().requires_grad_(), beta.clone().requires_grad_()
+    grads = torch.autograd.grad(nl_loss("core", a, b, field_strength), [a, b])
+    # central differences on a few coefficients
     h = 1e-6
     for kind, idx in [(0, (0, 3, 1)), (0, (2, 4, 0)), (1, (1, 5, 3)), (0, (1, 2, 2))]:
         plus, minus = [alpha.clone(), beta.clone()], [alpha.clone(), beta.clone()]
         plus[kind][idx] += h
         minus[kind][idx] -= h
         with torch.no_grad():
-            fd = (nl_loss("fused", *plus, field_strength) - nl_loss("fused", *minus, field_strength)) / (2 * h)
-        got = grads["fused"][kind][idx]
+            fd = (nl_loss("core", *plus, field_strength) - nl_loss("core", *minus, field_strength)) / (2 * h)
+        got = grads[kind][idx]
         assert abs(float(got - fd)) < 1e-5 * max(1.0, abs(float(fd))), (kind, idx, float(got), float(fd))

@@ -1,7 +1,7 @@
 """Gradients through the Metal kernel (``simulate_metal``'s adjoint, ROADMAP M2) against autograd through
 the float64 core. The adjoint runs in float32: the tolerances below are those measured with ~10x margin
 (per input: 1e-7 to 3e-6 on short random sequences, 2e-5 on a 1600-segment RF-spoiled GRE, up to 1e-4
-with the bound pool, where the fused kernel's float32 adjoint is up to 1.5e-3 off)."""
+with the bound pool, where the retired fused kernel's float32 adjoint was up to 1.5e-3 off)."""
 
 from dataclasses import replace
 
@@ -10,7 +10,7 @@ import torch
 
 import blochparty as bp
 from test_bloch_vs_ode import random_case
-from test_fused import with_readout
+from helpers import with_readout
 
 metal = pytest.importorskip("blochparty.metal")
 pytestmark = pytest.mark.skipif(not metal.available(), reason="no Apple GPU (MPS)")

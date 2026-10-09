@@ -17,6 +17,10 @@ thicknesses × 2×2 per pixel (174 k spins), RF merged 4:1:
 | analytic IR formula, T1 v2 | 25.93 % | 19.88 % | 30.2 33.8 35.5 32.2 29.1 28.7 24.1 21.4 15.4 8.8 9.0 5.9 2.9 1.2 |
 | **Bloch on the scanner's .seq, T1 v2** | **1.49 %** | **1.29 %** | 2.2 3.3 5.3 1.8 0.6 0.4 0.2 0.3 0.4 0.3 1.4 1.2 0.4 0.2 |
 
+**On the Apple GPU** (2026-10-09, the default engine since the fused kernel's retirement): the
+table reproduced digit for digit, every per-sphere value included; 124 s per T1 version for the
+10 sequences (the fused kernel: 598 s).
+
 **Correction (2026-10-06):** the first version of this table (1.44 % / 2.67 %) used T2 values
 that belong to the *MnCl2* (T2-plane) spheres. The NiCl2 spheres' T2 is now derived from their
 T1 with the 3 T relaxivity ratio (`nist.py`); the change is small because T2 only scales each
@@ -41,6 +45,8 @@ within ~1.5 % with no free parameter. Reference version 2 fits better than versi
 | 64 × 2 | 86.5 k | 318 s | 2.16 % | 0.038 |
 | 128 × 2 | 174 k | 598 s | **1.44 %** | 0.037 |
 
+These rows predate the T2 correction above (their 128 × 2 row is the old 1.44 %); with the
+corrected T2, 16 × 1 gives 16.72 % (fused kernel and Metal alike, 2026-10-09) instead of 14.35 %.
 Too few spins across the slice leave the crusher dephasing (~1.7 cycles per slice thickness)
 unresolved: the magnitude of a few random phasors at a null isn't zero, so nulls stay shallow.
 Exact RF (no merging) at 64 × 2: 2.03 % (v2) vs 2.16 % merged, so merging is not what limits.
@@ -68,6 +74,11 @@ per pixel along the readout (85 k spins), RF merged 4:1, 8 warm-up TRs before th
 | mono-exponential, reference T2 | 10.47 % | 9.27 % | 4.2 4.9 5.8 7.3 5.7 9.5 11.2 15.1 19.6 21.5 32.3 41.2 42.0 53.1 |
 | **Bloch on the scanner's .seq, nominal B1⁺** | **2.25 %** | **2.09 %** | 0.7 0.9 1.1 1.3 2.6 0.7 1.0 2.6 5.1 6.6 18.6 24.4 23.7 36.3 |
 | Bloch + global B1⁺ 1.144 (fit on even spheres) | 1.90 % | 2.09 % | 0.8 0.7 0.6 0.5 4.0 1.6 2.3 0.8 2.7 5.0 16.5 22.9 21.4 34.6 |
+
+On the Apple GPU (2026-10-09, `--sub-read 4 --fill-margin 0`, the settings of this table; the
+script's defaults now add 4 spins per pixel along the readout and the water fill): the
+mono-exponential and nominal rows reproduced digit for digit, the simulation in 64 s (the fused
+kernel's forward: 232 s).
 
 ![curves](nist_tse_curves.png)
 

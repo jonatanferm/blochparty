@@ -32,14 +32,15 @@ import torch
 from scipy import ndimage
 
 import blochparty as bp
-from blochparty.fused import simulate_fused
 from blochparty.pulseq import read_pulseq
 from nist import (N, PIXEL, T2_MNCL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, mc_errors,
                   phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_positions,
                   sphere_radius, t1_of_mncl2)
 
-if os.environ.get("BLOCHPARTY_BACKEND") == "metal":  # Apple GPU, forward only: same physics, float32
-    from blochparty.metal import simulate_metal as simulate_fused  # noqa: F811
+if os.environ.get("BLOCHPARTY_BACKEND") == "core":  # the float64 reference (slow at this size)
+    engine = bp.simulate
+else:  # the Apple GPU (float32); until 2026-10-09 the fused CPU kernel, with the same tables
+    from blochparty.metal import simulate_metal as engine
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "TSE_T2_mapping"
 SEQ = DATA / "acq" / "tse_multiecho_NIST_t2_sag.seq"
@@ -140,7 +141,7 @@ def monte_carlo(real, rois, radii, x0, seq, *, seeds=4, n=256, fill_margin=8, de
             mask = fill_mask(real_img, rois, radii[0] + wall)
             phs.append(fill_phantom_qmc(rois, mask, radii[0], wall, x0, margin=fill_margin * PIXEL, t1_ms=water[0],
                                         t2_ms=water[1], n=n, dense=dense * PIXEL, sparse=sparse, seed=k))
-        total = sum(simulate_fused(ph, seq).signal for ph in phs)
+        total = sum(engine(ph, seq).signal for ph in phs)
         imgs.append(sim_complex_images(total))
         print(f"  seed {k}: {' + '.join(str(len(ph)) for ph in phs)} spins, {time.perf_counter() - t0:.0f} s", flush=True)
     imgs = np.array(imgs)
@@ -159,7 +160,7 @@ def simulate(phantoms, seq: bp.Sequence, rois, b1: float | None = None) -> np.nd
     for ph in phantoms:
         if b1 is not None:
             ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0, b1=torch.full((len(ph),), b1, dtype=ph.pd.dtype))
-        total = total + simulate_fused(ph, seq).signal
+        total = total + engine(ph, seq).signal
     return roi_means(sim_images(total), rois)
 
 

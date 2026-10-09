@@ -76,19 +76,14 @@ def test_seed_and_errors():
         bp.phantom_from_maps(pd, t1, t2, 0.2, spins_per_voxel=4, jitter="random")
 
 
-@pytest.mark.parametrize("sim", ["core", "fused"])
-def test_kspace_matches_signal_equation(sim):
+def test_kspace_matches_signal_equation():
     # 2D GRE (ideal spoiling), 3x3 jittered spins per voxel, 4 coils evaluated at the spins
     n, fov = 16, 0.22
     pd, t1, t2 = maps(n)
     ph = bp.phantom_from_maps(pd, t1, t2, fov, spins_per_voxel=9, jitter="stratified", seed=0)
     coils = bp.birdcage_sensitivities(ph.pos, n_coils=4)
     seq = bp.gre_2d(n, fov, flip_deg=20.0, dwell=1e-6, rf_duration=1e-6, n_dummy=50)
-    if sim == "fused":
-        fused = pytest.importorskip("blochparty.fused")
-        out = fused.simulate_fused(ph, seq, coils).signal
-    else:
-        out = bp.simulate(ph, seq, coils).signal
+    out = bp.simulate(ph, seq, coils).signal
     ref = signal_equation(ph, seq, coils)
     err = float((out - ref).abs().max() / ref.abs().max())
     # no gradient or off-resonance during the pulses, so the Strang-split pulse (relax, rotate,

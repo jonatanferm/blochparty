@@ -348,9 +348,9 @@ def magnitude_image(signal: Tensor, seq: Sequence) -> Tensor:
 
 
 def _default_simulate():
-    from .fused import simulate_fused
+    from .bloch import simulate
 
-    return simulate_fused
+    return simulate
 
 
 def point_spread_function(seq: Sequence, *, t1=1.0, t2=0.1, pd=1.0, db0=0.0, pos=(0.0, 0.0, 0.0),
@@ -427,10 +427,10 @@ def jacobian(signal_fn: Callable[[Tensor], Tensor], theta: Tensor, *, method: st
 
     ``method="autograd"`` differentiates through the simulator with ``create_graph=True``:
     the Jacobian is itself differentiable (w.r.t. sequence parameters, say) when the
-    simulator supports double backward, as ``simulate`` does and ``simulate_fused``
+    simulator supports double backward, as ``simulate`` does and ``simulate_metal``
     (first-order adjoint) does not. ``method="fd"`` uses central differences with step
     ``rel_step * |theta|``: every evaluation is an ordinary forward pass, so the result is
-    differentiable through ``simulate_fused`` too (truncation error ~ rel_step^2).
+    differentiable through ``simulate_metal`` too (truncation error ~ rel_step^2).
     ``method="fd4"``: the fourth-order central stencil (truncation ~ rel_step^4), for float32
     simulators, whose rounding needs steps near 1e-2.
     """
@@ -539,7 +539,8 @@ def design_report(seq: Sequence, phantom: Phantom | None = None, *, hardware: Ha
     ``phantom`` and label ``masks`` on the image grid, per-tissue signal, contrast, CNR and
     SNR efficiency. Noise: image-domain ``noise_sigma``, or ``kspace_sigma`` (+
     ``noise_cov``) propagated by pseudo-replicas through the reconstruction; without either,
-    noise-dependent metrics are omitted. Only plain JSON types are returned.
+    noise-dependent metrics are omitted. Only plain JSON types are returned. ``simulate``: the core
+    (float64) unless given, e.g. ``blochparty.metal.simulate_metal`` for large phantoms.
     """
     hw = hardware or Hardware()
     simulate = simulate or _default_simulate()

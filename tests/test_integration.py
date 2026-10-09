@@ -1,15 +1,15 @@
 """Features from different modules working together: realistic sequences (ramps, slice
 selection, RF spoiling) on realistic phantoms (sub-voxel spins, T2', fat, B1+ maps),
-through both simulators, checked by the design toolkit."""
+through the core and the Metal kernel (forward and adjoint), checked by the design toolkit."""
 
 import pytest
 import torch
 
 import blochparty as bp
-from blochparty import design, fused
+from blochparty import design, metal
 
 N = 12
-needs_fused = pytest.mark.skipif(not fused.available(), reason="fused extension unavailable")
+needs_gpu = pytest.mark.skipif(not metal.available(), reason="no Apple GPU (MPS)")
 
 
 @pytest.fixture(scope="module")
@@ -29,20 +29,22 @@ def realistic_gre(flip=20.0):
 
 
 @pytest.mark.slow
-@needs_fused
-def test_fused_matches_core_on_realistic_inputs(phantom):
+@needs_gpu
+def test_metal_matches_core_on_realistic_inputs(phantom):
     flip = torch.tensor(20.0, dtype=torch.float64, requires_grad=True)
     b1 = phantom.b1.clone().requires_grad_()
     coils = bp.birdcage_sensitivities(phantom.pos, n_coils=4)
     out = {}
-    for name, sim in (("core", bp.simulate), ("fused", fused.simulate_fused)):
+    for name, sim in (("core", bp.simulate), ("metal", metal.simulate_metal)):
         ph = bp.Phantom(phantom.pos, phantom.pd, phantom.t1, phantom.t2, phantom.db0, b1=b1)
         r = sim(ph, realistic_gre(flip), coils)
         out[name] = (r.signal.detach(), *torch.autograd.grad((r.signal.abs() ** 2).sum(), [flip, b1]))
-    (s0, gf0, gb0), (s1, gf1, gb1) = out["core"], out["fused"]
-    assert (s1 - s0).abs().max() <= 1e-10 * s0.abs().max()
-    assert (gf1 - gf0).abs() <= 1e-9 * gf0.abs()
-    assert (gb1 - gb0).abs().max() <= 1e-9 * gb0.abs().max()
+    (s0, gf0, gb0), (s1, gf1, gb1) = out["core"], out["metal"]
+    # float32 against float64 over 32000 RF segments (slice-selective sincs): Metal 5e-6 on the signal,
+    # 8.9e-4 / 3.6e-4 on the flip / B1+ gradients, where the core itself in float32 is 5.4e-3 / 1.4e-3 off
+    assert (s1.to(s0.dtype) - s0).abs().max() <= 5e-5 * s0.abs().max()
+    assert (gf1 - gf0).abs() <= 3e-3 * gf0.abs()
+    assert (gb1 - gb0).abs().max() <= 3e-3 * gb0.abs().max()
 
 
 def test_builder_limits_pass_design_checks():

@@ -5,7 +5,7 @@ Checked against: k-space of a delayed sequence from NumPy interpolation of the n
 moment, closed-form exponential responses to a trapezoid (true ramps and the raster
 staircase), an FFT (transfer-function) convolution on the raster, the analytic phase of a
 B0 eddy current, a sequential reference for the blocked scan, and finite differences for
-the eddy parameters through both simulators.
+the eddy parameters through the core (Metal agrees with it in ``test_engines.py``).
 """
 
 import math
@@ -19,19 +19,10 @@ import blochparty as bp
 from blochparty import GAMMA_BAR, Phantom, SequenceBuilder, Sequence, simulate, trapezoid
 from blochparty.girf import GIRF, EddyCurrents, _linear_scan, apply_girf
 from test_free_runs import random_phantom
-from test_fused import rel
+from helpers import rel
 
-fused = pytest.importorskip("blochparty.fused")
-SIMS = {"core": simulate, "fused": fused.simulate_fused}
+SIMS = {"core": simulate}
 RASTER = 10e-6
-
-
-@pytest.fixture(scope="module", autouse=True)
-def extension():
-    try:
-        fused._ext()
-    except Exception as e:  # no compiler / ninja: nothing to test
-        pytest.skip(f"fused extension unavailable: {e}")
 
 
 def moments(seq):
@@ -191,13 +182,8 @@ def test_eddy_parameter_gradients():
               torch.tensor([[1e-5], [-2e-5], [3e-5]], dtype=torch.float64),
               torch.tensor([[1e-3], [0.5e-3], [2e-3]], dtype=torch.float64),
               torch.tensor([2e-6, -3e-6, 4e-6], dtype=torch.float64)]
-    grads = {}
-    for sim in SIMS:
-        leaves = [p.clone().requires_grad_() for p in params]
-        kw = {"checkpoint_every": 9} if sim == "fused" else {}
-        grads[sim] = torch.autograd.grad(eddy_loss(sim, *leaves, **kw), leaves)
-    for a, b in zip(grads["core"], grads["fused"]):
-        assert rel(b, a) < 1e-10
+    leaves = [p.clone().requires_grad_() for p in params]
+    grads = torch.autograd.grad(eddy_loss("core", *leaves), leaves)
     for i, idx in [(0, (0, 0)), (0, (1, 1)), (1, (2, 1)), (2, (1, 0)), (3, (0, 0)), (4, (2,))]:
         h = 1e-6 * float(params[i].abs().max())
         plus = [p.clone() for p in params]
@@ -205,9 +191,9 @@ def test_eddy_parameter_gradients():
         plus[i][idx] += h
         minus[i][idx] -= h
         with torch.no_grad():
-            fd = (eddy_loss("fused", *plus) - eddy_loss("fused", *minus)) / (2 * h)
-        got = float(grads["fused"][i][idx])
-        assert abs(got - float(fd)) < 1e-5 * max(abs(float(fd)), 1e-3 * float(grads["fused"][i].abs().max())), (i, idx)
+            fd = (eddy_loss("core", *plus) - eddy_loss("core", *minus)) / (2 * h)
+        got = float(grads[i][idx])
+        assert abs(got - float(fd)) < 1e-5 * max(abs(float(fd)), 1e-3 * float(grads[i].abs().max())), (i, idx)
 
 
 def test_chunked_carries_b0_offset():

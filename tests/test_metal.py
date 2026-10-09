@@ -1,5 +1,5 @@
 """Metal (Apple GPU) forward kernel vs. the float64 PyTorch core. Metal is float32-only, so
-tolerances are those of the CPU fused kernel in float32 on the same cases."""
+tolerances are those the (since retired) CPU fused kernel had in float32 on the same cases."""
 
 import math
 
@@ -100,7 +100,7 @@ def test_magnetization_transfer(shape, mma):
     from dataclasses import replace
 
     from test_exchange import bm_case
-    from test_fused import with_readout
+    from helpers import with_readout
 
     ph, seq = bm_case(0, shape)
     ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64))
@@ -120,7 +120,7 @@ def test_generalized_bloch_bound_pool(shape, mma):
     from dataclasses import replace
 
     from test_exchange import bm_case
-    from test_fused import with_readout
+    from helpers import with_readout
 
     ph, seq = bm_case(1, shape)
     ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64),
@@ -177,7 +177,7 @@ def _pools_case(n_pools, with_bound, seed=0):
     """pool_case's random RF / gradient / off-resonance sequence with 1-3 free pools, B1+ and a readout."""
     from dataclasses import replace
 
-    from test_fused import with_readout
+    from helpers import with_readout
     from test_pools import pool_case
 
     ph, seq = pool_case(seed, with_bound)
@@ -323,7 +323,7 @@ def test_lineshape_without_cut(n_pools):
     from dataclasses import replace
 
     from test_exchange import bm_case
-    from test_fused import with_readout
+    from helpers import with_readout
 
     if n_pools == 0:
         ph, seq = bm_case(0, "superlorentzian")

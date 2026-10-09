@@ -2,8 +2,9 @@
 
 Two spoiled-GRE steady states at flip angles a1, a2 (same TR) determine M0 and T1. The
 bound on the variance of the T1 estimate comes from the Jacobian of the *simulated*
-signals w.r.t. (M0, T1) (``blochparty.design.crb``), and gradient descent through the fused
-kernel moves the two flip angles to minimise it. Known result (Deoni, Rutt & Peters, MRM
+signals w.r.t. (M0, T1) (``blochparty.design.crb``), and gradient descent through the core
+(float64, about a minute) or the Metal adjoint (``--metal``, float32, seconds) moves the two flip
+angles to minimise it. Known result (Deoni, Rutt & Peters, MRM
 49:515, 2003): at the optimum both signals are ≈ 71 % of the Ernst-angle maximum. Checked
 here against a brute-force grid search over the closed-form signal and its exact derivative.
 
@@ -60,7 +61,7 @@ def t1_crb(flips, simulate, *, method="fd", n_dummy=N_DUMMY, rel_step=1e-4):
 
 def optimize(start=(10.0, 40.0), simulate=None, rel_step=1e-4, method="fd"):
     if simulate is None:
-        from blochparty.fused import simulate_fused as simulate
+        from blochparty import simulate
     flips = f64(start).clone().requires_grad_(True)
     t0 = time.perf_counter()
     info = minimize([flips], lambda: t1_crb(flips, simulate, method=method, rel_step=rel_step))
@@ -116,14 +117,14 @@ def main():
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--metal", action="store_true", help="through the GPU adjoint (float32) instead of the fused kernel")
+    p.add_argument("--metal", action="store_true", help="through the GPU adjoint (float32) instead of the core")
     args = p.parse_args()
     if args.metal:  # float32: fourth-order differences with a step large against the signals' rounding
         from blochparty.metal import simulate_metal
 
         res, engine = optimize(simulate=simulate_metal, rel_step=METAL_STEP, method="fd4"), "Metal adjoint"
     else:
-        res, engine = optimize(), "fused kernel"
+        res, engine = optimize(), "core"
     print(f"T1 {T1} s, TR {TR * 1e3:g} ms, Ernst angle {math.degrees(math.acos(math.exp(-TR / T1))):.3f} deg")
     print(f"gradient descent ({engine}): flips {res['flips'][0]:.3f}, {res['flips'][1]:.3f} deg, "
           f"CoV(T1)·SNR0 {res['cov']:.4f} ({res['n_evals']} evaluations, {res['seconds']:.1f} s)")

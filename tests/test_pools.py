@@ -15,7 +15,7 @@ import blochparty as bp
 from blochparty import ExchangePool, Phantom, simulate
 from blochparty.exchange import lineshape, rf_frequency
 from test_exchange import bm_case
-from test_fused import with_readout
+from helpers import with_readout
 
 f64 = torch.float64
 
@@ -114,50 +114,6 @@ def test_inert_pool_matches_split_core():
     split = simulate(ph, seq.subdivide_rf(8))  # splitting error ~ (dt/8)^2
     exact = simulate(inert, seq)
     assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(exact.m_bound, split.m_bound, atol=2e-6)
-
-
-# ---------------------------------------------------------------- the fused kernel (fused/bm.h)
-
-POOLF = ("f", "k", "t1", "t2", "dw")
-
-
-def _pool_grads(sim, ph, seq, coils, **kw):
-    req = lambda t: t.detach().clone().requires_grad_()
-    spin = {f: req(getattr(ph, f)) for f in ("pos", "pd", "t1", "t2", "db0", "b1")}
-    pools = [{f: req(getattr(q, f)) for f in POOLF} for q in ph.pools]
-    bound = {f: req(getattr(ph.bound, f).expand(len(ph))) for f in POOLF} if ph.bound is not None else {}
-    sq = {f: req(getattr(seq, f)) for f in ("dt", "rf", "grad", "adc_phase")}
-    leaves = {**spin, **{f"pool{i}.{k}": v for i, q in enumerate(pools) for k, v in q.items()},
-              **{"bound." + k: v for k, v in bound.items()}, **sq, "coils": req(coils)}
-    p = Phantom(**spin, pools=tuple(ExchangePool(**q) for q in pools),
-                bound=replace(ph.bound, **bound) if ph.bound is not None else None)
-    r = sim(p, replace(seq, **sq), leaves["coils"], **kw)
-    g = torch.Generator().manual_seed(3)
-    loss = ((r.signal * torch.randn(r.signal.shape, dtype=torch.complex128, generator=g)).real.sum()
-            + (r.signal.abs() ** 2).sum() + (r.m * torch.randn(r.m.shape, dtype=f64, generator=g)).sum()
-            + (r.m_pools**2).sum())
-    if r.m_bound is not None:
-        loss = loss + (r.m_bound * torch.randn(r.m_bound.shape, dtype=f64, generator=g)).sum()
-    return dict(zip(leaves, torch.autograd.grad(loss, list(leaves.values()))))
-
-
-@pytest.mark.parametrize("with_bound", [True, False])
-def test_fused_forward_and_adjoint(with_bound):
-    fused = pytest.importorskip("blochparty.fused")
-    from test_fused import rel
-
-    ph, seq = pool_case(0, with_bound)
-    seq = with_readout(seq)
-    ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64))
-    coils = bp.birdcage_sensitivities(ph.pos, 3)
-    ref = simulate(ph, seq, coils)
-    for dtype, tol in ((f64, 1e-12), (torch.float32, 3e-5)):
-        out = fused.simulate_fused(ph.to(dtype=dtype), seq.to(dtype=dtype), coils)
-        assert rel(out.signal, ref.signal) < tol and rel(out.m, ref.m) < tol and rel(out.m_pools, ref.m_pools) < tol
-    g_ref = _pool_grads(simulate, ph, seq, coils)
-    g_out = _pool_grads(fused.simulate_fused, ph, seq, coils, checkpoint_every=5)
-    errs = {k: rel(g_out[k], g_ref[k]) for k in g_ref}
-    assert max(errs.values()) < 1e-10, errs
 
 
 # ---------------------------------------------------------------- with FieldMaps, motion, diffusion (ROADMAP M1c)
@@ -361,13 +317,3 @@ def test_rate_model_is_wrong_for_short_on_resonance_pulses_with_or_without_cut()
     gen = simulate(_wm_like("generalized", 0.0, 1e3), seq).m[0]
     nocut = simulate(_wm_like("rate", 0.0, None), seq).m[0]
     assert float((nocut - gen).abs().max()) > 1e-2
-
-
-def test_cut_free_lineshape_rejected_by_the_fused_kernel():
-    from blochparty.fused import simulate_fused
-
-    ph = _wm_like("rate", 0.0, None)
-    with pytest.raises(NotImplementedError, match="cutoff=None"):
-        simulate_fused(replace(ph, pools=None), _pulsed_saturation(n_pulses=1))
-    with pytest.raises(NotImplementedError, match="cutoff=None"):
-        simulate_fused(ph, _pulsed_saturation(n_pulses=1))

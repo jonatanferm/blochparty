@@ -6,7 +6,7 @@ exp(-j ESP / T2). A constant train needs ~100° throughout (set by the first ech
 variable train can start there and drop, because stimulated-echo pathways (decaying with
 T1, not T2) carry the later echoes — the idea behind Hennig's TRAPS and Alsop's
 pseudo-steady-state trains. The echoes come from the isochromat simulator (one voxel of
-``K`` spins with crusher gradients, fused kernel), the energy from the sequence's own RF
+``K`` spins with crusher gradients, the core in float64), the energy from the sequence's own RF
 (``blochparty.design.rf_energy``), and the optimizer is the augmented Lagrangian in
 ``blochparty.design.minimize``.
 
@@ -79,7 +79,7 @@ def constant_baseline():
 
 def optimize(start=None, simulate=None):
     if simulate is None:
-        from blochparty.fused import simulate_fused as simulate
+        from blochparty import simulate
     base = constant_baseline()
     e_ref = float(rf_energy(cpmg_sequence([base] * N_ECHO)))
     flips = torch.full((N_ECHO,), 120.0 if start is None else start, dtype=torch.float64, requires_grad=True)
@@ -123,7 +123,7 @@ def main():
     flips = res["flips"]
     print(f"T1 {T1} s, T2 {T2} s, ESP {ESP * 1e3:g} ms, {N_ECHO} echoes, target {FRACTION:g} x exp(-t/T2)")
     print(f"constant train: {res['baseline_flip']:.2f} deg, RF energy {res['baseline_energy']:.2f} µT²s")
-    print(f"optimized train (fused, {res['n_evals']} evaluations, {res['seconds']:.1f} s):")
+    print(f"optimized train (core, {res['n_evals']} evaluations, {res['seconds']:.1f} s):")
     print("  " + " ".join(f"{a:.1f}" for a in flips.tolist()))
     print(f"  RF energy {res['energy']:.2f} µT²s = {100 * res['energy'] / res['baseline_energy']:.1f} % of the "
           f"constant train; peak B1 {res['peak_b1']:.2f} µT")

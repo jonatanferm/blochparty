@@ -139,7 +139,7 @@ def _field_chain_case():
     """Five spins at constant velocity, a random RF / gradient / off-resonance sequence with
     gradients 20x stronger (concomitant fields of tens of Hz at 0.55 T), four coils."""
     from test_bloch_vs_ode import random_case
-    from test_fused import with_readout
+    from helpers import with_readout
 
     g = torch.Generator().manual_seed(0)
     n = 5

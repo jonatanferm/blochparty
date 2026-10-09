@@ -1,6 +1,8 @@
-"""Bloch simulation on the Apple GPU (Metal), forward only.
+"""Bloch simulation on the Apple GPU (Metal), forward and adjoint.
 
-The same physics as the CPU paths (``bloch.py``, ``fused/kernel.h``): per segment exact
+The same physics as the core (``bloch.py``) and the retired fused C++ kernel (``fused/kernel.h``,
+removed 2026-10-09 and kept in the git history; the comments below cite it where code was ported
+from it): per segment exact
 free precession and relaxation (relaxation in the ``m += (m - m0) * expm1(-dt/T)`` form, which
 float32 needs), Strang-split Rodrigues rotations on RF segments, B1+ scaling and per-segment
 uniform B0 offsets; ADC samples at segment ends, demodulated by exp(-i psi); ideal spoils. RF
@@ -37,7 +39,7 @@ positions, concomitant fields at leading order or exact) enters the off-resonanc
 
 Gradients: a hand-written adjoint (``_MetalSimulate``), the reverse sweep of fused/kernel.h on the GPU.
 The forward stores the state (hi and lo parts) before every ``checkpoint_every`` segments; per interval
-in reverse order, ``bloch_replay`` reruns the forward keeping every 4th state, and ``bloch_adjoint``
+in reverse order, ``bloch_replay`` reruns the forward keeping m before every 4th segment, and ``bloch_adjoint``
 recomputes each block of 4 into threadgroup memory and sweeps it backward. Per-spin gradients stay with
 their thread; per-segment ones are summed per simdgroup and then in order (``seg_reduce``), so the result
 is the same for any interval and every run. Not for moving spins, free pools or the generalized bound

@@ -2,8 +2,9 @@
 
 Checked against: the explicit vector field of a cylindrical coil set (Maxwell's
 equations, and |B| in 50-digit arithmetic), Bernstein's analytic concomitant phase of a
-bipolar gradient pair, a Maxwell-compensated spin echo, and between the two simulators
-(forward and gradients, both modes), with finite differences for the field strength.
+bipolar gradient pair, a Maxwell-compensated spin echo, the closed-form free runs against
+segment-wise stepping, and finite differences for the field strength (Metal agrees with the core
+in ``test_engines.py`` and ``test_metal_grad.py``).
 """
 
 import math
@@ -16,19 +17,10 @@ import torch
 from blochparty import GAMMA_BAR, Phantom, SequenceBuilder, simulate, trapezoid
 from blochparty.fields import Scanner, concomitant_coefficients, exact_excess, transverse_coefficients
 from test_free_runs import busy_sequence, random_phantom
-from test_fused import rel
+from helpers import rel
 
-fused = pytest.importorskip("blochparty.fused")
-SIMS = {"core": simulate, "fused": fused.simulate_fused}
+SIMS = {"core": simulate}
 G_MAX = 40e-3 * GAMMA_BAR  # 40 mT/m [Hz/m]
-
-
-@pytest.fixture(scope="module", autouse=True)
-def extension():
-    try:
-        fused._ext()
-    except Exception as e:  # no compiler / ninja: nothing to test
-        pytest.skip(f"fused extension unavailable: {e}")
 
 
 def vector_field(r, g, f0, a=0.5):
@@ -292,36 +284,12 @@ def field_case(mode, seed=0):
 
 
 @pytest.mark.parametrize("mode", ["leading", "exact"])
-def test_fused_matches_core(mode):
+def test_field_model_matters_and_stepping_agrees(mode):
     ph, seq, coils, scanner = field_case(mode)
     a = simulate(ph, seq, coils, scanner=scanner)
-    b = fused.simulate_fused(ph, seq, coils, scanner=scanner)
-    assert rel(b.signal, a.signal) < 1e-12 and rel(b.m, a.m) < 1e-12
     # the field model matters here, and segment-wise stepping agrees with the closed form
     assert rel(simulate(ph, seq, coils).signal, a.signal) > 0.1
     assert rel(simulate(ph, seq, coils, scanner=scanner, merge_free_runs=False).signal, a.signal) < 1e-11
-
-
-def field_grads(sim, mode, **kw):
-    ph, seq, coils, scanner = field_case(mode)
-    b0 = scanner.field_strength.clone().requires_grad_()
-    pos, db0 = ph.pos.clone().requires_grad_(), ph.db0.clone().requires_grad_()
-    grad, dt, off = seq.grad.clone().requires_grad_(), seq.dt.clone().requires_grad_(), seq.b0_offset.clone().requires_grad_()
-    r = sim(replace(ph, pos=pos, db0=db0), replace(seq, grad=grad, dt=dt, b0_offset=off), coils,
-            scanner=replace(scanner, field_strength=b0), **kw)
-    w = torch.randn(r.signal.shape, dtype=torch.complex128, generator=torch.Generator().manual_seed(9))
-    loss = (r.signal * w).real.sum() + (r.m**2).sum()
-    names = ("field_strength", "pos", "db0", "grad", "dt", "b0_offset")
-    return dict(zip(names, torch.autograd.grad(loss, [b0, pos, db0, grad, dt, off])))
-
-
-@pytest.mark.parametrize("mode", ["leading", "exact"])
-def test_fused_gradients_match_core(mode):
-    ref = field_grads(simulate, mode)
-    got = field_grads(fused.simulate_fused, mode, checkpoint_every=5)
-    for k in ref:
-        assert rel(got[k], ref[k]) < 1e-10, k
-    assert ref["field_strength"].abs() > 0
 
 
 @pytest.mark.parametrize("mode", ["leading", "exact"])
@@ -329,7 +297,7 @@ def test_field_strength_gradient_vs_finite_differences(mode):
     ph, seq, coils, scanner = field_case(mode)
 
     def loss(b0):
-        r = fused.simulate_fused(ph, seq, coils, scanner=replace(scanner, field_strength=b0))
+        r = simulate(ph, seq, coils, scanner=replace(scanner, field_strength=b0))
         w = torch.randn(r.signal.shape, dtype=torch.complex128, generator=torch.Generator().manual_seed(9))
         return (r.signal * w).real.sum() + (r.m**2).sum()
 
@@ -339,11 +307,3 @@ def test_field_strength_gradient_vs_finite_differences(mode):
     with torch.no_grad():
         fd = (loss(torch.tensor(0.3 + h, dtype=torch.float64)) - loss(torch.tensor(0.3 - h, dtype=torch.float64))) / (2 * h)
     assert abs(float(g) - float(fd)) < 1e-6 * abs(float(fd))
-
-
-def test_float32_runs():
-    ph, seq, coils, scanner = field_case("leading")
-    a = fused.simulate_fused(ph, seq, coils, scanner=scanner)
-    b = fused.simulate_fused(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64),
-                             scanner=replace(scanner, field_strength=0.3))
-    assert rel(b.signal.to(torch.complex128), a.signal) < 1e-3

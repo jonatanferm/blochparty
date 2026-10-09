@@ -8,7 +8,7 @@ The matrix is parsed from the document. For every feature row there is a small c
   (``TOL``). For the core itself the cell says it runs; its references are the other test files
   named in the document.
 * ``✓`` gradients: core: autograd matches a (Richardson-extrapolated) central difference of the
-  same loss along a random direction; fused and chunked: their gradients match the core's autograd.
+  same loss along a random direction; Metal and chunked: their gradients match the core's autograd.
 * ``✗``: the engine raises ``NotImplementedError`` (forward: on the plain case; gradients: on the
   case with its tensors requiring grad, grad mode on).
 * ``–``: not applicable, not checked.
@@ -35,20 +35,20 @@ from test_bloch_vs_ode import random_case
 from test_diffusion import pgse
 from test_exchange import bm_case
 from test_fields_nonlinearity import distortion
-from test_fused import with_readout
+from helpers import with_readout
 from test_pools import pool_case
 from test_restriction import sgp
 
 f64 = torch.float64
 DOC = Path(__file__).resolve().parents[1] / "docs" / "ENGINES.md"
-ENGINES = ("core", "fused", "metal", "chunked")
+ENGINES = ("core", "metal", "chunked")
 # agreement with the core, max |engine - core| / scale per output (``errors``); observed worst cases
 # in docs/ENGINES.md ("Agreement")
-TOL = {"fused": 1e-12, "metal": 5e-5, "chunked": 1e-12}
+TOL = {"metal": 5e-5, "chunked": 1e-12}
 # Metal with walking spins (diffusion): the kernel walks absolute positions in float32, which
 # perturbs every spin's phase; the per-spin states feel it most, the signal averages it
 TOL_METAL_WALK = {"signal": 2e-4, "states": 3e-3}
-GRAD_TOL = {"core": 1e-6, "fused": 1e-11, "chunked": 1e-12, "metal": 2e-4}  # core: vs finite differences
+GRAD_TOL = {"core": 1e-6, "chunked": 1e-12, "metal": 2e-4}  # core: vs finite differences
 # metal: its float32 adjoint vs the core's float64 autograd
 
 
@@ -422,11 +422,6 @@ def build(name: str, grad: bool, shift=None) -> Case:
 def engine(name: str):
     if name == "core":
         return bp.simulate
-    if name == "fused":
-        fused = pytest.importorskip("blochparty.fused")
-        if not fused.available():
-            pytest.skip("fused extension unavailable (C++ compiler, ninja)")
-        return lambda *a, seed=None, **k: fused.simulate_fused(*a, n_threads=2, **k)  # seed: only walks use it
     if name == "metal":
         metal = pytest.importorskip("blochparty.metal")
         if not metal.available():
@@ -547,10 +542,10 @@ def test_cell(feature, eng, kind, mark):
 
 
 def test_dtypes():
-    """Core, fused and chunked compute in the phantom's dtype; Metal computes in float32 and returns
+    """Core and chunked compute in the phantom's dtype; Metal computes in float32 and returns
     float32 whatever the input dtype."""
     case = build("basic Bloch: PD, T1, T2, dB0, RF, gradients, ADC, spoils, coils", grad=False)
-    for eng in ("core", "fused", "chunked"):
+    for eng in ("core", "chunked"):
         assert run(eng, case).m.dtype == f64
     metal = pytest.importorskip("blochparty.metal")
     if metal.available():
@@ -559,7 +554,7 @@ def test_dtypes():
 
 
 def test_metal_runs_under_no_grad():
-    """Metal refuses inputs that require grad only while grad mode is on."""
+    """Under no_grad, inputs that require grad take the plain forward."""
     metal = pytest.importorskip("blochparty.metal")
     if not metal.available():
         pytest.skip("no Apple GPU (MPS)")

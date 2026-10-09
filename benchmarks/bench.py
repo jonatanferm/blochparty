@@ -3,8 +3,6 @@
     uv run python benchmarks/bench.py                  # default cases
     uv run python benchmarks/bench.py --cases 3d-64    # pick cases
     uv run python benchmarks/bench.py --record         # also append to history.jsonl
-    uv run python benchmarks/bench.py --backend fused  # C++ kernel (blochparty.fused)
-    uv run python benchmarks/bench.py --grad --backend fused  # forward + backward instead
     uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal); --grad: its adjoint
     uv run python benchmarks/bench.py --repeat 3       # fastest of 3 runs per case (GPU timings vary ~10 %)
 
@@ -21,7 +19,6 @@ from __future__ import annotations
 import argparse
 import functools
 import json
-import os
 import platform
 import resource
 import subprocess
@@ -120,26 +117,16 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
-    p.add_argument("--backend", default="torch", choices=["torch", "fused", "chunked", "metal"])
+    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "metal"])
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
-    p.add_argument("--checkpoint-every", type=int, default=None, help="fused / metal --grad: checkpoint interval")
-    p.add_argument("--threads", type=int, default=None, help="fused: worker threads (default: all CPUs)")
-    p.add_argument("--block", type=int, default=None, help="fused: spins per block (default: auto)")
+    p.add_argument("--checkpoint-every", type=int, default=None, help="metal --grad: checkpoint interval")
     p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
     p.add_argument("--record", action="store_true", help="append results to history.jsonl")
     args = p.parse_args(argv)
     dtype = getattr(torch, args.dtype)
 
     simulate, threads, backend = bp.simulate, torch.get_num_threads(), args.backend
-    if args.backend == "fused":
-        from blochparty import fused
-
-        fused._ext()  # compile (or load) outside the timed region
-        threads = args.threads or os.cpu_count()
-        simulate = functools.partial(fused.simulate_fused, n_threads=threads, block=args.block,
-                                     checkpoint_every=args.checkpoint_every)
-        backend = f"fused block {args.block or 'auto'}"
-    elif args.backend == "chunked":
+    if args.backend == "chunked":
         simulate = bp.simulate_chunked
     elif args.backend == "metal":
         from blochparty import metal

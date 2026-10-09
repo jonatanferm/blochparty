@@ -12,8 +12,8 @@ pulseq = ["pypulseq>=1.5"]  # read_pulseq
 mrzero = ["MRzeroCore>=1.1"]  # validation/compare_mrzero.py and the crosscheck tests
 
 [dependency-groups]
-# ninja: builds blochparty.fused; finufft: radial reconstruction in validation/real (benchmark 3)
-dev = ["pytest", "scipy", "matplotlib", "ninja", "pypulseq>=1.5", "finufft>=2.5.1"]
+# finufft: radial reconstruction in validation/real (benchmark 3)
+dev = ["pytest", "scipy", "matplotlib", "pypulseq>=1.5", "finufft>=2.5.1"]
 
 [build-system]
 requires = ["hatchling"]

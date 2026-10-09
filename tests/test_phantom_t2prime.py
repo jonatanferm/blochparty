@@ -21,13 +21,6 @@ from blochparty import SequenceBuilder, simulate
 
 one = lambda v: torch.full((1, 1), v, dtype=torch.float64)
 SIMS = {"core": simulate}
-try:
-    from blochparty.fused import available, simulate_fused
-
-    if available():
-        SIMS["fused"] = simulate_fused
-except ImportError:
-    pass
 
 
 def voxel(k, t2prime, t1=1e9, t2=1e9, sampling="quantile", seed=0):

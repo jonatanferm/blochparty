@@ -6,7 +6,8 @@ without a limit the optimum drifts to TR ≈ 0.8 s. A budget on the total scan t
 ((dummies + lines) x TR) makes the constraint active, and the augmented-Lagrangian
 optimizer (``blochparty.design.minimize``) has to find the optimum on its boundary. With a
 budget of (400 + 32) x 10 ms that is again TR = 10 ms and 16.109°. Everything runs through
-the full Bloch simulation and reconstruction (fused kernel) and is checked against a
+the full Bloch simulation and reconstruction (the core in float64; through the float32 Metal
+adjoint the flip is found but the constraint only to ~1e-4) and is checked against a
 brute-force grid over the closed-form steady state.
 
     uv run python examples/design_contrast_tr.py
@@ -53,7 +54,7 @@ def image_contrast(seq, simulate):
 def optimize(budget, start=(40.0, 6e-3), simulate=None):
     """Maximize WM-GM contrast subject to scan time <= ``budget`` [s]."""
     if simulate is None:
-        from blochparty.fused import simulate_fused as simulate
+        simulate = bp.simulate
     flip = torch.tensor(start[0], dtype=torch.float64, requires_grad=True)
     u0 = math.log(math.expm1((start[1] - TR_MIN) / 1e-3))  # softplus^-1
     u = torch.tensor(u0, dtype=torch.float64, requires_grad=True)
@@ -97,7 +98,7 @@ def main():
         budget = (N_DUMMY + N) * tr_budget
         res = optimize(budget)
         print(f"budget {budget:.3f} s (TR <= {tr_budget * 1e3:g} ms):")
-        print(f"  gradient descent (fused): flip {res['flip']:.3f} deg, TR {res['tr'] * 1e3:.4f} ms, "
+        print(f"  gradient descent (core):  flip {res['flip']:.3f} deg, TR {res['tr'] * 1e3:.4f} ms, "
               f"scan time {res['duration']:.4f} s, contrast {res['contrast']:.5f} "
               f"({res['n_evals']} evaluations, {res['seconds']:.1f} s)")
         flip, tr, c = grid_optimum(budget)

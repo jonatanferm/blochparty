@@ -1,5 +1,5 @@
-"""Full 3D 128^3 spoiled GRE (565k spins, 2.2M segments, 8 coils) with the fused C++
-kernel; saves central slices. About 6 min on an Apple M4.
+"""Full 3D 128^3 spoiled GRE (565k spins, 2.2M segments, 8 coils) on the Apple GPU (Metal);
+saves central slices. 192 s on an M4's GPU (2026-10-09; the retired fused CPU kernel took 6 min).
 
     uv run python examples/gre3d_128.py      -> outputs/gre3d_128.png
 """
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import torch
 
 import blochparty as bp
-from blochparty.fused import simulate_fused
+from blochparty.metal import simulate_metal
 
 N = 128
 
@@ -20,7 +20,7 @@ coils = bp.birdcage_sensitivities(phantom.pos, n_coils=8)
 seq = bp.gre_3d(N, flip_deg=15.0, tr=10e-3, n_dummy=200, dtype=torch.float32)
 
 t0 = time.perf_counter()
-signal = simulate_fused(phantom, seq, coils).signal
+signal = simulate_metal(phantom, seq, coils).signal
 t_sim = time.perf_counter() - t0
 print(f"{len(phantom)} spins x {len(seq)} segments, {seq.n_adc} samples x 8 coils: {t_sim:.0f} s "
       f"({len(phantom) * len(seq) / t_sim:.2e} spin-segments/s)")
@@ -31,7 +31,7 @@ for a, im, title in zip(ax, (img[N // 2], img[:, N // 2], img[:, :, N // 2]), ("
     a.imshow(im, cmap="gray", origin="lower")
     a.set_title(title)
     a.axis("off")
-fig.suptitle(f"Bloch Party: 3D spoiled GRE 128³, 8 coils, fused CPU kernel ({t_sim / 60:.1f} min)")
+fig.suptitle(f"Bloch Party: 3D spoiled GRE 128³, 8 coils, Apple GPU ({t_sim:.0f} s)")
 fig.tight_layout()
 out = Path("outputs") / "gre3d_128.png"
 out.parent.mkdir(exist_ok=True)

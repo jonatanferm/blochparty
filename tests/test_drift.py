@@ -1,7 +1,7 @@
 """Drift and physiological fields (``drift.py``): the phase of spins at known positions
 under a linear / exponential drift and a respiratory field (uniform plus linear terms)
-equals the closed-form integral of the field, in both simulators; parameter gradients
-match finite differences."""
+equals the closed-form integral of the field (the core; Metal agrees with it in
+``test_engines.py``); parameter gradients match finite differences."""
 
 import math
 from dataclasses import replace
@@ -12,16 +12,7 @@ import torch
 from blochparty import Phantom, SequenceBuilder, simulate
 from blochparty.drift import exponential_drift, linear_drift, respiration
 
-fused = pytest.importorskip("blochparty.fused")
-SIMS = {"core": simulate, "fused": fused.simulate_fused}
-
-
-@pytest.fixture(scope="module", autouse=True)
-def extension():
-    try:
-        fused._ext()
-    except Exception as e:  # no compiler / ninja: nothing to test
-        pytest.skip(f"fused extension unavailable: {e}")
+SIMS = {"core": simulate}
 
 
 def setup(n=8):
@@ -92,7 +83,7 @@ def test_parameter_gradients():
     names = ("amp", "period", "phase", "rate", "tau")
     base = torch.tensor([5.0, 0.21, 0.4, 25.0, 0.15], dtype=torch.float64)
 
-    def loss(p, sim=fused.simulate_fused):
+    def loss(p, sim=simulate):
         played = respiration(seq, p[0], p[1], torch.stack([p[0] * 2, -p[0], p[0]]), p[2])
         played = exponential_drift(linear_drift(played, 1.0, p[3]), 3.0, p[4])
         r = sim(ph, played, coils)
@@ -101,9 +92,6 @@ def test_parameter_gradients():
 
     p = base.clone().requires_grad_()
     (g,) = torch.autograd.grad(loss(p), [p])
-    q = base.clone().requires_grad_()
-    (g_core,) = torch.autograd.grad(loss(q, simulate), [q])
-    assert torch.allclose(g, g_core, rtol=1e-10, atol=0)
     for i, name in enumerate(names):
         h = 1e-6 * float(base[i])
         e = torch.zeros(5, dtype=torch.float64)
