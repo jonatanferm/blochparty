@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "subject": 38,
+  "snapshot": "2026-10-09",
+  "source": "https://brainweb.bic.mni.mcgill.ca/brainweb/anatomic_normal_20.html",
+  "shape": [
+    362,
+    434,
+    362
+  ],
+  "voxel": [
+    0.0005,
+    0.0005,
+    0.0005
+  ],
+  "dtype": "<u2",
+  "scale": 4095,
+  "origin": [
+    -0.09025,
+    -0.12625,
+    -0.07225
+  ],
+  "files": {
+    "background": {
+      "path": "subject38_bck.raws.gz",
+      "sha256": "4557209ae05e8b5d9a02aa92383f69d6b312fef05ea2e5fade16ad277a2e8f22",
+      "alias": "subject38_bck"
+    },
+    "csf": {
+      "path": "subject38_csf.raws.gz",
+      "sha256": "47fcb62c768888d3ff2ee9bddb41ed97f078c77844bf53e986caa417615d5d86",
+      "alias": "subject38_csf"
+    },
+    "gm": {
+      "path": "subject38_gry.raws.gz",
+      "sha256": "3b82765e1a92e5a7ab444ced35684c56802d608cfdd1d950c95d56f1d56d7dac",
+      "alias": "subject38_gry"
+    },
+    "wm": {
+      "path": "subject38_wht.raws.gz",
+      "sha256": "39cfbe9f38f537724295c8fac51229f529a9197c5619e8d7589333a0d698d450",
+      "alias": "subject38_wht"
+    },
+    "fat": {
+      "path": "subject38_fat.raws.gz",
+      "sha256": "677b3ebd66088463485f0cf6db389c7e537cea9f24a18c7effb9b909d3e4e700",
+      "alias": "subject38_fat"
+    },
+    "muscle": {
+      "path": "subject38_mus.raws.gz",
+      "sha256": "2f6765fb5771f4f71358e22b1e3aac835dc1c999dcb55c42e9643106cc75e579",
+      "alias": "subject38_mus"
+    },
+    "skin": {
+      "path": "subject38_m-s.raws.gz",
+      "sha256": "f6e5434a9446c4e70a36694118d2f2d0ef83e4cec43598aefc373756808797c5",
+      "alias": "subject38_m-s"
+    },
+    "skull": {
+      "path": "subject38_skl.raws.gz",
+      "sha256": "7b7804d44f665fd1aadb96d61340e446e6b474f12b44259b80c5105d1afb801d",
+      "alias": "subject38_skl"
+    },
+    "vessels": {
+      "path": "subject38_ves.raws.gz",
+      "sha256": "2a66fe3e79db0ce444bac46cbacc0c0e1cdca6c4b7c1bb00422aa3f80919eb91",
+      "alias": "subject38_ves"
+    },
+    "connective": {
+      "path": "subject38_fat2.raws.gz",
+      "sha256": "e1845d79010d42afd415afc633f75a56d96adf08809508c08867ba933d65de90",
+      "alias": "subject38_fat2"
+    },
+    "dura": {
+      "path": "subject38_dura.raws.gz",
+      "sha256": "eab95e3804686c3b501c3c812dbb35980021fc52696d21ba118de11278641634",
+      "alias": "subject38_dura"
+    },
+    "marrow": {
+      "path": "subject38_mrw.raws.gz",
+      "sha256": "f43ad789da8f2dd17120ac4ec390dfb2f06730aeaac2a087d512cd4382cb9df5",
+      "alias": "subject38_mrw"
+    },
+    "t1w": {
+      "path": "subject38_t1w.raws.gz",
+      "sha256": "3b1d9320da57808e1b88e0d7986c11514613784ff7b160b1671ac1004dd4cada",
+      "alias": "subject38_t1w"
+    }
+  }
+}

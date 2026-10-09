@@ -8,6 +8,7 @@ the ignored data directory. See README.md for access and manual-download details
 --record deliberately creates a new local snapshot; review its manifest before use.
 """
 import argparse
+from datetime import date
 import gzip
 import hashlib
 import json
@@ -57,7 +58,7 @@ def fetch(subject, root, manifest_path, record=False):
     if subject not in SUBJECTS:
         raise ValueError(f"subject must be one of {SUBJECTS}")
     if record:
-        manifest = dict(schema=1, subject=subject, snapshot="2026-10-07",
+        manifest = dict(schema=1, subject=subject, snapshot=date.today().isoformat(),
                         source="https://brainweb.bic.mni.mcgill.ca/brainweb/anatomic_normal_20.html",
                         shape=[362, 434, 362], voxel=[0.0005]*3, dtype="<u2", scale=4095,
                         origin=[-0.09025, -0.12625, -0.07225], files={})

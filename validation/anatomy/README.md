@@ -33,9 +33,9 @@ The default snapshot is subject 04, plus optional older SBD T1/T2/PD references.
 The committed manifests pin SHA-256 of **decompressed bytes**: gzip headers can
 vary between requests. A mismatch stops loading/fetching; it never refreshes a pin.
 `--record --subject N --manifest PATH` deliberately records a new snapshot for review.
-Valid subject IDs are 4, 5, 6, 18, 20, 38, and 41–54. Only subject 04 has been
-downloaded and validated here. Check the source header geometry before using a
-new subject snapshot; the fetcher currently uses the captured subject-04 geometry.
+Valid subject IDs are 4, 5, 6, 18, 20, 38, and 41–54; all 20 are pinned. The
+fetcher records subject 04's captured geometry for every subject; `brainweb_volumes.py`
+checks it through the brain centroids, which agree to 2.6 mm (RESULTS.md).
 
 For manual download, choose raw short + gzip on each tissue's public form, place
 the files directly inside your chosen root, and supply `subjectNN.json` following
