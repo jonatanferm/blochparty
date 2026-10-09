@@ -19,7 +19,18 @@ imaging:
 ``check`` compares the reduced model's curves with the full simulation's ROI means at nominal
 parameters; the fits are only meaningful where the two agree.
 
-    uv run python validation/real/nist_twin.py check
+The twin's unknown input is B1+ (``b1_field``: five parameters, axially symmetric about the bore, so
+one sagittal plane determines them and they carry to the other plane). ``fits`` fits it by L-BFGS
+through the Metal adjoint on each benchmark, from both sides of |B1+ - 1| (inversion and refocusing
+are nearly symmetric in it); ``predict`` scores a fit on a benchmark with the full simulation, Monte
+Carlo over Sobol seeds (shape error with jackknife SEs, absolute error with one global scale), next
+to nothing fitted and the ablations (water fill, slice profile, concomitant fields, the measured
+Prisma GIRF of benchmark 7), all on common seeds so the differences are paired. Results:
+``RESULTS.md``, "Digital twin".
+
+    uv run python validation/real/nist_twin.py check | explore | gradcheck
+    uv run python validation/real/nist_twin.py fits fits.json
+    uv run python validation/real/nist_twin.py predict fits.json irse@0.9 tse out.npz 4
 """
 
 from __future__ import annotations

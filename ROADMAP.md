@@ -320,7 +320,23 @@ Then retire the fused kernel: once 1 to 4 pass, move `src/blochparty/fused/` out
 `tools/snapshot.py` in a separate commit that re-saves the snapshot and explains why, and update
 `docs/ENGINES.md`, README and `CLAUDE.md`. Until then it stays frozen.
 
-## M3. The digital-twin loop on the NIST data (3 to 5 days)
+## M3. The digital-twin loop on the NIST data (3 to 5 days) — done 2026-10-09
+
+Status. B1+ fitted on benchmark 1 through the Metal adjoint predicts the held-out benchmark 2 at
+1.83 ± 0.03 % (shape, spheres 1-10) against 2.20 ± 0.02 % with nothing fitted; in sample it takes
+benchmark 1 from 1.77 ± 0.31 to 1.13 ± 0.25 %. The field is plausible (0.93-1.19 on the spheres,
+centre-brightened). The reverse direction fails: B1+ fitted on benchmark 2 predicts benchmark 1 at
+13.6 % (it absorbs sphere-specific residuals of the echo shapes; a refocusing-only factor and the
+phantom temperature explain none of them). Ablations, paired on common Monte Carlo seeds: the water
+fill (+0.25 on benchmark 2, 0.0 on benchmark 1) and the slice profile (+7 to +25) matter and are
+in the model; concomitant fields (≤ 0.01) and the measured Prisma GIRF of benchmark 7 (≤ 0.1, within
+1-1.4 SE) do not, so condition 3 holds for these two sequences. Gradient delays and the first
+refocusing interval were scanned out before fitting (< 0.1 %). Of benchmark 2's short-T2 spheres,
+11 drops from 7.8 to 3.8 % with the twin but 12-14 stay at 13-17 %: the physics missing there is not
+B1+, timing or temperature; candidates are the fill geometry at the sphere edges and the references. Results:
+`validation/real/RESULTS.md` ("Digital twin"); journal 2026-10-09.
+
+The original plan:
 
 Goal: condition 3 above. Benchmarks 1 (IR-SE, T1 plane) and 2 (23-echo TSE, T2 plane) are the
 same phantom on the same Prisma with the same 20-channel coil (Tong et al. 2022). Today both are

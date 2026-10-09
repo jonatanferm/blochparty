@@ -588,3 +588,96 @@ reproduce the 4-seed row above exactly.
   1.90, 1.80, 1.73 %), and the jackknife bias correction (now printed) moves it to 1.66 %.
   The remaining gap to 1.51 % is in spheres 5–10 (8 seeds: 0.4–0.9 vs 0.2–0.5 % at 1024
   spins), whose small errors are the most noise-inflated.
+
+## Digital twin: B1+ fitted on one NIST plane, the other predicted (`nist_twin.py`, ROADMAP M3)
+
+Benchmarks 1 (IR-SE, T1 plane at x = +57 mm) and 2 (multi-echo SE, T2 plane at x = -12 mm) are the
+same phantom on the same Prisma in one session. The twin's unknown inputs are fitted on one plane
+by gradient descent through the Metal adjoint, and the other plane is predicted; reference T1 / T2
+are never fitted.
+
+**Which inputs.** Scanned first, on a reduced model (below): per-axis gradient delays of 10 us move
+the curves by < 0.1 % (a readout delay is a k-space shift, invisible in a magnitude ROI mean), a
+longer first refocusing interval (benchmark 2's earlier suspect) does nothing without off-resonance
+and < 0.1 % with 50 Hz, and the phantom temperature (3 T coefficients of Stupic et al., MRM 2021:
+MnCl2 T1 +2.7 %/C, T2 +1.6 %/C; NiCl2 within 4 % over 16-26 C) moves benchmark 2 by < 0.1 point
+over the plausible range. The fitted input is therefore B1+, as five parameters of a field that is
+axially symmetric about the bore to second order, s (1 + a (x^2 + y^2)/R^2 + b z^2/R^2 + c_y y/R +
+c_z z/R): one sagittal plane determines them and the symmetry carries the field to the other plane.
+Receive maps estimated from the data (coil image / RSS, as planned) have unit norm and leave an RSS
+image unchanged, so the absolute metric is reported with uniform receive and with a smooth
+receive profile fitted to the water fill (which carries the water's transmit shading too).
+
+**Reduced model for fitting.** Per sphere one column of spins at the ROI centre (+-1.5 slice
+thicknesses, one pixel along the readout), only the TR that acquires the k-space centre after its
+warm-up TRs, the two ADC samples either side of k = 0: 25 k spins and 1.7e5-2.7e5 segments instead
+of 85-174 k spins and 4.3e6 segments per series, so a gradient costs seconds. Against the full
+simulation at nominal inputs: 0.5-1.0 % (shape) on benchmark 2's spheres 1-10, <= 1.4 % on
+benchmark 1's long-T1 spheres. Gradients through the adjoint match central differences to
+1e-4..3e-3.
+
+**Fits** (reduced model, spheres 1-10). Benchmark 1: 1.05 -> 0.50 %, from either side of 1 (the
+field is 0.93-1.09 on its spheres; 1.21 at isocentre, falling radially: centre brightening).
+Benchmark 2: 2.26 -> 1.57-1.66 %, but that field is 0.70-0.91 or 0.99-1.26 on the T1 plane.
+
+**Predictions and ablations** (full simulation of every TR and sample, Monte Carlo with 256 Sobol
+spins per pixel and 4 seeds, ± jackknife SE; ablation rows paired with the twin on the same seeds;
+Mac mini, 2026-10-09):
+
+| benchmark 1, B1+ fitted on benchmark 1 (in sample) | shape, spheres 1-10 | vs twin (paired) | absolute | absolute, receive profile |
+|---|---|---|---|---|
+| nothing fitted (B1+ = 1) | 1.77 ± 0.31 % | +0.64 ± 0.16 | 7.95 ± 0.24 % | 3.67 ± 0.36 % |
+| **twin** | **1.13 ± 0.25 %** | | 7.05 ± 0.14 % | 4.14 ± 0.22 % |
+| twin + water fill | 1.14 ± 0.20 % | +0.01 ± 0.09 | 7.23 ± 0.14 % | 3.98 ± 0.21 % |
+| twin, ideal slab (no slice profile) | 25.65 % | +24.51 ± 0.25 | 32.18 % | 28.23 % |
+| twin + concomitant fields (3 T) | 1.13 ± 0.25 % | +0.00 ± 0.00 | 7.04 ± 0.14 % | 4.15 ± 0.22 % |
+| twin + Prisma GIRF (benchmark 7) | 1.10 ± 0.16 % | -0.03 ± 0.10 | 6.96 ± 0.16 % | 4.17 ± 0.17 % |
+
+| benchmark 1 predicted, B1+ fitted on benchmark 2 | shape, spheres 1-10 | vs twin (paired) | absolute | absolute, receive profile |
+|---|---|---|---|---|
+| nothing fitted (B1+ = 1) | 1.77 ± 0.31 % | -11.80 ± 0.60 | 7.95 ± 0.24 % | 3.67 ± 0.36 % |
+| twin | 13.57 ± 0.31 % | | 21.97 ± 0.22 % | 17.80 ± 0.26 % |
+| twin + water fill | 13.73 ± 0.24 % | +0.16 ± 0.08 | 21.86 ± 0.21 % | 17.66 ± 0.24 % |
+| twin, ideal slab | 25.24 % | +11.67 ± 0.32 | 33.18 % | 28.66 % |
+| twin + concomitant fields | 13.56 ± 0.31 % | -0.01 ± 0.00 | 21.96 ± 0.22 % | 17.78 ± 0.26 % |
+| twin + Prisma GIRF | 13.67 ± 0.34 % | +0.10 ± 0.07 | 22.02 ± 0.22 % | 17.80 ± 0.29 % |
+
+| benchmark 2 predicted, B1+ fitted on benchmark 1 (held out) | shape, spheres 1-10 | vs twin (paired) | absolute | absolute, receive profile |
+|---|---|---|---|---|
+| nothing fitted (B1+ = 1) | 2.20 ± 0.02 % | +0.38 ± 0.04 | 7.16 ± 0.10 % | 7.77 ± 0.13 % |
+| **twin** | **1.83 ± 0.03 %** | | 8.05 ± 0.09 % | 6.27 ± 0.10 % |
+| twin, no water fill | 2.08 ± 0.08 % | +0.25 ± 0.07 | 8.03 ± 0.16 % | 6.55 ± 0.08 % |
+| twin, ideal slab | 8.66 % | +6.83 ± 0.04 | 11.99 % | 10.85 % |
+| twin + concomitant fields | 1.82 ± 0.03 % | -0.01 ± 0.01 | 8.02 ± 0.09 % | 6.28 ± 0.10 % |
+| twin + Prisma GIRF | 1.80 ± 0.03 % | -0.02 ± 0.03 | 8.07 ± 0.13 % | 6.22 ± 0.15 % |
+
+Per sphere (benchmark 2, %): nothing fitted 0.7 0.8 1.2 1.5 2.9 1.1 1.3 2.8 3.6 6.1 | 7.8 13.4
+15.2 22.1; twin 0.9 0.7 0.4 0.5 3.6 0.9 1.1 2.4 3.3 4.6 | 3.8 13.1 12.7 17.4.
+
+- **Fit on one plane, predict the other: it works in one direction.** B1+ from benchmark 1 predicts
+  benchmark 2 better than nothing fitted, by 0.38 ± 0.04 points (paired), on every sphere but 1 and
+  5, and the short-T2 spheres 11-14 gain too (11: 7.8 -> 3.8 %). The reverse fails: the field
+  fitted to benchmark 2's echo shapes wrecks benchmark 1 (13.6 %). Echo shapes constrain |B1+ - 1|
+  only and five smooth parameters then fit sphere-specific residuals; the inversion recovery is
+  the measurement that pins B1+ down.
+- **Physics no longer moves the table** (condition 3): with the twin's input fixed, concomitant
+  fields (<= 0.01) and a measured Prisma GIRF (<= 0.10, within 1.4 SE on every row) change the
+  prediction less than its error bar; the water fill (+0.25 on benchmark 2) and the slice profile
+  (+7 to +25) are large and already in the model. A refocusing-only amplitude factor and the
+  phantom temperature, fitted on benchmark 2 on top of benchmark 1's field, change < 0.1 point.
+- **What is left** on benchmark 2 sits in sphere 5 (3.6 %: its reference T2 is one the manufacturer
+  withholds; Jiang 2016 instead) and in spheres 12-14 (13-17 %, T2 5-10 ms against a 7 ms echo
+  spacing): neither B1+, timing nor temperature reaches them. Candidates are the fill geometry at
+  the sphere edges (the walls are not in the images) and the short-T2 references themselves.
+- **Absolute metric.** With one global scale per benchmark the errors are 7-8 % with uniform receive
+  and move by about 1 point either way with the twin; a receive profile fitted to the water fill
+  helps benchmark 1 at nominal B1+ (7.95 -> 3.67 %) and the twin on benchmark 2 (8.05 -> 6.27 %).
+  Receive shading is the unknown these data leave: separating it from the transmit field needs a
+  B1+ map or a proton-density scan.
+- The fitted field: 0.93-1.09 on benchmark 1's spheres, 1.03-1.19 on benchmark 2's, 1.21 at
+  isocentre, decreasing radially (3 T centre brightening), within the planned ±20 %. The other
+  branch of |B1+ - 1| (0.82-0.96 on benchmark 2) fits benchmark 1 equally and predicts benchmark 2
+  equally with the reduced model (2.14 against 2.15 %).
+
+`uv run python validation/real/nist_twin.py fits fits.json` (minutes), then `predict fits.json
+irse@0.9 tse out.npz 4` (90 min on an M4 Mac mini for benchmark 2, 40 min for benchmark 1).

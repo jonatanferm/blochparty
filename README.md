@@ -9,7 +9,7 @@ lessons: [docs/LESSONS.md](docs/LESSONS.md); project journal: [docs/JOURNAL.md](
 
 ```bash
 uv sync
-uv run pytest                              # ~660 verification tests, ~5 min on an M4
+uv run pytest                              # ~685 verification tests, ~4 min on an M4
 uv run pytest -m "not slow"                # the quick subset, under a minute
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--metal: the GPU adjoint)

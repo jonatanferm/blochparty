@@ -151,7 +151,7 @@ nonlinearity, duty-driven drift, Bschorr et al. comparisons.
 | R4 receive/transmit chain | EM-imported B1⁺/B1⁻/E, noise covariance from E fields, RF amplifier, ADC filter | noise and coil realism decide training-data usefulness | measured SNR/g-factor; EM ground truth |
 | R5 anatomy | χ-map → B0, BrainWeb/XCAT/MIDA, continuous phantoms, orientation-dependent R2* | anatomy realism + inverse crime | Guerquin-Kern closed forms; published orientation curves |
 | R6 motion, flow, diffusion | time-dependent positions in the free-run closed form; Bloch–Torrey; MCMR kernels | big but well covered elsewhere — we need parity, then speed | KomaMRI/CMRsim/MRzero/MCMR cross-checks, analytic moments |
-| R7 digital twin | differentiable calibration of R1/R4 parameters from calibration scans | the capability nobody else has | held-out sequences on the same scanner (R3) |
+| R7 digital twin | differentiable calibration of R1/R4 parameters from calibration scans | the capability nobody else has | held-out sequences on the same scanner (R3). **Started**: B1+ fitted on NIST benchmark 1 through the Metal adjoint predicts the held-out benchmark 2 at 1.83 ± 0.03 % against 2.20 ± 0.02 % nothing fitted; concomitant fields and a measured GIRF change it by less than the error bars (`validation/real/RESULTS.md`, "Digital twin") |
 
 J-coupling and vibration slot in when R2/R1 are in place.
 

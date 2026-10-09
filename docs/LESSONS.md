@@ -288,6 +288,30 @@ says where it came from so it can be re-checked.
   sinc segments the flip-angle gradient through the Metal adjoint was 8.9e-4 off the float64 core,
   which looked like a bug until the core itself in float32 came out 5.4e-3 off.
 
+- **A ROI mean of a uniform sphere is one column of spins at k = 0** (M3, `nist_twin.py`): spins
+  across the slab and one pixel along the readout, at the ROI centre, simulated only through the TR
+  that acquires the k-space centre, reproduce the full imaging simulation's ROI curves to 0.5-1.4 %
+  at 1/16 of the spins and 1/16-1/25 of the segments, so gradients cost seconds. A 3 x 3 grid of
+  columns at half the slab resolution was worse (1-3 %): the slab sampling (crusher dephasing)
+  matters more than in-plane coverage.
+- **Some scanner imperfections are invisible to magnitude ROI means** (M3 scans): per-axis gradient
+  delays of 10 us change nothing on y and z (a readout delay is a k-space shift, a linear phase;
+  the k = 0 line has no phase encoding; a crusher pair shifts together) and < 0.1 % on x; a longer
+  first refocusing interval does nothing without off-resonance and < 0.1 % with 50 Hz. Scan before
+  adding a parameter to a twin.
+- **B1+ fits have two branches, and a spatial model removes the asymmetry that seemed to pick one**:
+  inversion and refocusing depend on |B1+ - 1| to second order, so the gradient vanishes at 1 (start
+  fits at 0.9 or 1.1). A global scan of benchmark 1 looked asymmetric (0.9: 2.2 %, 1.1: 3.7 %), but
+  the five-parameter field fits it equally from either side (0.50 %).
+- **A field fitted to echo shapes can be absorbing something else** (M3): the TSE's own B1+ fit
+  improved it from 2.26 to 1.6 % but predicted the IR-SE plane at 14-19 % (nominal 1.05 %), and a
+  refocusing-only amplitude factor on top of the IR-SE-fitted field converged to 1.003. Five smooth
+  parameters fit sphere-specific residuals of ten spheres. Fit inputs on the data that constrain
+  them physically and judge them on held-out data, never on the fit.
+- **The flip angle of a slice-selective pulse off the slice centre is not |sum s dt|**: its phase ramp
+  (f = G z0) makes the sum cancel (0.05 deg for a 180 at -12 mm). Demodulate by the pulse's own
+  frequency first (`pulseq.flip_angle`: the median phase step, robust to the pi steps of a sinc).
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.
