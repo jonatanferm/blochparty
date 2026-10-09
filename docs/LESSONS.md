@@ -275,6 +275,19 @@ says where it came from so it can be re-checked.
 - **A gradcheck step of 1e-6 on a parameter of 1e-5 is a 10 % perturbation**: check derivatives
   w.r.t. T2b through a unit-scale multiplier (`t2 = 1e-5 * s`), or the mismatch looks like a bug.
 
+- **Judge a float32 design optimum by its objective, not its parameters, when the objective is
+  flat** (DESPOT1 through the Metal adjoint, 2026-10-09): the CRB-optimal pair moved by 0.0003° to
+  0.03° as the finite-difference step went from 2e-2 to 1e-1, while the closed-form bound at every
+  pair found stayed within 3e-6 of its minimum. The Jacobian inside the bound is a difference of
+  float32 signals: central differences need steps ~1e-2 (rounding ~1e-6 / step) and then carry
+  h² ≈ 1e-4 of truncation, which moved the pair 0.045°; the fourth-order stencil (`design.jacobian(
+  method="fd4")`) removes that. Constrained designs are stricter: the augmented Lagrangian found
+  the flip through the float32 adjoint (0.003°) but held the scan-time constraint only to 8e-5.
+- **Float32 gradient accuracy depends on how many RF segments feed it; measure the core in
+  float32 before setting a tolerance** (`tests/test_integration.py`): over 32000 slice-selective
+  sinc segments the flip-angle gradient through the Metal adjoint was 8.9e-4 off the float64 core,
+  which looked like a bug until the core itself in float32 came out 5.4e-3 off.
+
 ## Pulseq, data and reference values
 
 - **Check what a reference table's columns refer to, not just the numbers.** Jiang et al.
@@ -612,6 +625,20 @@ says where it came from so it can be re-checked.
   32k random walkers through ~2000 cycles/m crushers still scattered 2.7 % between seeds, larger
   than the effect sought; the pathway b-values from the gradient waveform answered it exactly.
 
+- **In an adjoint, what is read per sample dominates, not the arithmetic** (Metal adjoint,
+  2026-10-09): with 8 coils, reading every spin's 16 sensitivity floats at every ADC sample was
+  half of the reverse sweep (adjoint 1.97 s vs 0.84 s with a loss on m only, 3d-48). Forming the
+  samples' source terms once per 4-segment block with the coils outermost cut it to 1.26 s; the
+  coil gradients need no lambda, so they moved into the block's forward recomputation, which has
+  each sample's output at hand (one step per sample saved). Likewise the replay buffer: storing
+  the two-sum low parts with the state (8 rows instead of 3 per block start) cost ~25 % of the
+  backward, and the recomputation does not need them (one ulp, and block starts are global
+  multiples of 4, so results stay independent of `checkpoint_every`).
+- **A GPU shared with another process gives 2x timing swings** (here a desktop app kept the GPU at
+  up to 93 %): the same 8-coil adjoint ran in 1.19 s and 2.60 s back to back. Alternate the old and
+  new code in one process (load the old module from a saved copy under another name) and compare
+  minima; absolute ratios against the plain forward are only good to ~20 % under such load.
+
 ## Process and tooling
 
 - **Idle GPU threads alias spin 0: guard every write.** Threads past the last spin read spin 0's
@@ -738,6 +765,32 @@ says where it came from so it can be re-checked.
   Relative PD must not be presented as calibrated absolute M0; zero QSM does not
   identify air. BigBrain-MR's TE=0 GRE magnitude also retains TR/flip-angle weighting
   and is not M0. Actual inventories and checks: `validation/anatomy/ALTERNATIVE_SOURCES.md`.
+
+- **Removing a module silently skips every test file that `importorskip`s it**, core tests
+  included (2026-10-09, retiring `blochparty.fused`: nine files had `fused =
+  pytest.importorskip("blochparty.fused")` plus an autouse fixture at module level, so deleting
+  the package would have turned their core checks into skips). Grep for the module name in
+  `importorskip` and fixtures before deleting, and compare passed counts, not just failures.
+- **`.double()` on a complex tensor drops the imaginary part** (with a warning that is easy to
+  miss in a script): a coil-gradient comparison showed relative error 1.0 that was only the
+  measurement. Compare complex tensors with `.to(other.dtype)` or `.to(torch.complex128)`.
+- **`git stash` in the middle of a rename splits it** into a staged add and an unstaged delete
+  (content intact, but confusing); do not stash while a refactor has renames in flight.
+
+- **Wall time is not run time when the Mac sleeps, and `time.perf_counter` does not count the
+  sleep** (2026-10-09, overnight with the user away): benchmark 1 took 55 min of wall clock for 251 s
+  of simulation, the full suite 88 min while pytest reported 338 s. `pmset -g log` showed the
+  machine in Maintenance Sleep with ~180 s DarkWake windows every ~15 min (closed lid or a manual
+  sleep; the app's keep-awake prevents idle sleep only), and Python's monotonic clock
+  (mach_absolute_time) stops during sleep, so in-script timings stay right while `date` and `time`
+  do not. Swap (8.5 GB of 10 GB used, a 6.7 GB test process footprint) looked like the cause and
+  was not. Before blaming an engine for a slow wall clock, compare it with `perf_counter` and read
+  `pmset -g log | grep -E "Sleep|Wake"`.
+- **A results table can predate a correction that the main table got**: benchmark 1's
+  convergence rows were computed before the T2 fix (their best row is the old 1.44 %), so the
+  16 x 1 row read 14.35 % where the current code gives 16.72 % on both engines. When a rerun
+  disagrees with a recorded number, rerun the old code on the same inputs before suspecting the
+  new engine.
 
 ## Monte Carlo estimator audit — 2026-10-08
 

@@ -120,8 +120,8 @@ direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 rel
   32 mapped coils. Threadgroups of 256 (`group`), segments dispatched in chunks of `chunk`.
 - Metal adjoint: `checkpoint_every` must be a multiple of 64 (default ~sqrt(segments)); memory: the
   checkpoints (8 floats per spin per interval) plus one interval's block-start magnetization (3 or 4
-  floats per spin every 4 segments). Forward + backward is ~5-7x the plain forward on the 3D
-  benchmark cases, depending on which gradients are asked for (per-spin only, or per-segment too).
+  floats per spin every 4 segments). Forward + backward is ~5x the plain forward for per-spin
+  gradients and 5.5-9x with coil and per-segment gradients too on the 3D benchmark cases.
 - Chunked: `m_init`, `scanner` and `maps` raise; the bound pool and free pools raise.
 - Core: free pools step segment by segment with one matrix exponential each, so
   `checkpoint_every` and `merge_free_runs` do not apply to them.

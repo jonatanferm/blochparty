@@ -31,8 +31,7 @@ Three conditions, each testable. The core is done when all three hold.
    exception is confined to short, intense pulses: for saturation pulses the rate model with
    `BoundPool(cutoff=None)` reproduces the generalized model on the GPU (M1c).
 2. **Gradients.** The Metal kernel has an adjoint for the physics that calibration and sequence
-   design need (M2). Without it, "differentiable" holds only for the CPU reference and the
-   frozen fused kernel.
+   design need (M2, since 2026-10-09; the fused CPU kernel, which had one before, is retired).
 3. **Physics no longer moves the benchmark table.** On at least one scanner with two sequences
    (NIST benchmarks 1 and 2), the remaining errors are attributable to unknown inputs (B1+,
    coil sensitivities, temperature, geometry) rather than to missing physics. The test is the
@@ -44,8 +43,8 @@ Three conditions, each testable. The core is done when all three hold.
 | engine | role | gradients | policy |
 |---|---|---|---|
 | `blochparty.simulate` (`src/blochparty/bloch.py`) | readable reference; every new effect lands here first, checked on small cases | autograd, `simulate_chunked` | keep small and readable; float64 |
-| `blochparty.metal.simulate_metal` (`src/blochparty/metal/__init__.py`) | the engine; all imaging-scale work | none yet (M2) | must agree with the core; float32 |
-| `blochparty.fused.simulate_fused` (`src/blochparty/fused/`) | frozen CPU kernel with a hand-written adjoint | adjoint | no new physics (it raises); retired once M2 is verified (see M2) |
+| `blochparty.metal.simulate_metal` (`src/blochparty/metal/__init__.py`) | the engine; all imaging-scale work | hand-written adjoint (M2) | must agree with the core; float32 |
+| `blochparty.fused.simulate_fused` (was `src/blochparty/fused/`) | CPU kernel with a hand-written adjoint | adjoint | retired 2026-10-09 after M2; in the git history |
 
 ## Working rules for whoever implements this
 
@@ -71,9 +70,8 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
   into its own variant; the plain kernels lost 10 to 30 % to register pressure when state was
   shared. Measure the plain variant's speed before and after any shader change
   (`benchmarks/bench.py`, record with `--record`).
-- **Fused kernel raises.** New `Phantom` or `Sequence` fields must make `simulate_fused` raise
-  `NotImplementedError` with a message naming where the feature lives (pattern at
-  `src/blochparty/fused/__init__.py:263`).
+- **Metal's adjoint raises** for what it does not differentiate (pattern: `_simulate_grad` in
+  `src/blochparty/metal/__init__.py`), and the engine matrix says so.
 - **Tests run on this Mac.** `uv run pytest` (about 3.5 min with GPU access). Mark anything over
   ~30 s with a marker and keep the default suite under 5 min. GPU tests skip without MPS, so
   check `blochparty.metal.available()` and do not let a skipped test pass for a GPU change.
@@ -241,21 +239,28 @@ acquires Bernstein's velocity-dependent phase for a moving one.
 - [x] Free pools with `FieldMaps` (2026-10-08), static and moving, core and Metal: equal to the
       same fields given per spin to 1e-14.
 
-## M2. Metal adjoint (5 to 7 days) — first version done 2026-10-09; speed and the fused kernel's retirement open
+## M2. Metal adjoint (5 to 7 days) — done 2026-10-09
 
 Status. `simulate_metal` is differentiable for the planned scope (sequence `dt`, `rf`, `grad`,
 `adc_phase`, `b0_offset`, `rf_freq`; phantom `pos`, `pd`, `t1`, `t2`, `db0`, `b1`; coils; `m_init`;
-the rate-model bound pool; the scanner field model through the encoding positions and coefficients;
-static `FieldMaps`), raising for moving spins, free pools and the generalized bound pool. Checks:
-(1) against the core's float64 autograd per input, 1e-7 to 3e-6 on random sequences, 2e-5 on a
-1600-segment RF-spoiled GRE, ≤ 1.2e-4 with the bound pool; (2) as accurate as the fused float32
-adjoint or better (bound-pool `rf_freq`: 1.2e-4 against its 1.5e-3); (3) bit-identical for any
-`checkpoint_every` and every run; (4) the WM/GM optimum to 0.001° and the Ernst angle to 0.01°, but
-the DESPOT1 pair only to 0.05°: its bound differentiates float32 signals by finite differences
-(`rel_step` 1e-2; the default 1e-4 lands degrees off); (5) forward + backward 6-7x the forward on
-3d-48 / 3d-64 (target 5x; 3-4x on the small cases). Not done: the speed target; retiring the fused
-kernel, which still is the only fast float64 path with gradients (DESPOT1 to 0.001° needs float64):
-a decision, see the journal.
+the rate-model bound pool, with or without the lineshape cut; the scanner field model through the
+encoding positions and coefficients; static `FieldMaps`), raising for moving spins, free pools and
+the generalized bound pool. Checks: (1) against the core's float64 autograd per input, 1e-7 to 3e-6
+on random sequences, 2e-5 on a 1600-segment RF-spoiled GRE, ≤ 1.2e-4 with the bound pool; (2) as
+accurate as the fused float32 adjoint or better (bound-pool `rf_freq`: 1.2e-4 against its 1.5e-3;
+32000 RF segments: 8.9e-4 where the core in float32 is 5.4e-3 off); (3) bit-identical for any
+`checkpoint_every` and every run; (4) the WM/GM optimum to 0.001°, the Ernst angle to 0.01°, the
+DESPOT1 pair to 0.0003°–0.03° with its closed-form bound within 3e-6 of the optimum (fourth-order
+differences of float32 signals, `design.jacobian(method="fd4")`; the flat bound makes the pair the
+wrong yardstick); (5) the 5x target is met only in part: after storing only m in the replay buffer and
+forming the coil terms once per 4-segment block (backward −11 to −20 %), forward + backward is ~5x the
+forward for per-spin gradients on 3d-48 (8 coils), but 8-9x there with coil and flip-angle gradients
+too (`bench.py --grad`: 3.2-4.1 s against a 0.42 s forward) and 5.5x on 3d-64; the interval length
+does not change it. Open performance work, not a blocker: the plain forward is very efficient (MMA
+coil sums), the reverse sweep is register-bound. The fused kernel is retired (2026-10-09): the design examples whose checks need float64
+(constraints to 1e-6, Bloch vs EPG to 1e-12) run on the core, which takes 36 s for the TR-budget
+design and 74 s for DESPOT1 instead of seconds; free-pool and generalized-pool gradients are
+core-only. Journal: 2026-10-09.
 
 The original plan:
 
