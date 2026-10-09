@@ -1030,7 +1030,11 @@ _ADJOINT_COMMON = r"""
 
 struct Acc { float px, py, pz, db0, pd, r1, r2, b1, c[7], bf, bk, br1, bt2, bdw; };
 #define N_ACC 20
-#define RBLOCK 4  // segments per recomputed block (divides 64; tg: RBLOCK x 4 x 256 floats = 16 KB)
+#define RBLOCK 4  // segments per recomputed block (divides 64; tg: RBLOCK x 4 x 256 floats = 16 KB; the selects
+                  // of the samples' source terms in bloch_adjoint assume 4)
+// rows of R per block start: the magnetization only (the bound pool's in the variants that have one); the
+// recomputation starts each block with zero low parts, one ulp from the forward and the same for any K1
+template <int V> constexpr uint rrows() { return V == 0 ? 3u : 4u; }
 
 inline void acc_flush(thread Acc& g, device float* GS, uint n, uint j) {
     const float v[N_ACC] = {g.px, g.py, g.pz, g.db0, g.pd, g.r1, g.r2, g.b1, g.c[0], g.c[1], g.c[2], g.c[3], g.c[4],
@@ -1343,9 +1347,10 @@ kernel void seg_reduce(device const float* GSEG [[buffer(0)]],  // (simdgroups, 
 """
 
 _ADJOINT_KERNEL = r"""
-// The forward again over one interval, from its checkpoint, keeping the full state (hi and lo) before every
-// RBLOCK-th segment in R; bloch_adjoint recomputes each block from there into threadgroup memory. Storing
-// every state was DRAM-bound (12 B per spin and segment written and read again: 1 s of 3d-48's 2.5 s).
+// The forward again over one interval, from its checkpoint, keeping the magnetization before every RBLOCK-th
+// segment in R; bloch_adjoint recomputes each block from there into threadgroup memory. Storing every state
+// was DRAM-bound (12 B per spin and segment written and read again: 1 s of 3d-48's 2.5 s), and so was storing
+// the low parts too (8 rows per block start instead of 3: replay and sweep 30 % slower on 3d-48).
 kernel void bloch_replay@SUFFIX@(device const float* CK  [[buffer(0)]],   // (8, N) state at the interval start: m, mb, lo
                                  constant float* spins   [[buffer(1)]],
                                  constant float* segs    [[buffer(2)]],
@@ -1355,7 +1360,7 @@ kernel void bloch_replay@SUFFIX@(device const float* CK  [[buffer(0)]],   // (8,
                                  constant float* line    [[buffer(6)]],
                                  constant float* log_f   [[buffer(7)]],
                                  constant float* conc    [[buffer(8)]],
-                                 device float* R         [[buffer(9)]],   // (K1 / RBLOCK, 8, N) block-start states, out
+                                 device float* R         [[buffer(9)]],   // (K1 / RBLOCK, rrows, N) block-start m, out
                                  constant uint* prm      [[buffer(10)]],  // as bloch_adjoint
                                  uint i [[thread_position_in_grid]]) {
     const uint n = prm[0], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5];
@@ -1372,9 +1377,9 @@ kernel void bloch_replay@SUFFIX@(device const float* CK  [[buffer(0)]],   // (8,
         constant float* q = segs + 8 * s;
         const int f = flags[s];
         if ((s - s0) % RBLOCK == 0) {
-            device float* r = R + (s - s0) / RBLOCK * 8 * n;
-            r[j] = st.mx, r[n + j] = st.my, r[2 * n + j] = st.mz, r[3 * n + j] = st.mb;
-            r[4 * n + j] = st.lx, r[5 * n + j] = st.ly, r[6 * n + j] = st.lz, r[7 * n + j] = st.lb;
+            device float* r = R + (s - s0) / RBLOCK * rrows<@V@>() * n;
+            r[j] = st.mx, r[n + j] = st.my, r[2 * n + j] = st.mz;
+            if (rrows<@V@>() > 3) r[3 * n + j] = st.mb;
         }
         const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
         if (@V@ != 0 && mt)
@@ -1399,7 +1404,7 @@ kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],  
                                   constant float* line    [[buffer(9)]],   // (6,) lineshape (mt)
                                   constant float* log_f   [[buffer(10)]],  // lineshape table (mt)
                                   constant float* conc    [[buffer(11)]],  // (7, N) concomitant-field coefficients
-                                  device float* R         [[buffer(12)]],  // (K1 / RBLOCK, 8, N) block-start states
+                                  device float* R         [[buffer(12)]],  // (K1 / RBLOCK, rrows, N) block-start m
                                   device float* LAM       [[buffer(13)]],  // (4, N) lambda, in/out
                                   device float* GS        [[buffer(14)]],  // (20, N) per-spin gradients, in/out
                                   device float* GC        [[buffer(15)]],  // (2C, N) coil gradients, in/out
@@ -1414,6 +1419,7 @@ kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],  
     // need_seg: 2 every segment's gradients (dt, grad, b0_offset requested), 1 those of RF segments (rf, rf_freq)
     const uint n = prm[0], nc = prm[1], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5], need_seg = prm[6],
                need_sens = prm[7], need_adc = prm[8], K1 = prm[9];
+    const uint nch = @NC@ > 0 ? @NC@ : nc;  // coil rows of sens and hb (padded with zero coils)
     const bool active = i < n;
     const uint j = active ? i : 0;
     State st;
@@ -1436,11 +1442,10 @@ kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],  
     const uint nb = (s1 - s0 + RBLOCK - 1) / RBLOCK;
     for (int blk = int(nb) - 1; blk >= 0; --blk) {
         const uint b0 = s0 + uint(blk) * RBLOCK, b1 = min(b0 + RBLOCK, s1);
-        device const float* r = R + uint(blk) * 8 * n;
+        device const float* r = R + uint(blk) * rrows<@V@>() * n;
         st.mx = active ? r[j] : 0.0f, st.my = active ? r[n + j] : 0.0f, st.mz = active ? r[2 * n + j] : 0.0f;
-        st.mb = active ? r[3 * n + j] : 0.0f;
-        st.lx = active ? r[4 * n + j] : 0.0f, st.ly = active ? r[5 * n + j] : 0.0f;
-        st.lz = active ? r[6 * n + j] : 0.0f, st.lb = active ? r[7 * n + j] : 0.0f;
+        st.mb = (rrows<@V@>() > 3 && active) ? r[3 * n + j] : 0.0f;
+        st.lx = st.ly = st.lz = st.lb = 0.0f;
         st.cache = Cache{}, st.zc = ZCache{};
         for (uint s = b0; s < b1; ++s) {
             constant float* q = segs + 8 * s;
@@ -1453,7 +1458,37 @@ kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],  
                         log_f, st.cache, st.zc);
             else
                 step(q, f, bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+            if ((f & 2) && need_adc && need_sens) {  // coil gradients from the sample (before the spoil): no lambda needed
+                device const float* h = hb + 2 * nch * uint(adc_row[s]);
+                const float ox = st.mx + st.lx, oy = st.my + st.ly;
+                if (@NC@ > 0) {
+                    for (uint c = 0; c < @NC@; ++c) gcr[c] += h[2 * c] * ox + h[2 * c + 1] * oy, gci[c] += h[2 * c + 1] * ox - h[2 * c] * oy;
+                } else if (active) {
+                    for (uint c = 0; c < nc; ++c)
+                        GC[2 * c * n + j] += h[2 * c] * ox + h[2 * c + 1] * oy, GC[(2 * c + 1) * n + j] += h[2 * c + 1] * ox - h[2 * c] * oy;
+                }
+            }
             if (f & 4) st.mx = st.my = st.lx = st.ly = 0.0f;
+        }
+        // the samples' source terms dL/dm = sum_c h_c conj(sens_c), coils outermost: each sensitivity read once
+        // per block, not once per sample (3d-48, 8 coils: the per-sample reads were half of the sweep)
+        float ur[RBLOCK], ui[RBLOCK];
+        int row[RBLOCK];
+        bool any = false;
+        for (uint k = 0; k < RBLOCK; ++k) {
+            ur[k] = ui[k] = 0.0f;
+            row[k] = (need_adc && b0 + k < b1 && (flags[b0 + k] & 2)) ? adc_row[b0 + k] : -1;
+            any = any || row[k] >= 0;
+        }
+        if (any) {
+            for (uint c = 0; c < nch; ++c) {
+                const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
+                for (uint k = 0; k < RBLOCK; ++k) {
+                    if (row[k] < 0) continue;
+                    device const float* h = hb + 2 * nch * uint(row[k]) + 2 * c;
+                    ur[k] += h[0] * a + h[1] * b, ui[k] += h[1] * a - h[0] * b;
+                }
+            }
         }
         for (int s = int(b1) - 1; s >= int(b0); --s) {
             constant float* q = segs + 8 * s;
@@ -1461,35 +1496,10 @@ kernel void bloch_adjoint@SUFFIX@_c@NC@(device const float* CK  [[buffer(0)]],  
             threadgroup float* t = tg + (uint(s) - b0) * 4 * 256;
             const float x0 = t[tid], y0 = t[256 + tid], z0 = t[512 + tid], v0 = t[768 + tid];
             if (f & 4) lx = ly = 0.0f;
-            if ((f & 2) && need_adc) {  // the sample: lambda += dL/dm, and the coil gradients from the output
-                device const float* h = hb + 2 * (@NC@ > 0 ? @NC@ : nc) * uint(adc_row[s]);
-                float ox = 0.0f, oy = 0.0f;
-                if (need_sens) {  // the segment's output (before the spoil), recomputed
-                    Cache kc;
-                    ZCache zc;
-                    float mx = x0, my = y0, mz = z0, mb = v0, ax = 0.0f, ay = 0.0f, az = 0.0f, ab = 0.0f;
-                    const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
-                    if (@V@ != 0 && mt)
-                        step_mt(q, f, bz, frf[s], mx, my, mz, mb, ax, ay, az, ab, st.p, st.b, line, log_f, kc, zc);
-                    else
-                        step(q, f, bz, mx, my, mz, ax, ay, az, st.p, kc);
-                    ox = mx + ax, oy = my + ay;
-                }
-                if (@NC@ > 0) {
-                    for (uint c = 0; c < @NC@; ++c) {
-                        const float hr = h[2 * c], hi = h[2 * c + 1];
-                        const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
-                        lx += hr * a + hi * b, ly += hi * a - hr * b;
-                        if (need_sens) gcr[c] += hr * ox + hi * oy, gci[c] += hi * ox - hr * oy;
-                    }
-                } else {
-                    for (uint c = 0; c < nc; ++c) {
-                        const float hr = h[2 * c], hi = h[2 * c + 1];
-                        const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
-                        lx += hr * a + hi * b, ly += hi * a - hr * b;
-                        if (need_sens && active) GC[2 * c * n + j] += hr * ox + hi * oy, GC[(2 * c + 1) * n + j] += hi * ox - hr * oy;
-                    }
-                }
+            if ((f & 2) && need_adc) {  // the sample: lambda += dL/dm (selects keep ur, ui in registers)
+                const uint k = uint(s) - b0;
+                lx += k == 0 ? ur[0] : (k == 1 ? ur[1] : (k == 2 ? ur[2] : ur[3]));
+                ly += k == 0 ? ui[0] : (k == 1 ? ui[1] : (k == 2 ? ui[2] : ui[3]));
             }
             SegG sgv = SegG{};
             reverse_seg<@V@>(q, f, (@V@ != 0 && mt) ? frf[s] : 0.0f, x0, y0, z0, v0, st.p, st.b, st.conc, mode, mt != 0,
@@ -1667,7 +1677,7 @@ class _MetalSimulate(torch.autograd.Function):
         GS = torch.zeros(N_SPIN_GRADS, n, device=dev, dtype=f32)
         GC = torch.zeros(2 * max(nc, 16) if need_sens else 1, n, device=dev, dtype=f32)
         threads, sgs = cx["threads"], cx["threads"] // 32
-        R = torch.zeros(every // 4 * 8 * n, device=dev, dtype=f32)  # RBLOCK = 4
+        R = torch.zeros(every // 4 * 4 * n, device=dev, dtype=f32)  # RBLOCK = 4, rrows <= 4
         GSEG = torch.zeros(sgs * every * 8 if need_seg else 1, device=dev, dtype=f32)
         # coil gradients in registers (padded with zero coils) only when they are wanted: the arrays cost occupancy
         ncr = next((c for c in ADJOINT_COILS[1:] if c >= nc), 0) if need_sens else 0
