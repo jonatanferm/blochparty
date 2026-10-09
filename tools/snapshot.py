@@ -1,8 +1,9 @@
 """Bit-identity guard for changes to the simulators.
 
-Saves outputs and gradients of both simulators (and default sequences / phantoms) on a fixed
-set of default-argument inputs, so a change can be checked to leave default behaviour
-bit-for-bit unchanged:
+Saves outputs and gradients of the core (and default sequences / phantoms) on a fixed set of
+default-argument inputs, so a change can be checked to leave default behaviour bit-for-bit
+unchanged (until 2026-10-09 the fused CPU kernel too; the Metal kernel is not in it, its coil
+sums use atomics and are not bit-reproducible):
 
     git stash / switch to the base commit
     uv run python tools/snapshot.py save /tmp/before.pt
@@ -20,13 +21,12 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # for tests.test_bloch_vs_ode
 
 import blochparty as bp  # noqa: E402
-from blochparty.fused import simulate_fused  # noqa: E402
 from tests.test_bloch_vs_ode import random_case  # noqa: E402
 
 
 def snapshot() -> dict:
     out = {}
-    sims = (("torch", bp.simulate), ("fused", lambda *a, **k: simulate_fused(*a, n_threads=1, **k)))
+    sims = (("torch", bp.simulate),)
     for name, sim in sims:
         for dt in (torch.float64, torch.float32):
             ph = bp.shepp_logan(32).to(dtype=dt)
