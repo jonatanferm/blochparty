@@ -115,10 +115,25 @@ metadata; spatial variability is M4 and is explicitly rejected for now.
   proxy. Missing values raise; there is no silent field interpolation.
 - Chi uses absolute SI: air +0.36 ppm, water-like soft tissue −9.05 ppm, bone a
   −2 ppm contrast relative to water. There is no fitted iron or myelin model.
-- Optional WM/GM/CSF MT and isotropic diffusion values are marked illustrative
-  assumptions. Requesting them for other tissues raises until explicit properties
-  are provided. Bound fraction is of the total pool; assembly converts it to the
-  engine's bound/free ratio. Bound T1 equals free T1; the rate model is used.
+- MT and isotropic diffusion (opt-in, `to_phantom(mt=True, diffusion=True)`) are cited for every
+  signalling BrainWeb class since 2026-10-09 (M5). Bound fraction f = M0b/(M0b+M0f), of the
+  total pool; assembly converts it to the engine's bound/free ratio. Bound T1 equals free T1;
+  the rate model and a super-Lorentzian line are used.
+
+  | class | f | exchange (bound → free) | T2b | diffusivity [m²/s] |
+  |---|---|---|---|---|
+  | WM | 0.1277 ± 0.0041 (Yarnykh 2016) | 19.0 /s (Yarnykh 2012, R) | 9.7 µs (Yarnykh 2012) | 0.70 ± 0.03e-9 (Helenius 2002) |
+  | GM | 0.0673 ± 0.0015 (Yarnykh 2016) | 19.0 /s | 9.7 µs | 0.89 ± 0.04e-9 (cortex, Helenius 2002) |
+  | CSF | 0 (MTR 0.01, Smith 2005) | | | 3.04e-9 (water at 37 °C, Holz 2000) |
+  | muscle | 0.084 ± 0.006 (Sinclair 2010) | 19 /s, assumed (did not converge in muscle) | 5.9 ± 0.2 µs (Sinclair 2010) | 1.78 ± 0.08e-9 (Li 2014) |
+  | fat | 0 (no exchange with triglyceride, Chen 2010) | | | 1.83e-11, an upper bound (Weidlich 2018) |
+  | vessels | 0, assumed | | | 1.54 ± 0.12e-9 (blood, Funck 2018) |
+  | skin, connective, dura | muscle, flagged proxy | | | muscle, flagged |
+  | marrow | fat, flagged proxy | | | fat, flagged |
+
+  The qMT values are 3 T measurements; at 1.5 T and 7 T they are flagged as carried over
+  (Stanisz 2005 found MT parameters at 1.5 T and 3 T similar). Diffusivity does not depend on B0.
+  Exchange-rate conventions differ between papers; see docs/LESSONS.md.
 
 CSF and subcutaneous fat use measured values since 2026-10-07 (CSF T1 4.4 s, Rooney 2007;
 3 T CSF T2 2.03 s, Spijkerman 2018; 3 T fat T1/T2 382/68 ms, de Bazelaire 2004; 1.5 T fat from the

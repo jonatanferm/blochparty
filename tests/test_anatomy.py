@@ -183,6 +183,34 @@ def test_mt_diffusion_and_fat_bookkeeping():
     assert (ph.db0 < 0).any() and (ph.db0 > 0).any()
 
 
+CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+
+
+def all_classes(n=2):
+    return Anatomy({k: torch.full((n, n, n), 1 / 12, dtype=torch.float64) for k in CLASSES}, (.001,) * 3, (0, 0, 0))
+
+
+def test_every_signalling_class_has_mt_and_diffusion():
+    for strength in (1.5, 3.):
+        for name, p in DEFAULT_TISSUES[strength].items():
+            if p.pd.mean == 0:
+                continue
+            assert p.bound_fraction is not None and p.diffusivity is not None, name
+            if p.bound_fraction.mean > 0:
+                assert p.exchange_rate is not None and p.bound_t2 is not None, name
+                # MT measured at 3 T is an assumption elsewhere
+                assert p.bound_fraction.assumed or strength == 3., name
+        ph = to_phantom(all_classes(), field_T=strength, mt=True, diffusion=True, chi_to_b0=False, t2star="off")
+        assert ph.bound is not None and (ph.diffusion > 0).all()
+    wm = DEFAULT_TISSUES[3.]["wm"]
+    assert not wm.bound_fraction.assumed and not wm.exchange_rate.assumed and not wm.diffusivity.assumed
+    assert DEFAULT_TISSUES[7.]["wm"].bound_fraction.assumed
+    # CSF: Holz et al.'s Speedy-Angell fit; 2.299e-9 m^2/s at 25 C is their tabulated value
+    holz = lambda celsius: 1.635e-8 * ((celsius + 273.15) / 215.05 - 1) ** 2.063
+    assert holz(25) == pytest.approx(2.299e-9, rel=2e-4)
+    assert DEFAULT_TISSUES[3.]["csf"].diffusivity.mean == pytest.approx(holz(37), rel=1e-3)
+
+
 def test_loader_real_format_on_tiny_files(tmp_path):
     names = DEFAULT_TISSUES[3].keys()
     manifest = dict(schema=1,subject=4,shape=[3,4,5],voxel=[.0005]*3,

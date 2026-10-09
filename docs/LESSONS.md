@@ -541,6 +541,23 @@ says where it came from so it can be re-checked.
   roundings and neighbours) makes a re-exported file bit-identical; segment edges computed from
   absolute times can still differ in the last bit (1.7e-18 s on a scanner file).
 
+- **qMT papers name their exchange rates differently; convert before tabulating** (M5 tissue
+  table, 2026-10-09). Our `BoundPool.k` and `TissueProperties.exchange_rate` are bound -> free.
+  Yarnykh's k is free -> bound and his R = k(1-f)/f, with f = M0b/(M0b+M0f) (Yarnykh 2012, Eq. 2
+  and 7), so his R is our k: whole-brain median 19.0 /s at 3 T. Henkelman/Sled-Pike's R with
+  M0f = 1 is also our k (kf = R·F). Dortch's SIR kmf is bound -> free; its PSR is M0b/M0f, not a
+  fraction (Li et al. 2014 muscle PSR 0.097 is f = 0.088). Fat fractions follow the same split:
+  "pool size ratio" is F, "MPF"/"bound pool fraction" is f = F/(1+F).
+- **Some qMT parameters are not identifiable in vivo**: in human muscle at 3 T the exchange rate
+  did not converge in any of 10 subjects (Sinclair et al. 2010), so the muscle rate in the table
+  is the brain's, flagged as assumed. Lipid ADCs from DW imaging rise with slice thickness
+  (motion): 2.78e-5 at 20 mm, 1.83e-5 mm²/s at 2 mm (Weidlich, ISMRM 2018); take the smallest
+  value as an upper bound.
+- **Read numbers from the page source, not from a summary of it**: WebFetch's summaries of PMC
+  tables dropped columns and invented "not detailed" for values that were there (Li et al. 2014
+  ADC, Sinclair et al. 2010 per-subject table). `curl` the PMC HTML and print the `<table>`s and
+  the MathML annotations instead.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on

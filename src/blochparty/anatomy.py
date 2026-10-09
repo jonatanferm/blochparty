@@ -165,21 +165,71 @@ def _tables():
         else:
             default[strength]["fat"] = replace(fat, t1=Distribution(.3124, .029, _IT), t2=Distribution(.1174, .0564, _IT),
                 t2star=_assumed(.058, _BW + "; fat T2* legacy prior"))
-        for name, md, fraction in (("wm", .7e-9, .16), ("gm", .8e-9, .07), ("csf", 3e-9, 0.)):
-            # Explicit modelling priors, not claimed measurements or fitted qMT parameters.
-            default[strength][name] = replace(default[strength][name],
-                diffusivity=_assumed(md, "isotropic brain/CSF design prior; no fibre orientations"),
-                bound_fraction=_assumed(fraction, "WM/GM total-pool fractions 0.16/0.07, CSF zero; illustrative qMT prior"),
-                exchange_rate=_assumed(40., "bound-to-free rate 40/s; must be calibrated for quantitative MT"),
-                bound_t2=_assumed(12e-6, "12 us super-Lorentzian width; see exchange.py; not a tissue measurement"))
+        for name, values in _mt_and_diffusion(strength).items():
+            default[strength][name] = replace(default[strength][name], **values)
     # Only verified 7 T brain entries: the remaining classes require user-supplied
     # values. T2 is an explicit 3 T proxy; the T1/T2* means AND SDs are measured.
     default[7.] = {}
     for name, t1, s1, star, ss in (("wm",1.19,.02,.0267,.0001), ("gm",2.,.08,.0324,.0007)):
-        p = default[3.][name]
+        p = replace(default[3.][name], **_mt_and_diffusion(7.)[name])
         default[7.][name] = replace(p, t1=Distribution(t1,s1,_CA), t2star=Distribution(star,ss,_CA),
             t2=_assumed(p.t2.mean, _ST + "; 3 T T2 carried to 7 T pending calibrated value"))
     return default, {1.5: bw}
+
+
+# Two-pool MT and isotropic diffusion (ROADMAP M5). MT in BoundPool's convention: bound_fraction
+# p = M0b / (M0b + M0f), exchange_rate = bound -> free [1/s] (exchange.py), super-Lorentzian T2b.
+_YA16 = ("Yarnykh 2016, doi:10.1002/mrm.25811: 3 T single-point MPF = M0b/(M0b+M0f), whole-brain WM and GM of "
+         "8 healthy subjects, mean +- between-subject SD")
+_YA12 = ("Yarnykh 2012, doi:10.1002/mrm.23224, Eq. 2 and 7: 3 T multi-point pulsed qMT, whole-brain histogram "
+         "medians of 2 controls and 2 MS patients; R = k(1-f)/f is the bound-to-free rate; super-Lorentzian T2B")
+_SI = ("Sinclair et al. 2010, doi:10.1002/mrm.22562: in vivo qMT of human calf muscle at 3 T, soleus, 10 "
+       "subjects, mean +- SD; f of the total pool, super-Lorentzian T2b")
+_HE = ("Helenius et al. 2002, AJNR 23:194 (www.ajnr.org/content/23/2/194): ADC at b = 0/1000 s/mm^2, 80 adults "
+       "at 1.5 T, mean +- SD; diffusivity does not depend on B0")
+_HO = ("Holz, Heil and Sacco 2000, doi:10.1039/b005319h: water self-diffusion, Speedy-Angell fit "
+       "D0 (T/215.05 K - 1)^2.063, D0 = 1.635e-8 m^2/s, at 37 C (2.299e-9 at 25 C); in vivo CSF adds pulsation")
+_LI = ("Li et al. 2014, doi:10.1002/nbm.3159, Table 2: DTI mean diffusivity of 8 thigh muscles at 3 T; mean and "
+       "SD of the 8 muscle means")
+_FU = ("Funck et al. 2018, doi:10.1002/mrm.26919: whole blood at 37 C, flow-compensated, suggested D_b = 1.54 +- "
+       "0.12 um^2/ms (falls with haematocrit)")
+_WE = ("Weidlich et al., ISMRM 2018 #2511: gluteal subcutaneous fat at 3 T, lipid ADC 1.83e-5 mm^2/s at 2 mm "
+       "slices, rising with slice thickness (motion): an upper bound")
+_CH = ("Chen et al. 2010, doi:10.1002/mrm.22208: water exchanges magnetization with protein and membrane "
+       "protons but not with triglyceride (fat) protons")
+_SM = "Smith et al., ISMRM 2005 #417: CSF MTR 0.01 +- 0.02 at 3 T (frontal WM 0.48 +- 0.01)"
+
+
+def _mt_and_diffusion(strength):
+    """MT and diffusion fields per tissue class; MT measured at 3 T is flagged at other fields
+    (Stanisz et al. 2005 find qMT parameters at 1.5 T and 3 T similar). Diffusivity does not
+    depend on B0. Classes without a semi-solid pool get bound_fraction 0 only."""
+    def mt(value, sd, citation, assumed=False):
+        if strength != 3.:
+            citation, assumed = "Assumption: " + citation + f"; 3 T value used at {strength} T", True
+        return Distribution(value, sd, citation, assumed)
+    rate = mt(19., None, _YA12 + ": R = 19.0 /s")
+    t2b = mt(9.7e-6, None, _YA12 + ": T2B = 9.7 us")
+    out = {"wm": dict(bound_fraction=mt(.1277, .0041, _YA16 + ": WM 12.77 +- 0.41 %"), exchange_rate=rate,
+                      bound_t2=t2b, diffusivity=Distribution(.70e-9, .03e-9, _HE + ": white matter")),
+           "gm": dict(bound_fraction=mt(.0673, .0015, _YA16 + ": GM 6.73 +- 0.15 %"), exchange_rate=rate,
+                      bound_t2=t2b, diffusivity=Distribution(.89e-9, .04e-9, _HE + ": cortical grey matter")),
+           "csf": dict(bound_fraction=mt(0., None, _SM + ": no semi-solid pool"),
+                       diffusivity=Distribution(3.04e-9, None, _HO)),
+           "muscle": dict(bound_fraction=mt(.084, .006, _SI), bound_t2=mt(5.9e-6, .2e-6, _SI),
+                          exchange_rate=_assumed(19., "no converged value in human muscle (Sinclair et al. 2010, "
+                                                 "doi:10.1002/mrm.22562); the brain's R from " + _YA12),
+                          diffusivity=Distribution(1.78e-9, .08e-9, _LI)),
+           "fat": dict(bound_fraction=Distribution(0., None, _CH), diffusivity=Distribution(1.83e-11, None, _WE)),
+           "vessels": dict(bound_fraction=_assumed(0., "blood's MT is small next to tissue's, the premise of "
+                           "MT-suppressed TOF angiography (Pike et al. 1992, doi:10.1002/mrm.1910250217)"),
+                           diffusivity=Distribution(1.54e-9, .12e-9, _FU))}
+    for name in ("skin", "connective", "dura"):
+        out[name] = {key: _assumed(d.mean, d.citation.removeprefix("Assumption: ") + f"; muscle used for {name}")
+                     for key, d in out["muscle"].items()}
+    out["marrow"] = {key: _assumed(d.mean, d.citation + "; fat used for marrow, a lipid class here")
+                     for key, d in out["fat"].items()}
+    return out
 
 
 DEFAULT_TISSUES, BRAINWEB_TISSUES = _tables()
@@ -913,3 +963,4 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     if diffusion:
         ph.diffusion = cat("diff")
     return ph
+
