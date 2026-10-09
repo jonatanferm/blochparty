@@ -317,7 +317,8 @@ def _digest(seq):
         h.update(t.detach().contiguous().numpy().tobytes())
     for f in (seq.is_rf, seq.adc, seq.spoil):
         h.update(bytes(f))
-    h.update(repr(sorted(seq.meta.items())).encode())
+    # block provenance (meta "blocks", "system", since 2026-10-09) is bookkeeping for write_pulseq, not output
+    h.update(repr(sorted((k, v) for k, v in seq.meta.items() if k not in ("blocks", "system"))).encode())
     return h.hexdigest()
 
 

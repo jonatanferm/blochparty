@@ -77,6 +77,7 @@ class Sequence:
 
         return replace(
             self,
+            meta=_remap_spans(self.meta, reps.cpu().numpy()),
             dt=rep(self.dt / reps.to(self.dt.dtype)),
             rf=rep(self.rf),
             grad=rep(self.grad),
@@ -99,6 +100,22 @@ class Sequence:
             b0_offset=None if self.b0_offset is None else conv(self.b0_offset),
             rf_freq=None if self.rf_freq is None else conv(self.rf_freq),
         )
+
+
+def _remap_spans(meta: dict, reps: np.ndarray) -> dict:
+    """``meta`` with segment spans (builder ``blocks``, imported ``block_segments``) moved to the
+    segments of a sequence in which segment i became ``reps[i]`` segments."""
+    if "blocks" not in meta and "block_segments" not in meta and "segment_block" not in meta:
+        return meta
+    edge = np.concatenate([[0], np.cumsum(reps)])  # new index of every old boundary
+    out = dict(meta)
+    if "blocks" in meta:
+        out["blocks"] = [{**b, "span": (int(edge[b["span"][0]]), int(edge[b["span"][1]]))} for b in meta["blocks"]]
+    if "block_segments" in meta:
+        out["block_segments"] = [(int(edge[a]), int(edge[b])) for a, b in meta["block_segments"]]
+    if "segment_block" in meta:
+        out["segment_block"] = np.repeat(np.asarray(meta["segment_block"]), reps)
+    return out
 
 
 # --- hardware limits and events --------------------------------------------------------
@@ -425,6 +442,11 @@ class SequenceBuilder:
         self.time = 0.0  # [s] duration so far
         self._dt, self._rf, self._grad, self._phase = [], [], [], []
         self._is_rf, self._adc, self._spoil = [], [], []
+        self._blocks = []  # provenance: one record per call, with its segment span (Sequence.meta["blocks"])
+
+    def _record(self, start: int, kind: str, **events):
+        """Remember a call's events and the segments it produced (``pulseq.write_pulseq`` replays them)."""
+        self._blocks.append({"kind": kind, "span": (start, len(self._is_rf)), **events})
 
     def _t(self, x) -> Tensor:
         return torch.as_tensor(x, dtype=self.dtype, device=self.device)
@@ -464,7 +486,10 @@ class SequenceBuilder:
         ph = self._t(phase)
         rf = torch.stack([amp * torch.cos(ph), amp * torch.sin(ph)]).expand(n_steps, 2)
         dt = (dur / n_steps).expand(n_steps)
+        start = len(self._is_rf)
         self._append(dt, rf, self._grad3(grad, n_steps), torch.zeros_like(dt), is_rf=True, adc=False)
+        self._record(start, "rf", duration=duration, flip_deg=flip_deg, amplitude=amplitude, phase=phase, grad=grad,
+                     n_steps=n_steps)
         return self
 
     def rf_waveform(self, samples, dt, grad=None):
@@ -472,13 +497,17 @@ class SequenceBuilder:
         rf = self._t(samples)
         n = rf.shape[0]
         dts = self._t(dt).expand(n)
+        start = len(self._is_rf)
         self._append(dts, rf, self._grad3(grad, n), torch.zeros_like(dts), is_rf=True, adc=False)
+        self._record(start, "rf_waveform", samples=samples, dt=dt, grad=grad)
         return self
 
     def delay(self, duration, grad=None):
         dt = self._t(duration).reshape(1)
+        start = len(self._is_rf)
         self._append(dt, torch.zeros(1, 2, dtype=self.dtype, device=self.device),
                      self._grad3(grad, 1), torch.zeros_like(dt), is_rf=False, adc=False)
+        self._record(start, "delay", duration=duration, grad=grad)
         return self
 
     def readout(self, n: int, dwell, grad=None, phase=0.0):
@@ -488,7 +517,9 @@ class SequenceBuilder:
         dt = torch.cat([(0.5 * dw).reshape(1), dw.expand(n - 1), (0.5 * dw).reshape(1)])
         rf = torch.zeros(n + 1, 2, dtype=self.dtype, device=self.device)
         ph = self._t(phase).expand(n + 1)
+        start = len(self._is_rf)
         self._append(dt, rf, self._grad3(grad, n + 1), ph, is_rf=False, adc=[True] * n + [False])
+        self._record(start, "readout", n=n, dwell=dwell, grad=grad, phase=phase)
         return self
 
     def block(self, *grads, rf: RFPulse | None = None, adc: ADC | list[ADC] | None = None,
@@ -551,7 +582,9 @@ class SequenceBuilder:
             is_adc[seg] = True
             ph = torch.as_tensor(a.phase, dtype=self.dtype, device=self.device).expand(a.n)
             phase = phase.index_put((torch.as_tensor(seg, device=self.device),), ph)
+        start = len(self._is_rf)
         self._append(self._t(np.diff(t)), rf_seg, g, phase, is_rf=is_rf.tolist(), adc=is_adc.tolist())
+        self._record(start, "block", grads=list(grads), rf=rf, adc=adcs, duration=duration)
         return self
 
     def trapezoid(self, axis: str | None = None, **kwargs):
@@ -577,6 +610,9 @@ class SequenceBuilder:
         return self
 
     def build(self, **meta) -> Sequence:
+        """The segments. ``meta["blocks"]`` records every call's events and segment span (block
+        provenance, which ``pulseq.write_pulseq`` writes from); other ``meta`` entries are kept."""
+        meta = {"blocks": [dict(b) for b in self._blocks], "system": self.system, **meta}
         return Sequence(
             dt=torch.cat(self._dt),
             rf=torch.cat(self._rf),
