@@ -445,7 +445,8 @@ dataset round trip; a 3 T T1w / T2w / T2*w triplet of ten sampled heads in `exam
 
 Ordered by what training data and sequence design will hit first. Each item ships with the
 phantom input that feeds it (M5 schema) and its reference. Each is opt-in, core first, Metal
-second, parity test third, fused raises.
+second, parity test third; the Metal adjoint either differentiates it (gradient check against the
+core) or raises, and the engine matrix says which.
 
 1. **J-coupled fat.** Bright fat in TSE (fat T2 appears longer at short echo spacing; SE vs TSE
    fat ratio up to ~2). Model: per fat peak, a small spin-system (two or three coupled spins per
@@ -514,14 +515,16 @@ GUI (the three.js anatomy viewer in `examples/` is a prototype if wanted later).
 
 ## Done so far (summary; details in the archive)
 
-Reference core with closed-form free runs and chunked backward; fused CPU kernel with adjoint;
-Metal forward with many-coil matrix-product reductions and the field model; sub-voxel spins,
+Reference core with closed-form free runs and chunked backward; a fused CPU kernel with adjoint
+(retired 2026-10-09 after M2); Metal forward with many-coil matrix-product reductions and the
+field model, and since M2 its adjoint; sub-voxel spins,
 T2′, real spoiling, ramps, slice selection, B1+/B0 maps, 6-peak fat; SE / TSE / bSSFP / EPI
-builders; bound pool (rate and generalized Bloch), free pools in core and fused; concomitant
+builders; bound pool (rate and generalized Bloch), free pools in core and Metal; concomitant
 fields, gradient nonlinearity, GIRF / eddy currents, drift and respiration; diffusion (free,
 restricted), motion and flow, scanner-frame maps; receive and transmit chains; Biot–Savart and
-full-wave coils; BrainWeb / QSM / AHEAD anatomy with texture and R2* separation; Pulseq import;
+full-wave coils; BrainWeb / QSM / AHEAD anatomy with texture and R2* separation; Pulseq import and
+lossless export (M4);
 design penalties, losses, CRB and worked optima; MRzero and BMCTool crosschecks; nine real-data
 benchmarks (NIST IR-SE 1.5 %, NIST TSE 2.2 %, radial IR-bSSFP, BSA NMR, spiral TSE, radial
-timing, measured GIRF, Pulseq-CEST, iohexol CEST prediction); Monte Carlo estimators with
-jackknife error bars. 735 tests.
+timing, measured GIRF, Pulseq-CEST, iohexol CEST prediction) and a digital twin across benchmarks 1
+and 2 (M3); Monte Carlo estimators with jackknife error bars. 685 tests.
