@@ -353,10 +353,24 @@ def _scaled(x: float, unit: float) -> float:
     return float(v)
 
 
+def flip_angle(signal: np.ndarray, dt) -> float:
+    """Flip angle [deg] of an RF pulse (complex samples [Hz] over steps ``dt`` [s]) about its own
+    frequency: |sum s exp(-i 2 pi f t) dt| * 360, with f the median phase step between samples (a
+    slice-selective pulse off the slice centre carries f = G z0, which makes |sum s dt| cancel; the
+    median ignores the pi steps at the zero crossings of a sinc)."""
+    s = np.asarray(signal, dtype=complex)
+    dt = np.broadcast_to(np.asarray(dt, dtype=float), s.shape)
+    t = np.cumsum(dt) - 0.5 * dt
+    on = np.abs(s) > 1e-6 * np.abs(s).max() if s.size else np.zeros(0, bool)
+    steps = np.angle(s[1:] * np.conj(s[:-1]))[on[1:] & on[:-1]]
+    f = float(np.median(steps / (2 * math.pi * 0.5 * (dt[1:] + dt[:-1])[on[1:] & on[:-1]]))) if steps.size else 0.0
+    return float(abs(np.sum(s * np.exp(-2j * math.pi * f * t) * dt)) * 360.0)
+
+
 def _rf_use(signal: np.ndarray, raster: float) -> str:
-    """'e' or 'r', as pypulseq guesses for files without the field: excitation below 90.01 deg."""
-    flip = abs(np.sum(signal) * raster) * 360.0
-    return "e" if flip < 90.01 else "r"
+    """'e' or 'r' (pypulseq's rule for files without the field: excitation below 90.01 deg), with the
+    flip angle taken about the pulse's own frequency (``flip_angle``)."""
+    return "e" if flip_angle(signal, raster) < 90.01 else "r"
 
 
 class _Writer:

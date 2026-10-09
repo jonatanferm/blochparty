@@ -11,7 +11,7 @@ import pytest
 import torch
 
 import blochparty as bp
-from blochparty.pulseq import read_pulseq, write_pulseq
+from blochparty.pulseq import flip_angle, read_pulseq, write_pulseq
 
 pp = pytest.importorskip("pypulseq")
 f64 = torch.float64
@@ -21,6 +21,8 @@ CASES = {
                                                                   n_dummy=2),
     "tse: slice selection, crushers, gradient spoiling": lambda: bp.tse_2d(16, etl=4, tr=0.4, slice_thickness=5e-3,
                                                                             spoiling="gradient"),
+    "tse, slice 2 cm off centre (phase-ramped pulses)": lambda: bp.tse_2d(16, etl=4, tr=0.4, slice_thickness=5e-3,
+                                                                          slice_offset=0.02, spoiling="gradient"),
     "bssfp: slice selection, alpha/2 preparation": lambda: bp.bssfp_2d(16, slice_thickness=5e-3, n_dummy=4),
     "epi: blipped, ramps": lambda: bp.epi_2d(16, dwell=5e-6, slice_thickness=5e-3),
 }
@@ -64,7 +66,8 @@ def test_pypulseq_timing_check_passes(written):
 
 def kspace_at_adc(seq) -> np.ndarray:
     """(n_adc, 3) moments since the last excitation, negated at every refocusing pulse centre
-    (pulses: runs of RF segments, centres at their midpoints, excitation below 90.01 deg)."""
+    (pulses: runs of RF segments, centres at their midpoints, excitation below 90.01 deg about the
+    pulse's own frequency)."""
     tb = np.r_[0.0, np.cumsum(seq.dt.numpy())]
     moment = np.concatenate([np.zeros((1, 3)), np.cumsum(seq.grad.numpy() * seq.dt.numpy()[:, None], 0)])
     at = lambda t: np.stack([np.interp(t, tb, moment[:, j]) for j in range(3)], -1)
@@ -76,7 +79,7 @@ def kspace_at_adc(seq) -> np.ndarray:
             j = i
             while j < len(rf) and rf[j]:
                 j += 1
-            flip = abs((b1[i:j] * seq.dt.numpy()[i:j]).sum()) * 360
+            flip = flip_angle(b1[i:j], seq.dt.numpy()[i:j])
             events.append((0.5 * (tb[i] + tb[j]), "e" if flip < 90.01 else "r"))
             i = j
         else:
@@ -191,3 +194,12 @@ def test_scanner_file_is_written_back_losslessly(tmp_path):
     write_pulseq(first, tmp_path / "ours.seq")
     # measured: durations within 1.7e-18 s, RF and gradients within 1e-15 relative, receiver phases exact
     assert_same_segments(read_pulseq(tmp_path / "ours.seq"), first, exact=False)
+
+
+def test_flip_angle_about_the_pulse_frequency():
+    rf, _, _ = bp.sequence.sinc_pulse(180.0, 2e-3, slice_thickness=5e-3, slice_offset=0.02)
+    sig = (rf.signal[:, 0] + 1j * rf.signal[:, 1]).numpy()
+    assert abs(abs(sig.sum()) * rf.raster * 360 - 180) > 170  # the phase ramp cancels the plain sum
+    assert abs(flip_angle(sig, rf.raster) - 180) < 1e-9
+    rf0, _, _ = bp.sequence.sinc_pulse(90.0, 2e-3, slice_thickness=5e-3)
+    assert abs(flip_angle((rf0.signal[:, 0] + 1j * rf0.signal[:, 1]).numpy(), rf0.raster) - 90) < 1e-9
