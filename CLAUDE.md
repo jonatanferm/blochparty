@@ -40,6 +40,15 @@ uv run python benchmarks/bench.py [--backend metal] [--grad] [--record]
 uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py
 ```
 
+## Machines
+
+Long runs (the full suite, GPU validation and benchmarks) go to the Mac mini (`ssh mini`, Apple
+M4, 16 GB): a mirror at `~/projects/blochparty` with uv at `~/.local/bin/uv`. Sync with
+`rsync -az --exclude .venv --exclude __pycache__ --exclude outputs --exclude .claude --exclude
+validation/real/data ./ mini:projects/blochparty/` (copy only the data a job needs), run with
+`ssh mini 'cd ~/projects/blochparty && ~/.local/bin/uv run pytest -q'`, long jobs under `nohup`
+with a log. Commit from this checkout only. Small runs here are fine.
+
 ## Conventions
 
 Pulseq units (RF Hz, gradients Hz/m, s, m); dM/dt = γ M×B, a pulse along +x tips +z to +y;

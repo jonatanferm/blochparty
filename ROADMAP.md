@@ -352,7 +352,22 @@ shape; absolute: establish the baseline first) and the twin's parameters are phy
 (B1+ within ±20 % at 3 T, timing shift below 100 µs). If the short-T2 spheres 11 to 14 stay at
 6 to 9 % with B1+ and timing fitted, that is a physics result: record which physics is missing.
 
-## M4. Pulseq out (1 to 2 days)
+## M4. Pulseq out (1 to 2 days) — done 2026-10-09
+
+Status. `pulseq.write_pulseq` writes a builder sequence losslessly: GRE (ramps, slice selection,
+RF spoiling), TSE, bSSFP and EPI simulate identically after write → `read_pulseq` (signal 6e-16 to
+5e-14), pypulseq's `check_timing` passes, and k-space at every ADC sample equals its
+`calculate_kspace` of the written file (4e-13 to 5e-11). Imported files are written back from their
+events: bit-identical for a file pypulseq wrote, last bits (1.7e-18 s) for a scanner file. Two
+departures from the plan, both forced by the format: the writer is ours (Pulseq 1.5 at full
+precision; pypulseq's writer keeps six significant digits, ~5e-7, and `read_pulseq` now reads
+without pypulseq's rounding merge, which leaves every scanner file in `validation/real` bit-identical),
+and flat sequences without provenance raise instead of becoming arbitrary-gradient blocks
+(instantaneous gradient steps and RF without dead time have no Pulseq form; approximating them
+would not be lossless). Before writing, the provenance records are replayed and must rebuild the
+sequence exactly, so a changed sequence (e.g. after `apply_girf`) raises. Journal: 2026-10-09.
+
+The original plan:
 
 Goal: anything built or optimized here runs on a scanner, and the round trip is lossless. This is
 the precondition for sequence development and for a linter that talks about Pulseq blocks.

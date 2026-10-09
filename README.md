@@ -145,8 +145,9 @@ image = bp.rss(cartesian_recon(bp.simulate(phantom, seq, coils).signal, seq))
 
 ## Pulseq
 
-`read_pulseq` turns a `.seq` file (or a `pypulseq.Sequence`) into a `Sequence` (needs the
-`pulseq` extra: `pip install 'blochparty[pulseq]'`; `uv sync` installs it for development):
+`read_pulseq` turns a `.seq` file (or a `pypulseq.Sequence`) into a `Sequence`, and
+`write_pulseq` writes one back (both need the `pulseq` extra: `pip install 'blochparty[pulseq]'`;
+`uv sync` installs it for development):
 
 ```python
 from blochparty.pulseq import read_pulseq
@@ -154,6 +155,9 @@ from blochparty.pulseq import read_pulseq
 seq = read_pulseq("gre.seq", kspace_shape=(64, 64))   # extra keywords go to seq.meta
 kspace = bp.simulate(phantom, seq, coils).signal
 seq.meta["adc_per_readout"], seq.meta["kspace_trajectory"]  # samples per ADC; k from pypulseq
+
+from blochparty.pulseq import write_pulseq
+write_pulseq(bp.gre_2d(64, ramps=True, spoiling="rf", slice_thickness=5e-3), "gre.seq")  # for the scanner
 ```
 
 - Blocks are split at every event boundary, so each ADC sample ends a segment; gradients use
@@ -165,6 +169,18 @@ seq.meta["adc_per_readout"], seq.meta["kspace_trajectory"]  # samples per ADC; k
   that a frequency offset f excites the slice at f/G as Pulseq defines it. MRzero reads the
   phases as written: `read_pulseq(..., convention="mrzero")` does the same (the mirror image).
 - Pulseq cannot express ideal spoiling; set `seq.spoil[i] = True` after import if wanted.
+- Files are read with every number as written (pypulseq's default merges events after rounding
+  amplitudes to six digits and timings to 1 µs; the scanner files in `validation/real` read
+  identically either way).
+- `write_pulseq` is lossless: written and read back, GRE (ramps, slice selection, RF spoiling),
+  TSE, bSSFP and EPI simulate identically to 1e-9, pypulseq's `check_timing` passes and k-space
+  equals its `calculate_kspace` (`tests/test_pulseq_write.py`). It writes Pulseq 1.5 itself at
+  full precision (pypulseq's writer keeps six digits), one Pulseq block per `SequenceBuilder.block`
+  call (the builder records them in `seq.meta["blocks"]`; an EPI train's block is cut between its
+  ADCs). It raises for what a scanner cannot play: ideal spoilers (`spoil="drop"` writes without
+  them), the ideal `rf` / `readout` calls and instantaneous gradients (use `ramps=True` builders),
+  timings off the rasters, and sequences changed after building (e.g. by `apply_girf`: write the
+  nominal sequence). Imported files are written back from their own events.
 - Cross-validation against MRzero: `uv sync --extra mrzero`, then
   `uv run python validation/compare_mrzero.py` (writes [validation/RESULTS.md](validation/RESULTS.md))
   or `uv run pytest -m crosscheck`.
@@ -319,7 +335,7 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
-| `pulseq.py` | `read_pulseq()`: `.seq` / pypulseq → `Sequence` |
+| `pulseq.py` | `read_pulseq()`: `.seq` / pypulseq → `Sequence`; `write_pulseq()`: `Sequence` → `.seq`, lossless |
 | `fields.py` | `Scanner` field model: concomitant fields, gradient nonlinearity (solid harmonics, coefficient files) |
 | `girf.py` | `apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents (incl. B0 terms) |
 | `drift.py` | B0 drift and respiratory fields as sequence transforms |

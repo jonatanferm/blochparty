@@ -499,6 +499,24 @@ says where it came from so it can be re-checked.
   reconstruction by the fit residual of the curves it produces, not by the spectrum alone. In a
   3D slab, use the central partition for flip-angle-corrected T1 (the edges see less flip).
 
+- **pypulseq rounds on both sides** (pypulseq 1.5.0, found writing M4's exporter, 2026-10-09):
+  its writer formats amplitudes as `{:12g}`, six significant digits (a 1034070 Hz/m gradient
+  becomes 1.03407e+06, ~5e-7), and `Sequence.read` defaults to `remove_duplicates=True`, which
+  rounds the event libraries before merging them (amplitudes to six digits, timings to 1 us).
+  A lossless round trip needs both a full-precision writer and `remove_duplicates=False`. Every
+  scanner file in `validation/real/data` (up to 1.1e8 segments) reads bit-identically either way.
+- **Pulseq's `[GRADIENTS]` and `[TRAP]` share one id space**: the block table's gradient ids do not
+  say which section they mean, so separate counters make a block pick up the wrong event
+  (pypulseq then reports events longer than their block).
+- **pypulseq's shape reader runs forever if the file ends right after the last shape sample**: its
+  line reader returns -1 at end of file, and the sample loop stops only at a blank or comment
+  line. Its own files always follow the shapes with `[SIGNATURE]`; write one (md5 of the content
+  above it, the preceding newline belonging to the signature).
+- **Values in us or ns do not always survive x / 1e-6 * 1e-6**: 60 * 1e-6 is not 6e-05. Writing the
+  decimal that the reader's multiplication maps back to the same double (try x / unit, a few
+  roundings and neighbours) makes a re-exported file bit-identical; segment edges computed from
+  absolute times can still differ in the last bit (1.7e-18 s on a scanner file).
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
@@ -791,6 +809,13 @@ says where it came from so it can be re-checked.
   16 x 1 row read 14.35 % where the current code gives 16.72 % on both engines. When a rerun
   disagrees with a recorded number, rerun the old code on the same inputs before suspecting the
   new engine.
+
+- **`torch.as_tensor(python_float)` is float32** (the default dtype), not float64: it turned a 6.65 ms
+  block duration into 6.6499998793 ms (off the raster) and an RF-spoiling receiver phase into a
+  3e-8 error, both in the Pulseq writer. Convert Python numbers with `float()` or an explicit dtype.
+- **zsh does not split an unquoted `$var` into words** (bash does): `set -- $job` in a loop over
+  "a b c" strings gave one argument, and a chain of background jobs failed at once. Write the
+  commands out, or use `${=var}`.
 
 ## Monte Carlo estimator audit — 2026-10-08
 
