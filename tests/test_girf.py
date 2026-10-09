@@ -138,6 +138,23 @@ def test_convolution_and_transfer_function_agree():
     assert rel(torch.cat([from_tf.grad, from_tf.b0_offset[:, None]], 1), y) < 1e-12
 
 
+def test_chunked_response_is_bit_identical(monkeypatch):
+    # the response is evaluated in blocks of boundaries (memory); the blocks must not change a bit
+    import blochparty.girf as girf
+
+    gen = torch.Generator().manual_seed(2)
+    taps = torch.randn(4, 3, 40, dtype=torch.float64, generator=gen)
+    S = 300
+    seq = Sequence(torch.rand(S, dtype=torch.float64, generator=gen) * 2 * RASTER, torch.zeros(S, 2, dtype=torch.float64),
+                   torch.randn(S, 3, dtype=torch.float64, generator=gen) * 1e5, torch.zeros(S, dtype=torch.float64),
+                   [False] * S, [False] * S, [False] * S)
+    model = GIRF(taps, RASTER, delay=3e-6)
+    whole = apply_girf(seq, model)
+    monkeypatch.setattr(girf, "_GIRF_BLOCK", 7 * 40)  # 7 boundaries per block, 43 blocks
+    blocks = apply_girf(seq, model)
+    assert torch.equal(blocks.grad, whole.grad) and torch.equal(blocks.b0_offset, whole.b0_offset)
+
+
 @pytest.mark.parametrize("sim", SIMS)
 def test_b0_eddy_gives_analytic_uniform_phase(sim):
     c, tau, amp = 2e-4, 0.8e-3, 8e5  # Hz per Hz/m: ~100 Hz right after the ramp

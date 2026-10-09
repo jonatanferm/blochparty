@@ -204,17 +204,26 @@ def _girf_response(seq: Sequence, m: GIRF) -> Tensor:
     n = taps.shape[-1]
     delay = torch.as_tensor(m.delay, dtype=g.dtype).expand(4, 3)
     lags = delay[..., None] + m.raster * torch.arange(n, dtype=g.dtype)  # (4, 3, n)
+    # boundaries in chunks: a (S + 1, n) block at once is 2.8 GB for a 4e5-segment sequence and 800 taps;
+    # every row's arithmetic is the same either way, so the result does not depend on the chunk
+    rows = max(1, _GIRF_BLOCK // n)
     out = []
     for o in range(4):
         y = 0
         for j in range(3):
             if not bool((taps[o, j] != 0).any()) and not taps.requires_grad:
                 continue
-            t = tb[:, None] - lags[o, j][None, :]  # (S + 1, n)
-            gm = _moment_at(t, tb, g, moment)[..., j]  # (S + 1, n): G_j at the shifted boundaries
-            y = y + (gm * taps[o, j]).sum(-1)
+            parts = []
+            for a in range(0, len(tb), rows):
+                t = tb[a:a + rows, None] - lags[o, j][None, :]  # (rows, n)
+                gm = _moment_at(t, tb, g, moment)[..., j]  # G_j at the shifted boundaries
+                parts.append((gm * taps[o, j]).sum(-1))
+            y = y + torch.cat(parts)
         out.append(_segment_average(y, dt) if torch.is_tensor(y) else g.new_zeros(len(seq)))
     return torch.stack(out, -1)
+
+
+_GIRF_BLOCK = 1 << 22  # shifted boundaries evaluated at once in _girf_response (memory, not results)
 
 
 __all__ = ["EddyCurrents", "GIRF", "OUTPUTS", "apply_girf"]
