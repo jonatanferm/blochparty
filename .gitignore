@@ -6,3 +6,5 @@ outputs/
 .claude/worktrees/
 validation/real/data/
 .claude/settings.local.json
+# private: signed download links (fastMRI)
+*.eml
