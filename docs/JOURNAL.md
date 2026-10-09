@@ -1066,3 +1066,39 @@ flagged the NIST estimators. The parts that change reported numbers are now impl
   suite), not the engines and not the swap I suspected first.
 - 660 tests (5 min 38 s by pytest's clock; 814 before, the difference the fused kernel's own tests);
   core snapshot bit-identical (the fused entries dropped from it).
+- Commits: 6db590a (merge), f8f6cde (DESPOT1 through Metal), 8af3bee (adjoint speed), 2442508
+  (fused kernel retired), 5c38a1d (snapshot), f659d4a (docs).
+
+## 2026-10-09 — M4: Pulseq out
+
+- **Provenance.** `SequenceBuilder` records each call's events and segment span in
+  `meta["blocks"]` (plus its `System`); `subdivide_rf` remaps the spans; `read_pulseq` records the
+  source block per segment and keeps the source sequence for re-export. `apply_girf` and the drift
+  transforms carry `meta` through `replace`.
+- **Writer.** `write_pulseq` replays the records, which must rebuild the sequence exactly (a
+  sequence changed after building raises), and writes Pulseq 1.5 text itself at full precision:
+  pypulseq's writer formats amplitudes as `{:12g}` (six digits, ~5e-7), which alone rules out a
+  1e-9 round trip. One Pulseq block per builder block; a block with several ADCs (the EPI train) is
+  cut between them on the gradient raster with gradients continuing across the cuts. Raises for
+  ideal spoilers (`spoil="drop"`), the ideal `rf` / `readout` calls, instantaneous gradients and
+  off-raster timings: flat sequences without provenance are not written, a departure from the plan,
+  because instantaneous steps have no Pulseq form and an approximation would not be lossless.
+- **Reader.** `read_pulseq` now reads with `remove_duplicates=False`: pypulseq's default rounds the
+  libraries (amplitudes six digits, timings 1 us) before merging. All 14 scanner files in
+  `validation/real/data` (to 1.1e8 segments) read bit-identically either way (checked on the mini).
+- **Numbers** (tests/test_pulseq_write.py): GRE (ramps, slice selection, RF spoiling), TSE, bSSFP,
+  EPI: same segment counts, signals equal to 6e-16..5e-14 after write -> read_pulseq, pypulseq's
+  `check_timing` passes, k-space at every ADC equals its `calculate_kspace` to 4e-13..5e-11; a
+  pypulseq-made file re-exports bit-identically, a scanner file to the last bits (1.7e-18 s in
+  segment durations: edges are absolute times from rounded delays).
+- **Dead ends.** The file read back with six-digit values: pypulseq's reader, not the writer.
+  Block 3 of the EPI file had a 2.16 ms event in a 0.21 ms block: `[GRADIENTS]` and `[TRAP]`
+  share one id space. pypulseq hung on the first file: its shape loop never ends at end of file.
+  Two float32 slips via `torch.as_tensor(float)` (a block duration off the raster, a receiver
+  phase 3e-8 off). The builder's bit-identity test hashed `meta`, so provenance changed its digest
+  while the segments did not: the provenance is left out of the hash.
+- **Machines.** From today long runs go to a Mac mini (M4, 16 GB, `ssh mini`): the full suite ran
+  there in 3 min 42 s (681 tests). The laptop's slow wall clocks overnight were closed-lid sleep
+  and a GPU shared with a video-decoding app, not the code.
+- Commits: 59fca2a (GIRF response in blocks: the Prisma GIRF on a 4e5-segment sequence needed
+  2.8 GB per pair before), 788401e (writer, provenance, tests), f6ca6f1 (docs).
