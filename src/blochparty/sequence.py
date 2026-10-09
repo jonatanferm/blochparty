@@ -118,6 +118,41 @@ def _remap_spans(meta: dict, reps: np.ndarray) -> dict:
     return out
 
 
+def kspace_trajectory(seq: Sequence) -> Tensor:
+    """(n_adc, 3) k-space [1/m] at every ADC sample (segment ends): the gradient moment since the
+    last excitation, negated at each refocusing pulse. Pulses are runs of RF segments centred at
+    their midpoints; excitations flip less than 90.01 deg about their own frequency
+    (``pulseq.flip_angle``), as in pypulseq's ``calculate_kspace``, which it equals on written
+    files (tests/test_pulseq_write.py). NaN before the first excitation."""
+    from .pulseq import flip_angle
+
+    dt = seq.dt.detach().cpu().double().numpy()
+    tb = np.concatenate([[0.0], np.cumsum(dt)])
+    moment = np.concatenate([np.zeros((1, 3)), np.cumsum(seq.grad.detach().cpu().double().numpy() * dt[:, None], 0)])
+    at = lambda t: np.stack([np.interp(t, tb, moment[:, j]) for j in range(3)], -1)
+    edges = np.flatnonzero(np.diff(np.concatenate([[0], np.asarray(seq.is_rf, np.int8), [0]])))
+    starts, ends = edges[::2], edges[1::2]
+    rf = seq.rf.detach().cpu().double().numpy()
+    b1 = rf[:, 0] + 1j * rf[:, 1]
+    centres = 0.5 * (tb[starts] + tb[ends])
+    k_after = np.full((len(starts), 3), np.nan)  # k at each pulse centre, just after the pulse
+    k, prev = None, None
+    for n, (i, j) in enumerate(zip(starts, ends)):
+        if flip_angle(b1[i:j], dt[i:j]) < 90.01:
+            k = np.zeros(3)
+        elif k is not None:
+            k = -(k + at(centres[n]) - at(prev))
+        prev = centres[n]
+        if k is not None:
+            k_after[n] = k
+    t = tb[1:][np.asarray(seq.adc, bool)]
+    last = np.searchsorted(centres, t, side="right") - 1
+    out = np.full((len(t), 3), np.nan)
+    ok = last >= 0
+    out[ok] = k_after[last[ok]] + at(t[ok]) - at(centres[last[ok]])
+    return torch.from_numpy(out)
+
+
 # --- hardware limits and events --------------------------------------------------------
 
 

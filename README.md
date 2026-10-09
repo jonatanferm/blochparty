@@ -108,6 +108,29 @@ phantom = bp.phantom_from_maps(
   the main peak at 3 T). Fat spins share their water spin's position, T2′ offset and B1⁺.
   `bp.shepp_logan(n, chemical_shift=True)` turns its fat ellipse into fat.
 
+### Sampled heads and raw-data files
+
+`sample_head(seed, root=...)` returns a new head for every seed: a BrainWeb subject, smoothly
+deformed, with its own tissue draws from the cited table (relaxation, MT, diffusion) and its own
+texture; `head.meta` records every draw. `io.write_dataset` stores the result as ISMRMRD HDF5,
+readable by Gadgetron or ismrmrd-python, with a `/provenance` group (sequence arrays and JSON,
+the `.seq` file, the head's draws, seeds, engine, git commit, versions); `io.read_dataset` reads
+it back. Both need the `io` extra (`uv sync --extra io`).
+
+```python
+from blochparty.io import write_dataset
+
+from blochparty.metal import simulate_metal
+
+head = bp.sample_head(7, root="validation/anatomy/data", voxel=(1e-3,) * 3)
+k = round(-head.anatomy.origin[2] / head.anatomy.voxel[0])  # the z = 0 plane, where the slice is
+ph = head.to_phantom(fov_region=(slice(k - 4, k + 5), slice(None), slice(None)))  # B0 from the whole head
+seq = bp.gre_2d(64, ramps=True, spoiling="rf", slice_thickness=5e-3)
+coils = bp.birdcage_sensitivities(ph.pos, 8)
+write_dataset("head7.h5", simulate_metal(ph, seq, coils), seq, phantom=head, seed=7, engine="metal",
+              coils={"model": "birdcage", "n": 8})
+```
+
 ## Realistic sequences
 
 The default builders are idealised (hard pulse, instantaneous gradients, ideal spoiling) and
@@ -327,7 +350,8 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `motion.py`, `restriction.py`, `rng.py` | flow, deformation and rigid motion; restricted diffusion; the counter-based random numbers every engine's walks share |
 | `maps.py` | `FieldMaps`: scanner-frame B0, B1⁺ and coil maps sampled where each spin is |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
-| `anatomy.py`, `susceptibility.py` | BrainWeb / QSM / AHEAD anatomies with tissue properties and texture; susceptibility → B0, shimming |
+| `anatomy.py`, `susceptibility.py` | BrainWeb / QSM / AHEAD anatomies with cited tissue properties and texture, `DigitalPhantom`, the head sampler `sample_head`; susceptibility → B0, shimming |
+| `io.py` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
 | `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |
 | `receive.py`, `transmit.py` | the receive chain (oversampling, filtering); the RF amplifier |

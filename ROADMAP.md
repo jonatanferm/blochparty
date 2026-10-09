@@ -434,11 +434,14 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       chemical shift, skull and dura, sinuses, eyes. BrainWeb's fuzzy classes cover fat, skull,
       skin, dura, marrow, vessels and CSF; make sure each gets a cited property set and that fat
       classes get `fat_fraction` so the 6-peak model acts on them.
-- [ ] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
+- [x] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
       noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
       trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group
       with the sequence as JSON plus the `.seq` from M4, the sampler seed and every property
       draw, the engine and git hash). Reader for round trip.
+      *Done 2026-10-09:* via ismrmrd-python (extra `io`); one acquisition per ADC run with its
+      k-space (`sequence.kspace_trajectory`, equal to pypulseq's), encode indices and
+      ACQ_IS_REVERSE; round trip exact (complex64 signal, sequence arrays and meta, `.seq` text).
 - [ ] **First realism number (P2 start).** A classifier two-sample test, real vs simulated,
       on fastMRI brain raw k-space through the same reconstruction: a small CNN on magnitude
       images; report AUC. This is the anatomy pillar's benchmark the way `validation/real/` is

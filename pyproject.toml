@@ -10,6 +10,7 @@ dependencies = ["torch>=2.4", "numpy"]
 anatomy = ["nibabel>=5"]  # optional NIfTI reader for locally supplied QSM Challenge maps
 pulseq = ["pypulseq>=1.5"]  # read_pulseq
 mrzero = ["MRzeroCore>=1.1"]  # validation/compare_mrzero.py and the crosscheck tests
+io = ["ismrmrd>=1.14", "h5py>=3"]  # io.write_dataset / read_dataset (ISMRMRD HDF5)
 
 [dependency-groups]
 # finufft: radial reconstruction in validation/real (benchmark 3)

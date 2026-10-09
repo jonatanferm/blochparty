@@ -557,6 +557,10 @@ says where it came from so it can be re-checked.
   tables dropped columns and invented "not detailed" for values that were there (Li et al. 2014
   ADC, Sinclair et al. 2010 per-subject table). `curl` the PMC HTML and print the `<table>`s and
   the MathML annotations instead.
+- **ismrmrd-python's header arrays ignore whole assignment** (ismrmrd 1.15, writing M5's dataset
+  writer): `acq.read_dir = (1., 0., 0.)` leaves the ctypes array unchanged without an error; set
+  `acq.read_dir[k]` element by element. Scalars (`acq.sample_time_us`, `acq.idx.kspace_encode_step_1`)
+  assign normally. The header model (`ismrmrd.xsd`) requires `experimentalConditions`.
 
 ## Other simulators
 

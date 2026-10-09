@@ -20,6 +20,10 @@ dependencies = [
 anatomy = [
     { name = "nibabel" },
 ]
+io = [
+    { name = "h5py" },
+    { name = "ismrmrd" },
+]
 mrzero = [
     { name = "mrzerocore" },
 ]
@@ -39,13 +43,15 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "h5py", marker = "extra == 'io'", specifier = ">=3" },
+    { name = "ismrmrd", marker = "extra == 'io'", specifier = ">=1.14" },
     { name = "mrzerocore", marker = "extra == 'mrzero'", specifier = ">=1.1" },
     { name = "nibabel", marker = "extra == 'anatomy'", specifier = ">=5" },
     { name = "numpy" },
     { name = "pypulseq", marker = "extra == 'pulseq'", specifier = ">=1.5" },
     { name = "torch", specifier = ">=2.4" },
 ]
-provides-extras = ["anatomy", "pulseq", "mrzero"]
+provides-extras = ["anatomy", "pulseq", "mrzero", "io"]
 
 [package.metadata.requires-dev]
 dev = [

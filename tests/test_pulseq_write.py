@@ -1,8 +1,8 @@
 """Pulseq export (``pulseq.write_pulseq``, ROADMAP M4): written, read back by pypulseq through
 ``read_pulseq`` and simulated, a sequence gives the same signal to 1e-9; pypulseq's own timing
-check passes on the files; and k-space at every ADC sample equals pypulseq's ``calculate_kspace``
-of the written file. Block provenance (``meta["blocks"]``) follows the segments through
-``subdivide_rf``; what cannot be written raises."""
+check passes on the files; and k-space at every ADC sample (``sequence.kspace_trajectory``) equals
+pypulseq's ``calculate_kspace`` of the written file. Block provenance (``meta["blocks"]``) follows
+the segments through ``subdivide_rf``; what cannot be written raises."""
 
 from dataclasses import replace
 
@@ -12,6 +12,7 @@ import torch
 
 import blochparty as bp
 from blochparty.pulseq import flip_angle, read_pulseq, write_pulseq
+from blochparty.sequence import kspace_trajectory
 
 pp = pytest.importorskip("pypulseq")
 f64 = torch.float64
@@ -64,48 +65,12 @@ def test_pypulseq_timing_check_passes(written):
     assert ok, report[:5]
 
 
-def kspace_at_adc(seq) -> np.ndarray:
-    """(n_adc, 3) moments since the last excitation, negated at every refocusing pulse centre
-    (pulses: runs of RF segments, centres at their midpoints, excitation below 90.01 deg about the
-    pulse's own frequency)."""
-    tb = np.r_[0.0, np.cumsum(seq.dt.numpy())]
-    moment = np.concatenate([np.zeros((1, 3)), np.cumsum(seq.grad.numpy() * seq.dt.numpy()[:, None], 0)])
-    at = lambda t: np.stack([np.interp(t, tb, moment[:, j]) for j in range(3)], -1)
-    rf = np.asarray(seq.is_rf)
-    b1 = (seq.rf[:, 0] + 1j * seq.rf[:, 1]).numpy()
-    events, i = [], 0
-    while i < len(rf):
-        if rf[i]:
-            j = i
-            while j < len(rf) and rf[j]:
-                j += 1
-            flip = flip_angle(b1[i:j], seq.dt.numpy()[i:j])
-            events.append((0.5 * (tb[i] + tb[j]), "e" if flip < 90.01 else "r"))
-            i = j
-        else:
-            i += 1
-    t_adc = tb[1:][np.asarray(seq.adc)]
-    out = []
-    for t in t_adc:
-        k, prev = None, None
-        for c, kind in events:
-            if c > t:
-                break
-            if kind == "e":
-                k, prev = np.zeros(3), c
-            elif k is not None:
-                k = -(k + at(c) - at(prev))
-                prev = c
-        out.append(np.zeros(3) * np.nan if k is None else k + at(t) - at(prev))
-    return np.array(out)
-
-
 def test_kspace_equals_pypulseq(written):
     seq, path = written
     s = pp.Sequence()
     s.read(str(path), remove_duplicates=False)
     k_pp = np.asarray(s.calculate_kspace()[0]).T  # (n_adc, 3) [1/m]
-    ours = kspace_at_adc(seq)
+    ours = kspace_trajectory(seq).numpy()
     scale = np.abs(ours).max()
     assert np.abs(k_pp - ours).max() < 1e-9 * scale  # measured 4e-13 to 5e-11
 

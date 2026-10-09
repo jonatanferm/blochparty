@@ -32,7 +32,7 @@ Goal: the most physically realistic simulator, judged against real scanners
 ## Commands
 
 ```bash
-uv sync --extra pulseq --extra mrzero
+uv sync --extra pulseq --extra mrzero --extra io
 uv run pytest                      # full suite (GPU tests skip without MPS)
 uv run pytest -m "not slow"        # quick subset (< 1 min) while iterating
 uv run pytest -m crosscheck        # opt-in MRzero agreement
