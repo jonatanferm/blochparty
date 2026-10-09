@@ -425,6 +425,30 @@ def roi_means(images: np.ndarray, rois) -> np.ndarray:
     return np.array([[im[r].mean() for r in rois] for im in images])
 
 
+def absolute_error(sim: np.ndarray, real: np.ndarray, spheres=slice(0, 10)) -> np.ndarray:
+    """Per-sphere relative RMS error after ONE least-squares scale for all images and the spheres
+    ``spheres`` (receiver gain and PD units are global; what remains is relaxation weighting, B1+,
+    receive shading and PD differences between spheres). Returns the (n_rois,) errors, every sphere
+    scored with that one scale."""
+    s, r = sim[:, spheres], real[:, spheres]
+    a = (s * r).sum() / (s * s).sum()
+    return np.sqrt(((a * sim - real) ** 2).sum(0) / (real * real).sum(0))
+
+
+def receive_profile(image: np.ndarray, water: np.ndarray, degree: int = 2) -> np.ndarray:
+    """Smooth receive-magnitude shading (N, N), mean 1 over ``water``: a 2D polynomial of
+    ``degree`` fitted to the magnitude ``image`` over the water-fill pixels (uniform water, one
+    relaxation weighting). Estimated from the data like the authors' coil combination; it carries
+    the water's transmit (B1+) shading too, which these data cannot separate from receive."""
+    rr, cc = np.indices(image.shape)
+    u, v = (rr - CENTRE) / N, (cc - CENTRE) / N
+    terms = [u**i * v**j for i in range(degree + 1) for j in range(degree + 1 - i)]
+    A = np.stack([t[water] for t in terms], 1)
+    coef, *_ = np.linalg.lstsq(A, image[water], rcond=None)
+    prof = sum(c * t for c, t in zip(coef, terms))
+    return prof / prof[water].mean()
+
+
 def shape_error(sim: np.ndarray, real: np.ndarray, idx=None) -> np.ndarray:
     """Per-sphere relative RMS error after one least-squares scale per sphere, over images ``idx``."""
     idx = slice(None) if idx is None else idx
