@@ -115,7 +115,8 @@ deformed, with its own tissue draws from the cited table (relaxation, MT, diffus
 texture; `head.meta` records every draw. `io.write_dataset` stores the result as ISMRMRD HDF5,
 readable by Gadgetron or ismrmrd-python, with a `/provenance` group (sequence arrays and JSON,
 the `.seq` file, the head's draws, seeds, engine, git commit, versions); `io.read_dataset` reads
-it back. Both need the `io` extra (`uv sync --extra io`).
+it back. Both need the `io` extra (`uv sync --extra io`). `examples/sampled_heads.py` images ten heads
+in three contrasts ([figure](validation/anatomy/sampled_heads.png)).
 
 ```python
 from blochparty.io import write_dataset

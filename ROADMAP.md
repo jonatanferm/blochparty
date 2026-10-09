@@ -434,6 +434,12 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       chemical shift, skull and dura, sinuses, eyes. BrainWeb's fuzzy classes cover fat, skull,
       skin, dura, marrow, vessels and CSF; make sure each gets a cited property set and that fat
       classes get `fat_fraction` so the 6-peak model acts on them.
+      *Partly done 2026-10-09:* every signalling class has cited (or flagged-proxy) MT and
+      diffusion, and fat and marrow carry fat fraction 1 (6 peaks). Open: relaxation of skin,
+      connective tissue and dura is still muscle's and marrow's still BrainWeb's legacy fat prior,
+      adipose tissue is pure lipid (real adipose tissue holds some water), and there are no eyes,
+      vessels with flow or correlated coil noise. The tissue changes alter default `to_phantom`
+      output, so they wait for a decision.
 - [x] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
       noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
       trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group

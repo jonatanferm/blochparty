@@ -557,6 +557,11 @@ says where it came from so it can be re-checked.
   tables dropped columns and invented "not detailed" for values that were there (Li et al. 2014
   ADC, Sinclair et al. 2010 per-subject table). `curl` the PMC HTML and print the `<table>`s and
   the MathML annotations instead.
+- **A round TE puts a GRE half a dwell off the gradient raster** (M5 example, 2026-10-09):
+  `gre_cartesian` measures TE to the centre of ADC sample n/2, (n/2 + 1/2) dwell after the ADC
+  starts, so with a 10 us dwell TE 2.5 ms or 20 ms leaves a fill block 5 us off the 10 us raster
+  and `write_pulseq` refuses it; TE 2.505 / 20.005 ms writes and passes `check_timing`. A
+  scanner rounds TE itself; the builder does not (changing that would move existing sequences).
 - **ismrmrd-python's header arrays ignore whole assignment** (ismrmrd 1.15, writing M5's dataset
   writer): `acq.read_dir = (1., 0., 0.)` leaves the ctypes array unchanged without an error; set
   `acq.read_dir[k]` element by element. Scalars (`acq.sample_time_us`, `acq.idx.kspace_encode_step_1`)

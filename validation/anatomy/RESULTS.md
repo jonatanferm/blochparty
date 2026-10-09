@@ -247,3 +247,18 @@ cerebellar and deep grey matter.
 | 52 | 615 | 965 | 396 | 114 | 106 | 878 | 243 | 33 | 24 | 117 | 229 | 1.000000 | 0.0, -21.1, 9.5 |
 | 53 | 566 | 1027 | 304 | 121 | 158 | 901 | 391 | 68 | 42 | 187 | 182 | 1.000000 | -0.2, -22.1, 9.0 |
 | 54 | 570 | 969 | 441 | 205 | 183 | 944 | 325 | 60 | 54 | 55 | 211 | 1.000000 | 0.1, -21.3, 9.5 |
+
+## M5: ten sampled heads (`examples/sampled_heads.py`, 2026-10-09)
+
+![ten sampled heads](sampled_heads.png)
+
+Seeds 0-9 of `sample_head` at 1 mm (subjects 38, 4, 44, 4, 44, 54, 41, 48, 48, 49; Jacobians
+0.79-1.22), a ±4 mm slab of spins (2 x 2 x 2 per tissue and voxel, 8.8-10.0 million spins) under a
+5 mm slice, B0 from the whole deformed head, 8 birdcage receive coils and thermal noise (bright-
+tissue image SNR 40), 128 x 128 over 24 cm. Scanner-playable sequences (ramps, windowed-sinc slice
+selection, RF on a 10 us raster): T1w GRE TR 250 ms / TE 2.5 ms / 70°, T2w TSE TR 4 s / ETL 16 /
+TE 90 ms, T2*w GRE TR 600 ms / TE 20 ms / 20°. Metal on the Mac mini: 17 s per head to build, 44-58 s
+per image, 27 min for the 30. Every image is an ISMRMRD file (148 MB in all) whose provenance holds
+a `.seq` that passes pypulseq's timing check; `--replot` redraws the figure from those files
+through `io.read_dataset`. Visible: CSF and scalp fat, frontal sinus dropout at TE 20 ms, the same
+subject differing between seeds (1 and 3; 7 and 8) through deformation and tissue draws.

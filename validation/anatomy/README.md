@@ -182,6 +182,7 @@ with that mean and SD; T2* kept at or below T2) and the M4 texture with its own 
 Jacobian range, every drawn value and the seeds, and is JSON-serialisable. Population SDs come
 from the cited sources and are of mixed kinds (between-subject, specimen, across muscles); draws
 are independent, so correlations such as T1 with MPF are absent.
+`examples/sampled_heads.py` images ten of them in three contrasts (RESULTS.md).
 
 ## AHEAD 7 T templates
 
