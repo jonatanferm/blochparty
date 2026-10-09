@@ -171,6 +171,18 @@ anatomy and interpolated to voxel centres, so crops and slabs share one realisat
 is independent of the spin-position seed. It is texture within a tissue, not the population
 spread recorded in `Distribution.sd`.
 
+## Sampled heads (M5)
+
+`sample_head(seed, root=...)` returns a `DigitalPhantom`: a BrainWeb subject (drawn from the 20
+unless `subject=` is given), pulled back through a smooth random displacement (`random_deformation`:
+cubic B-spline, control points N(0, (3 mm)²) every 40 mm; halved until det(I + ∇d) > 0.2), a
+per-subject tissue table (`draw_tissues`: every property with a reported SD drawn once, log-normal
+with that mean and SD; T2* kept at or below T2) and the M4 texture with its own seed.
+`head.to_phantom(**kw)` makes the spins; `head.meta` records the subject, control points, scale and
+Jacobian range, every drawn value and the seeds, and is JSON-serialisable. Population SDs come
+from the cited sources and are of mixed kinds (between-subject, specimen, across muscles); draws
+are independent, so correlations such as T1 with MPF are absent.
+
 ## AHEAD 7 T templates
 
 `load_ahead(root)` reads the four pinned AHEAD v3 maps fetched by `fetch_ahead.py`: one

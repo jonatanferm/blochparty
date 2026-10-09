@@ -409,20 +409,27 @@ every input the engine can use, and a writer that stores what was simulated with
 provenance. This is P0 and P1 of [docs/PHANTOMS.md](docs/PHANTOMS.md) §9 and the start of the
 anatomy pillar. The learned parts (P4, P5) come after M6.
 
-- [ ] **Schema (P0).** A `DigitalPhantom` container above `Phantom`: label fractions on an
+- [x] **Schema (P0).** A `DigitalPhantom` container above `Phantom`: label fractions on an
       anatomy grid (what `anatomy.Anatomy` holds), per-tissue property distributions
       (`anatomy.TissueProperties`), field-strength-dependent tables, and the inputs today's
       engine needs but the tissue table lacks: bound-pool fraction / exchange rate / T2b per
       tissue (literature qMT values at 3 T for WM, GM, CSF, muscle, fat; cite each as the tissue
       table does), diffusivity per tissue, fat fraction. `to_phantom` fills `Phantom.bound`,
       `diffusion` and `fat_fraction` from them, opt-in. Round trip with today's maps bit-identical.
-- [ ] **Procedural sampler (P1).** `anatomy.sample(seed, *, subject=None, field_T, voxel)`:
+      *Done 2026-10-09:* `anatomy.DigitalPhantom` (anatomy, one field's table, `to_phantom`
+      options, `meta`); cited qMT and diffusivity for every signalling class (table in
+      validation/anatomy/README.md); round trip bit-identical; defaults unchanged (SHA-256).
+- [x] **Procedural sampler (P1).** `anatomy.sample(seed, *, subject=None, field_T, voxel)`:
       choose a BrainWeb subject (the 20-subject set is loaded and pinned), apply a random smooth
       diffeomorphic deformation (B-spline displacement field with a magnitude prior; check the
       Jacobian stays positive), sample tissue properties from the cited distributions, apply the
       within-tissue texture (`variability`, exists), compute χ → B0 and shim (exists), and the
       R2* policy (`t2star="separate"`, exists). Deterministic in the seed; metadata records every
       draw.
+      *Done 2026-10-09* as `anatomy.sample_head`: cubic B-spline control points N(0, 3 mm²)
+      40 mm apart (displacement SD ~1 mm, Jacobian 0.83-1.21 on subject 04), per-subject
+      log-normal draws of every property with a reported SD (`draw_tissues`; 1800
+      standardised draws: mean -0.03, SD 1.00), texture and spin seeds from one SeedSequence.
 - [ ] **Outside the brain.** PHANTOMS §6 says what gives synthetic brains away: scalp fat with
       chemical shift, skull and dura, sinuses, eyes. BrainWeb's fuzzy classes cover fat, skull,
       skin, dura, marrow, vessels and CSF; make sure each gets a cited property set and that fat

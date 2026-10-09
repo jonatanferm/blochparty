@@ -1,8 +1,8 @@
 """Bloch Party: a differentiable MRI simulator in PyTorch."""
 
 from . import design, epg, exchange, reference
-from .anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, Distribution, TissueProperties,
-                      anatomy_field_maps, gaussian_random_field, load_ahead, estimate_macroscopic_r2prime, load_brainweb, load_qsm2,
+from .anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, DigitalPhantom, Distribution, TissueProperties,
+                      anatomy_field_maps, deform, draw_tissues, random_deformation, sample_head, gaussian_random_field, load_ahead, estimate_macroscopic_r2prime, load_brainweb, load_qsm2,
                       to_phantom)
 from .bloch import SimResult, simulate
 from .builders import (bssfp_2d, cartesian_kspace, cartesian_recon, epi_2d, gre_2d, gre_3d, gre_cartesian,
@@ -22,8 +22,8 @@ from .sequence import (Sequence, SequenceBuilder, System, block_pulse, gradient_
 from .susceptibility import shim, susceptibility_to_b0
 
 __all__ = [
-    "Anatomy", "BRAINWEB_TISSUES", "DEFAULT_TISSUES", "Distribution", "TissueProperties",
-    "anatomy_field_maps", "gaussian_random_field", "load_ahead", "estimate_macroscopic_r2prime", "load_brainweb", "load_qsm2", "to_phantom",
+    "Anatomy", "BRAINWEB_TISSUES", "DEFAULT_TISSUES", "DigitalPhantom", "Distribution", "TissueProperties",
+    "anatomy_field_maps", "deform", "draw_tissues", "random_deformation", "sample_head", "gaussian_random_field", "load_ahead", "estimate_macroscopic_r2prime", "load_brainweb", "load_qsm2", "to_phantom",
     "GAMMA_BAR", "BoundPool", "ExchangePool", "FieldMaps", "Motion", "Phantom", "Restriction", "Sequence", "SequenceBuilder", "SimResult", "System", "add_noise", "b0_cylinder",
     "b0_shim", "b0_sphere", "birdcage_b1", "birdcage_sensitivities", "block_pulse", "bssfp_2d",
     "cartesian_kspace", "cartesian_recon", "coil_combine", "design", "epg", "epi_2d", "exchange",

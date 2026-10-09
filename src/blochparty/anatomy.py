@@ -7,11 +7,12 @@ Use a finer anatomy grid to resolve a sharp boundary independently of reconstruc
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields, replace
 import gzip
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import warnings
 
@@ -964,3 +965,162 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         ph.diffusion = cat("diff")
     return ph
 
+
+@dataclass
+class DigitalPhantom:
+    """An anatomy ready to simulate: fractional tissue volumes (``Anatomy``), ONE field strength's
+    tissue table, the ``to_phantom`` options that complete it (texture, spin seed, ...) and
+    ``meta``, the record of how it was made (``sample_head`` puts every draw there; the dataset
+    writer stores it). ``DigitalPhantom(a, DEFAULT_TISSUES[3.], 3.).to_phantom(**kw)`` is
+    ``to_phantom(a, DEFAULT_TISSUES, 3., **kw)``, bit for bit; keyword arguments override
+    ``options``.
+    """
+    anatomy: Anatomy
+    tissues: dict[str, TissueProperties]
+    field_T: float = 3.
+    options: dict = field(default_factory=dict)
+    meta: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not math.isfinite(self.field_T) or self.field_T <= 0:
+            raise ValueError("field_T must be positive [T]")
+        if not all(isinstance(p, TissueProperties) for p in self.tissues.values()):
+            raise ValueError("tissues maps class names to TissueProperties at field_T")
+
+    @property
+    def table(self) -> dict:
+        return {self.field_T: self.tissues}
+
+    def to_phantom(self, **overrides) -> Phantom:
+        return to_phantom(self.anatomy, self.table, self.field_T, **(self.options | overrides))
+
+    def field_maps(self, **kwargs):
+        """``anatomy_field_maps`` of this anatomy and table (reuse via ``to_phantom(field_maps=...)``)."""
+        return anatomy_field_maps(self.anatomy, self.table, self.field_T, **kwargs)
+
+
+def _bspline_weights(n, h, spacing):
+    """(n, m) uniform cubic B-spline weights at n grid points h apart, of control points
+    ``spacing`` apart that cover the grid with one to spare beyond each end."""
+    t = torch.arange(n, dtype=torch.float64) * (h / spacing)
+    i = t.floor().long()
+    u = t - i
+    w = torch.stack(((1 - u) ** 3, 3 * u ** 3 - 6 * u ** 2 + 4, -3 * u ** 3 + 3 * u ** 2 + 3 * u + 1, u ** 3), -1) / 6
+    return torch.zeros(n, int(i[-1]) + 4, dtype=torch.float64).scatter_(1, i[:, None] + torch.arange(4), w)
+
+
+def random_deformation(shape, voxel, generator: torch.Generator, *, magnitude=3e-3, spacing=40e-3):
+    """Smooth random displacement (3, z, y, x) [m] on a (z, y, x) grid, components along z, y, x:
+    a cubic B-spline of control-point displacements drawn independently from N(0, magnitude^2),
+    ``spacing`` [m] apart. Returns (displacement, control points (3, cz, cy, cx))."""
+    if not magnitude >= 0 or not spacing > 0:
+        raise ValueError("deformation needs magnitude >= 0 and spacing > 0 [m]")
+    weights = [_bspline_weights(n, h, spacing) for n, h in zip(shape, voxel)]
+    control = torch.randn((3, *(w.shape[1] for w in weights)), generator=generator, dtype=torch.float64) * magnitude
+    return torch.einsum("kabc,za,yb,xc->kzyx", control, *weights), control
+
+
+def deformation_jacobian(displacement: Tensor, voxel) -> Tensor:
+    """det(I + grad d) on the grid (central differences, one-sided at the faces): the local
+    volume ratio of x -> x + d(x). Positive everywhere means the map does not fold."""
+    g = [[torch.gradient(displacement[k], spacing=[h], dim=l)[0] for l, h in enumerate(voxel)] for k in range(3)]
+    for k in range(3):
+        g[k][k] = g[k][k] + 1
+    return (g[0][0] * (g[1][1] * g[2][2] - g[1][2] * g[2][1]) - g[0][1] * (g[1][0] * g[2][2] - g[1][2] * g[2][0])
+            + g[0][2] * (g[1][0] * g[2][1] - g[1][1] * g[2][0]))
+
+
+def deform(anatomy: Anatomy, displacement: Tensor) -> Anatomy:
+    """Pull the anatomy back through x -> x + d(x): every volume's new value at x is its old value
+    at x + d(x) (trilinear; outside the grid, air and ``chi_background``). Fractions stay a convex
+    combination of fractions, so they still sum to at most one; volumes change by the Jacobian."""
+    shape = anatomy.shape
+    if tuple(displacement.shape) != (3, *shape):
+        raise ValueError("displacement must be (3, z, y, x) on the anatomy grid [m]")
+    ref = next(iter(anatomy.fractions.values()))
+    axes = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) for n in shape), indexing="ij")
+    # grid_sample, align_corners=True: index i of n sits at -1 + 2 i / (n - 1); its last axis is (x, y, z)
+    grid = torch.stack([2 * (a + displacement[k] / h) / max(n - 1, 1) - 1
+                        for k, (a, h, n) in reversed(list(enumerate(zip(axes, anatomy.voxel, shape))))], -1)
+    grid = grid[None].to(ref.dtype)
+    del axes
+
+    def warp(volume, fill=0.):
+        out = torch.nn.functional.grid_sample((volume - fill)[None, None], grid, mode="bilinear",
+                                              padding_mode="zeros", align_corners=True)
+        return out[0, 0] + fill
+
+    fractions = _renormalize({k: warp(v).clamp(0, 1) for k, v in anatomy.fractions.items()})
+    chi = None if anatomy.chi is None else warp(anatomy.chi, anatomy.chi_background)
+    return Anatomy(fractions, anatomy.voxel, anatomy.origin, chi, {k: warp(v) for k, v in anatomy.maps.items()},
+                   anatomy.chi_background, anatomy.map_field_T)
+
+
+def draw_tissues(tissues: dict, generator: torch.Generator) -> tuple[dict, dict]:
+    """One subject's tissue table from a table of population Distributions: every property with a
+    reported SD is drawn once per class, log-normal with the table's mean and SD (normal for a
+    nonpositive mean such as susceptibility), independently; properties without an SD keep their
+    mean. Fractions are kept below 0.999 and T2* at or below T2. Returns (table, draws)."""
+    out, draws = {}, {}
+    for name in sorted(tissues):
+        p, values = tissues[name], {}
+        for f in fields(p):
+            d = getattr(p, f.name)
+            if d is None or not d.sd:
+                continue
+            z = float(torch.randn((), generator=generator, dtype=torch.float64))
+            if d.mean > 0:
+                s2 = math.log1p((d.sd / d.mean) ** 2)
+                values[f.name] = d.mean * math.exp(math.sqrt(s2) * z - s2 / 2)
+            else:
+                values[f.name] = d.mean + d.sd * z
+        for key in ("bound_fraction", "fat_fraction"):
+            if key in values:
+                values[key] = min(values[key], .999)
+        t2 = values.get("t2", p.t2.mean)
+        if p.t2star is not None and values.get("t2star", p.t2star.mean) > t2:
+            values["t2star"] = t2
+        draws[name] = values
+        out[name] = replace(p, **{k: Distribution(v, None, "Drawn by draw_tissues from: " + getattr(p, k).citation,
+                                                  getattr(p, k).assumed) for k, v in values.items()})
+    return out, draws
+
+
+BRAINWEB_SUBJECTS = (4, 5, 6, 18, 20, 38, *range(41, 55))
+DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation/anatomy/README.md, M4
+
+
+def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
+                magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32) -> DigitalPhantom:
+    """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
+    20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
+    until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
+    within-tissue texture (``texture``, ``to_phantom(variability=...)``) and its own spin seed.
+    Susceptibility -> B0, shim and the R2* policy are ``to_phantom``'s defaults. The result is
+    deterministic in the seed, and ``meta`` records every draw (subject, control points,
+    properties, seeds). ``root`` is the BrainWeb data directory (default: the environment
+    variable BLOCHPARTY_BRAINWEB; validation/anatomy/fetch_brainweb.py fetches it)."""
+    root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
+    if root is None:
+        raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
+    if field_T not in table:
+        raise ValueError(f"no tissue table for {field_T} T")
+    streams = [int(s.generate_state(1)[0]) for s in np.random.SeedSequence(int(seed)).spawn(5)]
+    if subject is None:
+        subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
+    anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
+    displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
+                                               magnitude=magnitude, spacing=spacing)
+    scale = 1.
+    while (jac := deformation_jacobian(displacement * scale, anatomy.voxel)).min() <= .2:
+        scale /= 2
+    tissues, draws = draw_tissues(table[field_T], torch.Generator().manual_seed(streams[2]))
+    options = {"seed": streams[4]}
+    if texture:
+        options["variability"] = dict(texture) | {"seed": streams[3]}
+    meta = {"sampler": "anatomy.sample_head", "seed": int(seed), "subject": subject, "field_T": field_T,
+            "voxel": list(anatomy.voxel), "streams": streams,
+            "deformation": {"magnitude": magnitude, "spacing": spacing, "scale": scale,
+                            "jacobian": [float(jac.min()), float(jac.max())], "control": control.tolist()},
+            "draws": draws, "options": options}
+    return DigitalPhantom(deform(anatomy, displacement * scale), tissues, field_T, options, meta)
