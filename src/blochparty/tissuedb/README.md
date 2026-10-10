@@ -65,10 +65,20 @@ protons) have their own ids (`bone.cortical.bound_water`, ...), so they are neve
    human compilation, human ex vivo, human in vitro, physical, animal in vivo / ex vivo / in vitro
    (assumed = True). T1, T2, T2* and dielectric values never come from another field; MT parameters
    may (assumed = True); diffusion, PD, fat fraction, susceptibility and water content do not depend on field.
-2. Within the best tier, one value per source: the mean of its rows (its regions), its SD the RMS of
-   their SDs (an SE becomes SD x sqrt(n)), its weight its largest n (1 if unknown).
-3. Mean = n-weighted mean over sources; SD = sqrt(weighted mean within-source SD^2 + weighted
-   between-source variance); None for a single source without an SD.
+2. T1 and T2 by their reference method first (`reference_method`): spin-echo decay for T2 (SE,
+   multi-echo SE/TSE, CPMG, GraSE, T2 preparation, STEAM), inversion or saturation recovery for T1
+   (IR, SE-IR, SIR, SR, SE with variable TR). The simulator plays the acquisition itself, so it needs
+   the intrinsic times; model-based mapping (MRF, synthetic MRI, GESFIDE, VFA, Look-Locker/MOLLI,
+   MP2RAGE, MPRAGE, IR-TFE) carries its method's bias and is used only when the tier has no
+   reference rows. The citation names the sources left out.
+3. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
+   their SDs (an SE becomes SD x sqrt(n)).
+4. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within
+   the RMS of the known within-source SDs, between 1.4826 x the median absolute deviation (three or
+   more sources) or half the difference (two); None for a single source without an SD. Studies
+   differ by method, cohort and region far more than by sampling error, so their sizes are not
+   weights (the random-effects limit). Until 2026-10-10 sources were n-weighted, and one synthetic-MRI
+   study of 54 elderly subjects set WM and GM T2 to 86 ms each (JOURNAL).
 
 `tissue_table(field_T)` pools every TissueProperties field for each class's tissue, then its
 descendants (assumed), then falls back to the current `DEFAULT_TISSUES[field_T]` entry; T2* above T2

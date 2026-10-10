@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import csv
 import math
+import re
+import statistics
 from dataclasses import dataclass, fields, replace
 from functools import lru_cache
 from pathlib import Path
@@ -172,25 +174,49 @@ def _source_sd(m: Measurement):
 
 def combine(rows: list[Measurement]) -> tuple[float, float | None, list[str]]:
     """The pooling rule: one value per source (mean of its rows, i.e. of its regions; within-source SD
-    = RMS of its row SDs; weight = its largest n, else 1), then the n-weighted mean over sources and
-    SD = sqrt(weighted mean within-source SD^2 + weighted between-source variance). SD is None for a
-    single source without SDs. Returns (mean, sd, source keys)."""
+    = RMS of its row SDs), then every source counts once: the median over sources, and SD =
+    sqrt(within^2 + between^2) with within the RMS of the known within-source SDs and between the
+    sources' robust spread (1.4826 x median absolute deviation from three sources, half the difference
+    of two). Studies differ by method, cohort and region far more than by sampling error, so their
+    sizes are not weights (the random-effects limit), and the median keeps one odd study from moving
+    the value. SD is None for a single source without SDs. Returns (value, sd, source keys)."""
     by_source = {}
     for m in rows:
         by_source.setdefault(m.source, []).append(m)
-    vals, sds, weights = [], [], []
+    vals, sds = [], []
     for group in by_source.values():
         vals.append(sum(m.value for m in group) / len(group))
         s = [x for x in map(_source_sd, group) if x is not None]
         sds.append(math.sqrt(sum(x * x for x in s) / len(s)) if s else None)
-        weights.append(max((m.n for m in group if m.n), default=1))
-    total = sum(weights)
-    mean = sum(w * v for w, v in zip(weights, vals)) / total
-    between = sum(w * (v - mean) ** 2 for w, v in zip(weights, vals)) / total if len(vals) > 1 else 0.
-    known = [(w, s) for w, s in zip(weights, sds) if s is not None]
-    within = sum(w * s * s for w, s in known) / sum(w for w, _ in known) if known else 0.
-    sd = math.sqrt(within + between) if known or len(vals) > 1 else None
-    return mean, sd, list(by_source)
+    centre = statistics.median(vals)
+    if len(vals) >= 3:
+        between = 1.4826 * statistics.median(abs(v - centre) for v in vals)
+    else:
+        between = abs(vals[0] - vals[-1]) / 2
+    known = [s for s in sds if s is not None]
+    within = math.sqrt(sum(s * s for s in known) / len(known)) if known else 0.
+    sd = math.hypot(within, between) if known or len(vals) > 1 else None
+    return centre, sd, list(by_source)
+
+
+# Relaxation times by their reference measurement first: the simulator plays the acquisition itself, so
+# it needs the intrinsic times, which spin-echo decay (T2) and inversion or saturation recovery (T1)
+# measure; model-based mapping (MRF, synthetic MRI, GESFIDE, VFA, Look-Locker, MP2RAGE, ...) carries
+# its method's bias (docs/LESSONS.md) and is used only when a tier has no reference rows.
+_MODEL = r"MRF|fingerprint|SyMRI|QRAPMASTER|synthetic MRI|DESPOT|TOMROP|look[- ]locker"
+_REFERENCE = {
+    "t2": (re.compile(r"\b(SE|TSE|FSE|MEFSE|CPMG|GraSE|STEAM|TRUST)\b|spin[- ]echo|T2[- ]?prep", re.I),
+           re.compile(_MODEL + r"|GESFIDE", re.I)),
+    "t1": (re.compile(r"\b(IR|SE-IR|IR-SE|SIR|IR-TSE|SR)\b|inversion[- ]recovery|saturation[- ]recovery|"
+                      r"\bSE\b.*variable TR", re.I),
+           re.compile(_MODEL + r"|VFA|MOLLI|SASHA|MP2RAGE|MPRAGE|TFE|Deichmann", re.I)),
+}
+
+
+def reference_method(m: Measurement) -> bool:
+    """Whether a T1 or T2 row was measured by the reference method (see _REFERENCE)."""
+    ref, model = _REFERENCE[m.property]
+    return bool(ref.search(m.method)) and not model.search(m.method)
 
 
 _TIER_NAMES = ["human in vivo", "human compilation", "human ex vivo", "human in vitro", "physical",
@@ -202,7 +228,9 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     """Pool the best available rows into a Distribution (None if there are none): human in vivo at
     ``field_T`` if any (assumed=False); otherwise the first non-empty tier of human compilation, ex
     vivo, in vitro, physical, then animal (assumed=True). T1, T2, T2* and dielectric values never fall
-    back to another field; MT parameters do (assumed=True); other properties do not depend on field."""
+    back to another field; MT parameters do (assumed=True); other properties do not depend on field.
+    Within the tier, T1 and T2 use the reference-method rows if there are any (``reference_method``);
+    then ``combine``: the median over sources, each source once."""
     db = db or load()
     rows = query(tissue, property, db=db, descendants=descendants, **filters)
     tiers = {}
@@ -213,13 +241,23 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     if not tiers:
         return None
     best = min(tiers)
-    mean, sd, keys = combine(tiers[best])
+    use, method_note = tiers[best], ""
+    if property in _REFERENCE:
+        ref = [m for m in use if reference_method(m)]
+        if ref:
+            left = sorted({m.source for m in use} - {m.source for m in ref})
+            method_note = ("; reference methods only" + (f", left out: {', '.join(left)}" if left else "")
+                           if len(ref) < len(use) else "")
+            use = ref
+        else:
+            method_note = "; no reference-method rows (model-based mapping)"
+    mean, sd, keys = combine(use)
     unit = PROPERTIES[property]
     scale = _SCALE.get(property, 1.)
     tier = _TIER_NAMES[best % len(_TIER_NAMES)] + ("" if best < len(_TIER_NAMES) else ", other field")
-    where = ", ".join(f"{k} ({'; '.join(sorted({m.location for m in tiers[best] if m.source == k}))})" for k in keys)
+    where = ", ".join(f"{k} ({'; '.join(sorted({m.location for m in use if m.source == k}))})" for k in keys)
     citation = (f"tissuedb pooled {tissue} {property}" + (f" at {field_T:g} T" if field_T is not None else "")
-                + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}")
+                + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}")
     return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0)
 
 
@@ -267,4 +305,4 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
 
 
 __all__ = ["Database", "Measurement", "Source", "Tissue", "PROPERTIES", "load", "query", "pooled", "combine",
-           "tissue_table"]
+           "reference_method", "tissue_table"]

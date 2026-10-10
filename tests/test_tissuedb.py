@@ -232,19 +232,48 @@ def test_cole_cole_reproduces_gabriel_values():
         assert value(tissue, "conductivity") == pytest.approx(sigma, rel=.02), tissue
 
 
+def row(source, value, sd=None, n=None, state="in_vivo", species="human", region="r", prop="t1", method=""):
+    return tissuedb.Measurement("t", region, prop, 3., value, sd, "between_subject" if sd else "", n, "s",
+                                species, state, None, method, source, "Table 1", "")
+
+
 def test_pooling_rule():
-    def row(source, value, sd=None, n=None, state="in_vivo", species="human", region="r"):
-        return tissuedb.Measurement("t", region, "t1", 3., value, sd, "between_subject" if sd else "", n, "s",
-                                    species, state, None, "", source, "Table 1", "")
-    # one value per source: its regions averaged first
-    mean, sd, keys = tissuedb.combine([row("a", 1.0, .1, 10, region="x"), row("a", 2.0, .1, 10, region="y"),
-                                       row("b", 3.0, .2, 30)])
+    # one value per source: its regions averaged first; two sources: their mean, spread half the difference
+    value, sd, keys = tissuedb.combine([row("a", 1.0, .1, 10, region="x"), row("a", 2.0, .1, 10, region="y"),
+                                        row("b", 3.0, .2, 30)])
     assert keys == ["a", "b"]
-    assert mean == pytest.approx((10 * 1.5 + 30 * 3.0) / 40)
-    within = (10 * .1**2 + 30 * .2**2) / 40
-    between = (10 * (1.5 - mean) ** 2 + 30 * (3.0 - mean) ** 2) / 40
-    assert sd == pytest.approx(math.sqrt(within + between))
+    assert value == pytest.approx(2.25)
+    assert sd == pytest.approx(math.hypot(math.sqrt((.1**2 + .2**2) / 2), 0.75))
+    # three or more: the median and 1.4826 MAD
+    value, sd, _ = tissuedb.combine([row("a", 1.0), row("b", 1.2), row("c", 2.0)])
+    assert value == pytest.approx(1.2) and sd == pytest.approx(1.4826 * 0.2)
     assert tissuedb.combine([row("a", 1.0)])[1] is None  # one source, no SD: unreported, not zero
+
+
+def test_one_large_study_does_not_decide():
+    """Studies count once: 54 subjects of an odd method do not outvote three smaller studies."""
+    rows = [row("small1", .069, n=6), row("small2", .080, n=19), row("small3", .072, n=12), row("big", .108, n=54)]
+    value, _, _ = tissuedb.combine(rows)
+    assert value == pytest.approx((.072 + .080) / 2)  # the median, not the n-weighted 0.093
+
+
+def test_reference_methods_first():
+    ref = lambda method, prop="t2": tissuedb.reference_method(row("a", 1., prop=prop, method=method))
+    for m in ("multi-echo SE (32 echoes, 10 ms)", "CPMG", "2D multi-gradient spin echo (GraSE)", "T2-prepared EPI",
+              "multi-echo TSE T2 mapping", "SE, 7 TEs 10-640 ms"):
+        assert ref(m), m
+    for m in ("SyMRI (QRAPMASTER)", "MRF (2D FISP-MRF)", "GESFIDE (R2 from echo part)", "literature compilation"):
+        assert not ref(m), m
+    for m in ("IR, 10 TIs", "SE-IR (6 TI)", "saturation recovery, 7 TRs", "SIR (selective IR)", "SE variable TR/TE"):
+        assert ref(m, "t1"), m
+    for m in ("2D IR Look-Locker", "MOLLI", "3D VFA (B1-corrected)", "MP2RAGE", "MPRAGE (multi-TI)",
+              "IR-TFE (Deichmann model)", "TOMROP (Look-Locker type)"):
+        assert not ref(m, "t1"), m
+    # brain at 3 T: synthetic MRI (n = 54, WM T2 108 ms > GM 80 ms) and GESFIDE are left out
+    wm, gm = pooled("brain.wm", "t2", 3.), pooled("brain.gm", "t2", 3.)
+    assert "ndengera2022" not in wm.citation.split(";")[0] and "reference methods only" in wm.citation
+    assert gm.mean / wm.mean > 1.2  # every spin-echo study: GM T2 well above WM T2
+    assert pooled("muscle.skeletal", "t2", 3.).mean == pytest.approx(.030, abs=.003)  # spin echo; MRF reads 44-74 ms
 
 
 def test_pooled_prefers_human_in_vivo_and_flags_fallbacks():

@@ -1035,6 +1035,14 @@ says where it came from so it can be re-checked.
   `method`, separate from absolute `chi`. Susceptometry papers report cgs: SI = 4 pi cgs.
 - **Most blood-oxygenation calibrations are bovine blood** (Lu 2012, Qin 2011, Krishnamurthy 2014,
   Grgac 2013/2017), and Liu 2016's printed T2 coefficients do not reproduce its own 191 ms.
+- **Pool studies as equals, and relaxation times by their reference method** (2026-10-10): n-weighted
+  pooling let Ndengera 2022 (SyMRI, 54 subjects aged 83 on average) set WM T2 108 ms against 56-80
+  ms elsewhere: pooled WM and GM T2 came out 86 ms each, and simulated T2w heads lost all GM/WM
+  contrast (realism f2). Between-study differences (method, cohort, region) dwarf sampling error, so
+  the random-effects weights are equal: median over sources. T1/T2 from spin-echo decay and
+  inversion/saturation recovery first: WM T2 74.5, GM 110, muscle 30 ms (52 with MRF rows). Rows
+  without a method cannot be classified and drop out of a tier that has reference rows (de
+  Bazelaire's fat rows had an empty method; filled from the paper's protocol).
 - **Fractions of a compartmentalised tissue must not be pooled as one tissue**: cortical-bone pd rows
   of bound and pore water add up, an average of them means nothing; they are separate ids
   (`bone.cortical.bound_water`, `.pore_water`, `.collagen`).
