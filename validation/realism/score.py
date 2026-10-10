@@ -4,7 +4,8 @@ simulated ones?
 Both sets pass through ``realism.recon`` (central 128 x 128 of k-space on a 220 mm field of view,
 root-sum-of-squares) and ``realism.normalise``. Simulated k-space (``simulate_heads.py``) gets
 complex Gaussian noise whose level puts the background (image corners) at the same fraction of the
-99th percentile as in the real scan it is paired with. Only slices 0-12 of each stack are used.
+99th percentile as in the real scan it is paired with. Slices 0-12 of each stack are used
+(``--slices``); real and simulated sets always use the same ones.
 
 The score is the cross-validated AUC of a small CNN on magnitude images, with folds split by
 person (a real volume, or all heads drawn from one BrainWeb subject, is never in training and test at
@@ -42,7 +43,7 @@ def background(img):
                                            img[-c:, -c:].ravel()])))
 
 
-def real_set(cache: Path, root: Path = R.FASTMRI):
+def real_set(cache: Path, root: Path = R.FASTMRI, slices=SLICES):
     """[(person, slice, image)], {file: noise floor} from the real scans (cached as .npy)."""
     cache.mkdir(parents=True, exist_ok=True)
     items, floor = [], {}
@@ -54,7 +55,7 @@ def real_set(cache: Path, root: Path = R.FASTMRI):
         vol = np.load(f).astype(np.float64)
         imgs = [R.normalise(v) for v in vol]
         floor[path.name] = float(np.median([background(i) for i in imgs]))
-        items += [(f"real:{path.stem}", s, imgs[s]) for s in SLICES]
+        items += [(f"real:{path.stem}", s, imgs[s]) for s in slices]
     return items, floor
 
 
@@ -65,14 +66,14 @@ def unit_floor(coils, n=128, rng=None):
     return float(np.median(R.recon(k)))
 
 
-def sim_set(sim_dir: Path, floor: dict, seed=0):
+def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES):
     rng = np.random.default_rng(seed)
     items, units = [], {}
     for f in sorted(sim_dir.glob("sim_*.npz")):
         d = np.load(f)
         meta = json.loads(str(d["meta"]))
         target = floor[meta["protocol"]["file"]]
-        for s in SLICES:
+        for s in slices:
             key = f"slice{s:02d}"
             if key not in d:
                 continue
@@ -197,13 +198,29 @@ def bootstrap(y, s, groups, b=2000, seed=0):
     return [float(np.percentile(out, 2.5)), float(np.percentile(out, 97.5))]
 
 
+def intensity_gap(items_a, items_b, threshold=0.15):
+    """How far apart the two sets' head intensities lie, without a classifier (it does not saturate):
+    the 1-Wasserstein distance between the pooled distributions of pixels above ``threshold``
+    (normalised units), averaged over slice indices, and the quartiles of each set."""
+    out, qa, qb = [], [], []
+    for s in sorted({i[1] for i in items_a} & {i[1] for i in items_b}):
+        a = np.sort(np.concatenate([i[2][i[2] > threshold] for i in items_a if i[1] == s]))
+        b = np.sort(np.concatenate([i[2][i[2] > threshold] for i in items_b if i[1] == s]))
+        q = np.linspace(0, 1, 501)[1:-1]
+        out.append(float(np.mean(np.abs(np.quantile(a, q) - np.quantile(b, q)))))
+        qa.append(np.quantile(a, [0.25, 0.5, 0.75]))
+        qb.append(np.quantile(b, [0.25, 0.5, 0.75]))
+    return {"w1": float(np.mean(out)), "quartiles_a": np.round(np.mean(qa, 0), 3).tolist(),
+            "quartiles_b": np.round(np.mean(qb, 0), 3).tolist()}
+
+
 def run(name, items_a, items_b, device, epochs):
     X = np.stack([i[2] for i in items_a + items_b])
     y = np.array([0] * len(items_a) + [1] * len(items_b))
     groups = np.array([i[0] for i in items_a + items_b])
     s = cnn_scores(X, y, groups, epochs=epochs, device=device)
     h = histogram_scores(X, y, groups)
-    res = {"test": name, "n": [len(items_a), len(items_b)], "people": [len({i[0] for i in items_a}), len({i[0] for i in items_b})],
+    res = {"test": name, "intensity": intensity_gap(items_a, items_b), "n": [len(items_a), len(items_b)], "people": [len({i[0] for i in items_a}), len({i[0] for i in items_b})],
            "cnn_auc": auc(y, s), "cnn_ci": bootstrap(y, s, groups), "histogram_auc": auc(y, h), "histogram_ci": bootstrap(y, h, groups)}
     slices = np.array([i[1] for i in items_a + items_b])
     res["cnn_auc_by_slice"] = {int(k): round(auc(y[slices == k], s[slices == k]), 3) for k in sorted(set(slices))}
@@ -218,11 +235,14 @@ def main():
     ap.add_argument("--fastmri", type=Path, default=R.FASTMRI, help="directory with the fastMRI files and manifest.json")
     ap.add_argument("--out", type=Path, default=Path("outputs/realism"))
     ap.add_argument("--epochs", type=int, default=30)
+    ap.add_argument("--slices", default="0-12", help="slice indices used on both sides, a-b or a-b:step")
     args = ap.parse_args()
+    rng_, _, step = args.slices.partition(":")
+    slices = range(int(rng_.split("-")[0]), int(rng_.split("-")[-1]) + 1, int(step or 1))
     args.out.mkdir(parents=True, exist_ok=True)
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    real, floor = real_set(args.cache, args.fastmri)
-    sim = sim_set(args.sim, floor)
+    real, floor = real_set(args.cache, args.fastmri, slices)
+    sim = sim_set(args.sim, floor, slices=slices)
     print(f"{len(real)} real slices from {len({i[0] for i in real})} scans, {len(sim)} simulated from "
           f"{len({i[0] for i in sim})} BrainWeb subjects; real noise floor {np.median(list(floor.values())):.4f} of p99", flush=True)
     results = []
