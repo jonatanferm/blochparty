@@ -1043,6 +1043,20 @@ says where it came from so it can be re-checked.
   inversion/saturation recovery first: WM T2 74.5, GM 110, muscle 30 ms (52 with MRF rows). Rows
   without a method cannot be classified and drop out of a tier that has reference rows (de
   Bazelaire's fat rows had an empty method; filled from the paper's protocol).
+- **The bright scalp in T2w TSE was anatomy first, fat T2 second** (2026-10-10): real fastMRI T2w
+  heads show a scalp peak 2.3x the brain interior 5-7 mm below the edge; the simulation had a flat
+  1.6, and changing fat's T2 from 68 to 148 ms changed nothing, because BrainWeb labels the scalp
+  "Muscle/Skin" (here `skin`, given muscle values) and the fat class covers 0-24 % of it. Splitting
+  that class by depth (dermis 1.61 mm, subcutaneous 4.14 mm, Li 2024 ultrasound: `layer_scalp`) put
+  the peak in place (1.26 at fat T2 68 ms), and the J-suppressed fat T2 lifted it to 1.86. Measure
+  where a contrast lives (an edge-depth profile, tissue composition per depth band) before tuning a
+  parameter. Still off: the calvarial diploe (fatty marrow) is 0.8 vs 1.6 in the real profile.
+- **A Bloch simulator's lipid T2 is the J-suppressed one** (Henkelman 1992; Keene 2020): single-echo
+  SE and STEAM read fat T2 40-75 ms at 3 T because J coupling modulates the echo; a train of
+  refocusing pulses spaced well below 1/(chemical-shift difference of the coupled groups) suppresses
+  it (Allerhand), and CPMG at 8 ms spacing reads 140-159 ms. A Bloch model has no J coupling but
+  plays the refocusing train, so it needs the CPMG value; with it, simulated single-echo SE fat is
+  too bright (the missing physics, REALISM.md).
 - **Fractions of a compartmentalised tissue must not be pooled as one tissue**: cortical-bone pd rows
   of bound and pore water add up, an average of them means nothing; they are separate ids
   (`bone.cortical.bound_water`, `.pore_water`, `.collagen`).
