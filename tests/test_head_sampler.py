@@ -96,3 +96,27 @@ def test_sample_head_is_deterministic_and_recorded():
     assert a.meta["draws"]["wm"]["t1"] == a.tissues["wm"].t1.mean
     ph = a.to_phantom(spins_per_voxel=1, sampling="categorical", t2star="off")
     assert len(ph) > 0 and math.isfinite(float(ph.db0.abs().max()))
+
+
+@pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
+def test_realistic_head_options():
+    """size="anthropometric": the head measures the drawn ANSUR II breadth and length (the random
+    deformation adds a few mm), a normal adult brain; yaw_sd turns it without changing volumes;
+    age widens the sulci (more CSF, less GM); the defaults add none of these."""
+    from blochparty.anatomy import head_dimensions
+
+    base = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3)
+    assert not {"size", "pose", "age"} & set(base.meta)
+    sized = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric")
+    b, l = head_dimensions(sized.anatomy)
+    assert abs(b - sized.meta["size"]["breadth"]) < 8e-3 and abs(l - sized.meta["size"]["length"]) < 8e-3
+    brain = float((sized.anatomy.fractions["gm"] + sized.anatomy.fractions["wm"]).sum()) * 8e-9  # m^3
+    assert 0.9e-3 < brain < 1.4e-3
+    turned = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", yaw_sd=10.)
+    assert turned.meta["size"] == sized.meta["size"] and abs(turned.meta["pose"]["yaw_deg"]) > 0
+    for k in ("gm", "wm", "csf"):
+        assert float(turned.anatomy.fractions[k].sum()) == pytest.approx(float(sized.anatomy.fractions[k].sum()), rel=0.02)
+    old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.)
+    assert old.meta["age"]["sulcal_widening"] == pytest.approx(40 * 0.71e-4)
+    assert float(old.anatomy.fractions["csf"].sum()) > float(sized.anatomy.fractions["csf"].sum())
+    assert float(old.anatomy.fractions["gm"].sum()) < float(sized.anatomy.fractions["gm"].sum())

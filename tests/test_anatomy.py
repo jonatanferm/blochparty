@@ -412,3 +412,42 @@ def test_layer_scalp_moves_the_subcutaneous_layer_into_fat():
     assert torch.equal(out.fractions["wm"], an.fractions["wm"]) and torch.equal(out.fractions["background"], air)
     assert (fat[depth < 1.61e-3 - h / 2] == 0).all() and (fat[depth > 5.75e-3 + h / 2] == 0).all()
     assert torch.allclose(fat[(depth > 1.61e-3 + h / 2) & (depth < 5.75e-3 - h / 2)], torch.tensor(0.9, dtype=torch.float64))
+
+
+def test_proportional_sampling_conserves_each_tissue_and_has_k_spins():
+    """sampling="proportional": every voxel's PD per tissue exactly fraction * PD, max(1, round(K f))
+    spins per tissue (about K per voxel)."""
+    g = torch.Generator().manual_seed(0)
+    shape = (2, 3, 4)
+    a = torch.rand(shape, generator=g, dtype=torch.float64) * 0.7
+    b = (1 - a) * torch.rand(shape, generator=g, dtype=torch.float64)
+    an = Anatomy({"wm": a, "gm": b}, (1e-3,) * 3, (0., 0., 0.))
+    ph = bp.to_phantom(an, DEFAULT_TISSUES, 3., spins_per_voxel=8, sampling="proportional", chi_to_b0=False, t2star="off")
+    pd_wm, pd_gm = DEFAULT_TISSUES[3.]["wm"].pd.mean, DEFAULT_TISSUES[3.]["gm"].pd.mean
+    t1_wm = DEFAULT_TISSUES[3.]["wm"].t1.mean
+    is_wm = torch.isclose(ph.t1, torch.tensor(t1_wm, dtype=ph.t1.dtype))
+    assert float(ph.pd[is_wm].sum()) == pytest.approx(pd_wm * float(a.sum()), rel=1e-12)
+    assert float(ph.pd[~is_wm].sum()) == pytest.approx(pd_gm * float(b.sum()), rel=1e-12)
+    expect = sum(int(max(1, round(8 * float(f)))) for f in torch.cat([a.ravel(), b.ravel()]) if f > 0)
+    assert len(ph) == expect
+
+
+def test_open_sulci_puts_csf_on_the_midline_between_two_banks():
+    """Two white-matter blocks with a 6 mm grey band between them (two touching cortical banks):
+    width W of CSF goes onto the band's midline, W x the sheet's area of it, nothing elsewhere."""
+    pytest.importorskip("scipy")
+    nz, ny, nx = 6, 30, 40
+    wm = torch.zeros(nz, ny, nx, dtype=torch.float64)
+    wm[..., :17] = 1
+    wm[..., 23:] = 1
+    gm = 1 - wm
+    an = Anatomy({"wm": wm, "gm": gm, "csf": torch.zeros_like(wm)}, (1e-3,) * 3, (0., 0., 0.))
+    out = bp.open_sulci(an, 2e-3, depth_max=1.)
+    csf = out.fractions["csf"]
+    assert torch.equal(out.fractions["gm"] + csf, gm) and torch.equal(out.fractions["wm"], wm)
+    assert float(csf[..., :17].sum() + csf[..., 23:].sum()) == 0
+    # the midline lies between columns 19 and 20; 2 mm of CSF over (nz x ny) mm^2, edges excepted
+    inner = csf[1:-1, 1:-1]
+    assert float(inner.sum()) == pytest.approx(2 * inner.shape[0] * inner.shape[1], rel=0.25)
+    assert float(inner[..., 19:21].mean()) > 0.5
+    assert torch.equal(bp.open_sulci(an, 0.).fractions["csf"], an.fractions["csf"])

@@ -776,7 +776,12 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     expectation. ``systematic`` assigns them from the evenly spaced (j + U) / K, one U per
     voxel (systematic resampling), dealt to the subcells at random: each tissue gets
     floor(K f) or ceil(K f) spins, unbiased, with a voxel error O(1/K) instead of O(1/sqrt K)
-    (docs/PERFORMANCE.md 2.6). K is a perfect cube or (kz,ky,kx). Jitter samples each subcell;
+    (docs/PERFORMANCE.md 2.6). ``proportional`` gives each nonzero tissue max(1, round(K f))
+    spins at random subcells and PD = fraction*PD/n: each voxel's composition exact like
+    ``per_tissue`` (no salt-and-pepper from composition draws) at about K spins per voxel.
+    K is a perfect cube or (kz,ky,kx). ``jitter="inplane"`` jitters x and y only and puts z at the
+    subcell centres: through a 2D slice's steep profile, random z positions make each pixel's slice
+    integral noisy (a visible grain), a z quadrature does not. Jitter samples each subcell;
     None uses subcell centres. Seeds change positions (and categorical draws),
     not material properties. Sampled B0 necessarily changes with positions.
     PD is per anatomy voxel, matching phantom_from_maps; multiply by physical
@@ -820,7 +825,7 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     from ``seed`` (positions), so jitter does not change the texture. It models within-tissue
     texture, not the population SDs of the table (``Distribution.sd``).
     """
-    if sampling not in ("per_tissue","categorical","systematic") or jitter not in (None,"stratified"):
+    if sampling not in ("per_tissue","categorical","systematic","proportional") or jitter not in (None,"stratified","inplane"):
         raise ValueError("invalid sampling or jitter mode")
     if t2star not in ("auto","off","table","separate"):
         raise ValueError("t2star must be auto, separate, off or table")
@@ -905,11 +910,17 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         idx = mask.nonzero()
         n = len(idx)
         u = torch.rand((n,k,3),dtype=ref.dtype,generator=gen) if jitter else torch.full((n,k,3),.5,dtype=ref.dtype)
+        if jitter == "inplane":  # z at the subcell centres: a quadrature of the slice profile, no z sampling noise
+            u[...,0] = .5
         offsets = (cells+u)/torch.tensor(counts)-.5
         origin = torch.tensor(anatomy.origin,dtype=ref.dtype)
         spacing = torch.tensor(anatomy.voxel,dtype=ref.dtype)
         pos = origin+(idx[:,None,:]+offsets).flip(-1)*spacing.flip(-1)
         select = torch.ones((n,k),dtype=torch.bool) if category is None else category[mask] == ti
+        if sampling == "proportional":  # n_t = max(1, round(k f)) of the k subcells, at random
+            n_t = (fraction[mask]*k).round().clamp(1, k)
+            rank = torch.argsort(torch.argsort(torch.rand((n,k),generator=gen),dim=1),dim=1)
+            select = rank < n_t[:,None]
         expand = lambda value: (value[:,None].expand(-1,k) if value.ndim else value.expand(n,k))[select]
         parameter = lambda key,default: anatomy.maps[key][mask] if key in anatomy.maps else ref.new_tensor(default)
         density = parameter("M0",p.pd.mean)
@@ -926,7 +937,9 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         if (density < 0).any() or (r1 <= 0).any() or (r2 <= 0).any():
             raise ValueError("M0 must be nonnegative; R1 and R2 positive")
         pd = expand(density) / k
-        if category is None:
+        if sampling == "proportional":
+            pd = expand(density*fraction[mask]/n_t)
+        elif category is None:
             pd = pd*expand(fraction[mask])
         pos = pos[select]
         db0 = torch.zeros_like(pd)
@@ -1132,13 +1145,126 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
 
 
+# Sulcal width grows 0.71 mm per decade (0.45-0.94 by sulcus) in 90 healthy adults aged 20-82
+# (Kochunov et al. 2005, Hum Brain Mapp 26:210, doi:10.1002/hbm.20198, Table III); BrainWeb's models
+# are young adults, taken as 30.
+SULCAL_WIDENING = 0.71e-4  # m per year
+BRAINWEB_AGE = 30.
+
+
+def _ridge(d: np.ndarray) -> np.ndarray:
+    """Voxels that are a local maximum of ``d`` along one of the 13 directions: >= the neighbour on one
+    side, > the other (a plateau of two, the midline of an even-width band, keeps one voxel)."""
+    import itertools
+
+    out = np.zeros(d.shape, bool)
+    for v in (v for v in itertools.product((-1, 0, 1), repeat=3) if v > (0, 0, 0)):
+        a, b = np.roll(d, v, axis=(0, 1, 2)), np.roll(d, tuple(-x for x in v), axis=(0, 1, 2))
+        out |= (d >= a) & (d > b)
+    return out
+
+
+def open_sulci(anatomy: Anatomy, width: float, depth_max: float = 20e-3) -> Anatomy:
+    """Widen the sulci by ``width`` [m] of CSF: where two cortical banks meet (grey matter > 0.5,
+    1-5 mm from white matter, on the ridge of the distance to white matter, with white matter again
+    straight through on the far side, no CSF next to it, within ``depth_max`` of the CSF around the
+    brain), grey matter within width / 2 of that midline becomes CSF (voxel-weighted at the edges).
+    BrainWeb's fuzzy segmentation lets many banks touch without CSF between them; real sulci hold
+    CSF, more with age (``SULCAL_WIDENING``)."""
+    from scipy import ndimage
+
+    if width <= 0:
+        return anatomy
+    fr = {k: v.numpy().astype(np.float64) for k, v in anatomy.fractions.items()}
+    gm, wm, csf = fr["gm"], fr["wm"], fr["csf"]
+    vox = tuple(float(v) for v in anatomy.voxel)
+    dw, (iz, iy, ix) = ndimage.distance_transform_edt(wm < .5, sampling=vox, return_indices=True)
+    # distance to the CSF around the brain (connected to the outside; ventricles are not)
+    c = csf > .3
+    outside = ((gm + wm) < .5) & ~c
+    opened = ndimage.binary_opening(c, structure=np.ones((3, 3, 3)))
+    lab, _ = ndimage.label(opened)
+    touch = np.unique(lab[ndimage.binary_dilation(outside, iterations=2) & opened])
+    outer = np.isin(lab, touch[touch > 0]) | (c & ~opened) | outside
+    do = ndimage.distance_transform_edt(~outer, sampling=vox)
+    cand = (gm > .5) & (dw >= 1e-3) & (dw <= 5e-3) & (do <= depth_max) & _ridge(dw) & ~(ndimage.maximum_filter(csf, 3) > .3)
+    z, y, x = np.nonzero(cand)
+    vz, vy, vx = iz[z, y, x] - z, iy[z, y, x] - y, ix[z, y, x] - x
+    ok = np.zeros(len(z), bool)
+    for f in (1., 1.25, 1.5, 1.75, 2.):  # white matter again on the far side: two banks
+        q = [np.clip(np.round(a - f * v).astype(int), 0, n - 1) for a, v, n in zip((z, y, x), (vz, vy, vx), wm.shape)]
+        ok |= wm[q[0], q[1], q[2]] > .5
+    ridge = np.zeros(gm.shape, bool)
+    ridge[z[ok], y[ok], x[ok]] = True
+    # an even-width band's midline is a plateau of two ridge voxels, h / 2 either side of it: a ridge
+    # voxel is half of one when its neighbour away from its nearest white matter is ridge at the same depth
+    z, y, x, vz, vy, vx = z[ok], y[ok], x[ok], vz[ok], vy[ok], vx[ok]
+    norm = np.sqrt(vz ** 2 + vy ** 2 + vx ** 2) + 1e-12
+    q = [np.clip(a - np.round(v / norm).astype(int), 0, n - 1) for a, v, n in zip((z, y, x), (vz, vy, vx), wm.shape)]
+    pair = np.zeros(gm.shape, bool)
+    pair[z, y, x] = ridge[q[0], q[1], q[2]] & (np.abs(dw[q[0], q[1], q[2]] - dw[z, y, x]) < 1e-6)
+    dr, (rz, ry, rx) = ndimage.distance_transform_edt(~ridge, sampling=vox, return_indices=True)
+    h = float(np.mean(vox))
+    dmid = dr + pair[rz, ry, rx] * h / 2
+    move = torch.from_numpy(gm * np.clip((width / 2 - dmid) / h + .5, 0, 1)).to(anatomy.fractions["gm"].dtype)
+    return replace(anatomy, fractions=anatomy.fractions | {"gm": anatomy.fractions["gm"] - move,
+                                                           "csf": anatomy.fractions["csf"] + move})
+
+
+# Head breadth (euryon-euryon) and length (glabella-opisthocranion) [m]: mean, SD and their correlation,
+# from the ANSUR II public data (2012 Anthropometric Survey of U.S. Army Personnel, Gordon et al. 2015,
+# NATICK/TR-15/007; ANSUR_II_MALE_Public.csv n = 4082, ANSUR_II_FEMALE_Public.csv n = 1986, via
+# openlab.psu.edu/ansur2, computed 2026-10-10).
+ANSUR_HEAD = {"male": dict(breadth=(0.1543, 0.0055), length=(0.1995, 0.0070), corr=0.18),
+              "female": dict(breadth=(0.1478, 0.0052), length=(0.1898, 0.0074), corr=0.22)}
+
+
+def _head_mask(anatomy: Anatomy) -> np.ndarray:
+    """Voxels more than half tissue (any class but background; outside a resampled grid is empty)."""
+    return (sum(v for k, v in anatomy.fractions.items() if k != "background") > .5).numpy()
+
+
+def head_dimensions(anatomy: Anatomy, depth: float = 0.1) -> tuple[float, float]:
+    """(breadth, length) [m] of a head: the largest left-right (x) and anterior-posterior (y) extents of
+    1 - background > 0.5 within ``depth`` below the vertex, above the brow and the nose, where a
+    caliper measures them (euryon-euryon, glabella-opisthocranion)."""
+    head = _head_mask(anatomy)
+    zs = np.nonzero(head.any((1, 2)))[0]
+    top = int(zs.max())
+    sl = head[max(top - round(depth / anatomy.voxel[0]), 0): top + 1]
+    ys, xs = np.nonzero(sl.any((0, 2)))[0], np.nonzero(sl.any((0, 1)))[0]
+    return (xs.max() - xs.min() + 1) * anatomy.voxel[2], (ys.max() - ys.min() + 1) * anatomy.voxel[1]
+
+
+def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator):
+    """Draw a sex (1:1) and a head breadth and length from ``ANSUR_HEAD`` (bivariate normal) and return
+    the scale factors (z, y, x) that give ``anatomy``'s head that size (z: their geometric mean),
+    the centre of the head's bounding box [m, (z, y, x) from the grid origin] and the draw. BrainWeb's
+    models live in MNI space, scaled to the template: subject 04's head is 174 x 207 mm (breadth x
+    length), its brain 1580 cm^3; an average man's 154 x 200 mm gives ~1250 cm^3."""
+    sex = "male" if generator.random() < .5 else "female"
+    a = ANSUR_HEAD[sex]
+    (mb, sb), (ml, sl), r = a["breadth"], a["length"], a["corr"]
+    z0, z1 = generator.standard_normal(2)
+    breadth, length = mb + sb * z0, ml + sl * (r * z0 + math.sqrt(1 - r * r) * z1)
+    b0, l0 = head_dimensions(anatomy)
+    sx, sy = float(breadth / b0), float(length / l0)
+    head = _head_mask(anatomy)
+    centre = tuple(float((np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean()) * h)
+                   for k, h in enumerate(anatomy.voxel))
+    draw = {"sex": sex, "breadth": float(breadth), "length": float(length), "source_breadth": float(b0),
+            "source_length": float(l0)}
+    return (math.sqrt(sx * sy), sy, sx), centre, draw
+
+
 BRAINWEB_SUBJECTS = (4, 5, 6, 18, 20, 38, *range(41, 55))
 DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation/anatomy/README.md, M4
 
 
 def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
                 magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
-                scalp: str = "brainweb") -> DigitalPhantom:
+                scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
+                age: float | tuple[float, float] | None = None) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1148,9 +1274,17 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     properties, seeds). ``root`` is the BrainWeb data directory (default: the environment
     variable BLOCHPARTY_BRAINWEB; validation/anatomy/fetch_brainweb.py fetches it). ``scalp``:
     "brainweb" keeps BrainWeb's skin class, "layered" splits it into skin and subcutaneous fat
-    (``layer_scalp``) before the deformation."""
+    (``layer_scalp``) after the deformation. ``size``: "brainweb" keeps the model's (MNI-template)
+    size, "anthropometric" scales the head to a breadth and length drawn from ANSUR II
+    (``anthropometric_scaling``), composed with the deformation into one resampling. ``yaw_sd``
+    [deg]: the head turned about the scanner's z axis through its centre by N(0, yaw_sd^2) (0: as
+    the model lies; BrainWeb is aligned to MNI space, scanned heads are not). ``age`` [years] (a
+    number, or (low, high) to draw uniformly): sulci widened by ``SULCAL_WIDENING`` per year beyond
+    ``BRAINWEB_AGE`` (``open_sulci``); None leaves them as the model has them."""
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
+    if size not in ("brainweb", "anthropometric"):
+        raise ValueError(f"size must be 'brainweb' or 'anthropometric', not {size!r}")
     root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
     if root is None:
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
@@ -1160,12 +1294,36 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
-    if scalp == "layered":
-        anatomy = layer_scalp(anatomy)
     displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
                                                magnitude=magnitude, spacing=spacing)
+    size_draw, pose = None, None
+    total = lambda d: d
+    if size == "anthropometric" or yaw_sd:
+        # pull back x -> c + S^-1 R^-1 (x + d(x) - c): deformed, then turned by the yaw and resized about c
+        rng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(6)[5])
+        if size == "anthropometric":
+            factors, centre, size_draw = anthropometric_scaling(anatomy, rng)
+            size_draw["factors"] = list(factors)
+        else:
+            factors = (1., 1., 1.)
+            head = _head_mask(anatomy)
+            centre = tuple(float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
+                           for k, h in enumerate(anatomy.voxel))
+        yaw = math.radians(yaw_sd) * float(rng.standard_normal()) if yaw_sd else 0.
+        pose = {"yaw_deg": math.degrees(yaw)}
+        dt = displacement.dtype
+        s = torch.tensor(factors, dtype=dt).view(3, 1, 1, 1)
+        grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=dt) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
+                                          indexing="ij"))
+        c = torch.tensor(centre, dtype=dt).view(3, 1, 1, 1)
+        cos, sin = math.cos(yaw), math.sin(yaw)
+
+        def total(d):
+            v = grid + d - c
+            v = torch.stack([v[0], cos * v[1] + sin * v[2], -sin * v[1] + cos * v[2]])  # R^-1 in the (y, x) plane
+            return c + v / s - grid
     scale = 1.
-    while (jac := deformation_jacobian(displacement * scale, anatomy.voxel)).min() <= .2:
+    while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
         scale /= 2
     tissues, draws = draw_tissues(table[field_T], torch.Generator().manual_seed(streams[2]))
     options = {"seed": streams[4]}
@@ -1176,4 +1334,16 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
             "deformation": {"magnitude": magnitude, "spacing": spacing, "scale": scale,
                             "jacobian": [float(jac.min()), float(jac.max())], "control": control.tolist()},
             "draws": draws, "options": options}
-    return DigitalPhantom(deform(anatomy, displacement * scale), tissues, field_T, options, meta)
+    if size_draw is not None:
+        meta["size"] = size_draw
+    if pose is not None:
+        meta["pose"] = pose
+    anatomy = deform(anatomy, total(displacement * scale))
+    if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
+        anatomy = layer_scalp(anatomy)
+    if age is not None:
+        years = float(age) if np.isscalar(age) else float(np.random.default_rng(
+            np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
+        meta["age"] = {"years": years, "sulcal_widening": max(years - BRAINWEB_AGE, 0.) * SULCAL_WIDENING}
+        anatomy = open_sulci(anatomy, meta["age"]["sulcal_widening"])
+    return DigitalPhantom(anatomy, tissues, field_T, options, meta)
