@@ -335,6 +335,8 @@ def tse_2d(
     time_bw_product: float = 4.0,
     apodization: float = 0.5,
     rf_steps: int | None = None,
+    slice_order=None,
+    other_rf_raster: float = 1e-4,
 ) -> Sequence:
     """2D turbo spin echo (CPMG): per shot a ``excite_flip_deg`` pulse along x, then ``etl``
     refocusing pulses along y every ``esp`` (None: the shortest possible), echoes at
@@ -350,10 +352,27 @@ def tse_2d(
     symmetric (the CPMG condition). ``spoiling``: "ideal" or "gradient" (a z spoiler of
     ``spoiler_cycles``) at the end of every shot.
 
+    ``slice_order`` (default None: this slice alone): multi-slice imaging as one slice sees it.
+    The z offsets [m] from this slice of every slice played in each TR, in playing order, with
+    this slice as the one ``0.0``; the other slices' echo trains are played at their times as
+    their RF pulses and slice-select gradients only (their crushers and readouts move no
+    longitudinal magnetization here). ``other_rf_raster=None`` plays them exactly: the real
+    phase-ramped pulses on the system's RF raster (a reference, slow at large offsets). Otherwise
+    those pulses are sampled on ``other_rf_raster`` without
+    their phase ramp, and moved to their slice by ``Sequence.b0_offset`` = -G z_j during their RF
+    segments, so a spin at z is off resonance by G (z - z_j), as under the real pulse, and its
+    bound pool is saturated at that offset (``rf_freq`` 0 there): incidental magnetization
+    transfer and slice cross-talk without the cost of resolving a 30 kHz phase ramp. Such a
+    sequence simulates, but is not a scanner sequence (``write_pulseq`` refuses ``b0_offset``).
+
     Returns ``meta["matrix"] = (n, n)`` and ``meta["kspace_index"]`` (grid index of every
     ADC sample; use ``cartesian_kspace`` / ``cartesian_recon``), ``te`` (effective),
     ``echo_times`` and ``line_echo`` (echo index of every ky line).
     """
+    if slice_order is not None:
+        slice_order = [float(z) for z in slice_order]
+        if slice_order.count(0.0) != 1 or slice_thickness is None:
+            raise ValueError("slice_order needs slice_thickness and exactly one 0.0 (this slice)")
     if n % etl:
         raise ValueError(f"n = {n} is not a multiple of etl = {etl}")
     if spoiling not in ("ideal", "gradient"):
@@ -389,11 +408,47 @@ def tse_2d(
     elif esp < 2 * max(h0, h1, h2) - _T_TOL:
         raise ValueError(f"echo spacing too short: minimum {2 * max(h0, h1, h2) * 1e3:.3f} ms")
 
+    others = []  # (first, last) segment of every other slice's RF block, and its offset [m]
+    pulses = {}  # offset -> (excitation, refocusing pulses) as played for that slice
+    if slice_order is not None:
+        exact = other_rf_raster is None  # the real phase-ramped pulses on the system's raster (a reference)
+        coarse = sysm if exact else replace(sysm, rf_raster=other_rf_raster)
+        for dz in slice_order:
+            cargs = (rf_duration, slice_thickness, (slice_offset + dz) if exact else 0.0, time_bw_product,
+                     apodization, coarse, dtype, rf_steps)
+            pulses[dz] = (_excitation(excite_flip_deg, *cargs), [_excitation(f, *cargs) for f in flips])
+            if abs(pulses[dz][0].duration - exc.duration) > _T_TOL or abs(pulses[dz][1][0].duration - ref.duration) > _T_TOL:
+                raise ValueError("other_rf_raster changes the pulse blocks' durations; choose a divisor of the RF timing")
+        spoiler = _lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype)
+        t_spoil = block_duration(spoiler, system=sysm)
+
+    def other_train(dz):
+        exc_o, refs_o = pulses[dz]
+        start = len(b._is_rf)
+        b.block(*exc_o.grads, rf=exc_o.rf)
+        if not exact:
+            others.append((start, len(b._is_rf), dz))
+        _pad(b, t_p)
+        _pad(b, esp / 2 - h0)
+        for r in refs_o:
+            start = len(b._is_rf)
+            b.block(*r.grads, rf=_with_phase(r.rf, math.pi / 2))
+            if not exact:
+                others.append((start, len(b._is_rf), dz))
+            for t_gap in (t_c, esp / 2 - h1, ro.duration, esp / 2 - h2, t_c):
+                _pad(b, t_gap)
+        if spoiling == "gradient":
+            _pad(b, t_spoil)
+
     b = SequenceBuilder(dtype=dtype, system=sysm)
     kspace_index = []
     for shot in range(n_dummy + n_shots):
         acquire = shot >= n_dummy
         t_start = b.time
+        for dz in slice_order or ():
+            if dz == 0.0:
+                break
+            other_train(dz)
         b.block(*exc.grads, rf=exc.rf)
         b.block(_lobe((ro.area_k0, 0.0, crush + exc.rephase[2]), t_p, ramps, sysm, dtype))
         _pad(b, esp / 2 - h0)
@@ -410,6 +465,8 @@ def tse_2d(
                 kspace_index += range(line * n, line * n + n)
         if spoiling == "gradient":
             b.block(_lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype))
+        for dz in (slice_order or [0.0])[(slice_order or [0.0]).index(0.0) + 1:]:
+            other_train(dz)
         t_fill = tr - (b.time - t_start)
         if t_fill < -_T_TOL:
             raise ValueError(f"TR too short by {-t_fill * 1e3:.3f} ms")
@@ -420,10 +477,22 @@ def tse_2d(
     for s in range(n_shots):
         for e in range(etl):
             line_echo[lines[s][e]] = e
-    return b.build(matrix=(n, n), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell, tr=tr, esp=esp,
-                   etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
-                   line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
-                   system=sysm)
+    seq = b.build(matrix=(n, n), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell, tr=tr, esp=esp,
+                  etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
+                  line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
+                  system=sysm, **({} if slice_order is None else {"slice_order": slice_order}))
+    if others:
+        from .exchange import rf_frequency
+
+        f_rf = rf_frequency(seq).clone()
+        offset = torch.zeros_like(seq.dt)
+        is_rf = torch.tensor(seq.is_rf)
+        for a, e, dz in others:
+            rf_seg = torch.arange(a, e)[is_rf[a:e]]
+            offset[rf_seg] = -seq.grad[rf_seg, 2].detach() * dz
+            f_rf[a:e] = 0.0
+        seq = replace(seq, b0_offset=offset, rf_freq=f_rf)
+    return seq
 
 
 # --- balanced SSFP ----------------------------------------------------------------------------
