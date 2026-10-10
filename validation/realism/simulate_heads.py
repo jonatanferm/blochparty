@@ -38,6 +38,7 @@ their bound pool (``to_phantom(mt=True)``); ``--table tissuedb`` draws the tissu
 from __future__ import annotations
 
 import argparse
+import math
 from concurrent.futures import ThreadPoolExecutor
 import json
 import time
@@ -92,6 +93,41 @@ def centre(anatomy, zs) -> tuple[float, float]:
     ys, xs = np.nonzero(rows.any((0, 2)))[0], np.nonzero(rows.any((0, 1)))[0]
     return (anatomy.origin[0] + (xs[0] + xs[-1]) / 2 * anatomy.voxel[2],
             anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1])
+
+
+B1_MAP = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "em" / "body.npz"
+_B1 = {}
+
+
+def b1_plus(head, pos: torch.Tensor) -> torch.Tensor:
+    """Relative B1+ at spin positions [m, anatomy frame] of a generated head: the full-wave 3 T body
+    birdcage map of BrainWeb subject 04 (validation/em/run_brainweb.py; mean 1 over its brain, 0.86-1.19
+    p5-p95), sampled where each spin came from before ``sample_head`` resized and turned the head
+    (BrainWeb's heads share MNI space). Ignores the small random deformation and the weaker dielectric
+    effect of smaller heads."""
+    from blochparty import em
+    from blochparty.maps import sample
+
+    if "fm" not in _B1:
+        fm = em.field_maps(transmit=em.read_mariepy_maps(B1_MAP))
+        ref = bp.load_brainweb(4, ROOT, voxel=(5e-3,) * 3, dtype=torch.float64)
+        brain = (ref.fractions["gm"] + ref.fractions["wm"]) > 0.5
+        p = torch.tensor(ref.origin, dtype=torch.float64) + brain.nonzero().double().flip(-1) * torch.tensor(ref.voxel[::-1], dtype=torch.float64)
+        grid = fm.b1[None].double(), torch.tensor(fm.origin, dtype=torch.float64), torch.tensor(fm.spacing, dtype=torch.float64)
+        _B1["fm"], _B1["norm"] = grid, float(sample(*grid, p)[:, 0].mean())
+    pose = head.meta.get("pose")
+    q = pos.double()
+    if pose is not None:  # back to the source head: x -> c + S^-1 R^-1 (x - c), (z, y, x) grid-relative
+        an = head.anatomy
+        o = torch.tensor(an.origin, dtype=torch.float64)  # (x, y, z)
+        c = torch.tensor(pose["centre"][::-1], dtype=torch.float64) + o  # (x, y, z)
+        s = torch.tensor(pose["factors"][::-1], dtype=torch.float64)
+        yaw = math.radians(pose["yaw_deg"])
+        v = q - c
+        v = torch.stack([math.cos(yaw) * v[:, 0] - math.sin(yaw) * v[:, 1], math.sin(yaw) * v[:, 0] + math.cos(yaw) * v[:, 1],
+                         v[:, 2]], -1)
+        q = c + v / s
+    return sample(*_B1["fm"], q)[:, 0] / _B1["norm"]
 
 
 def turn(ph: bp.Phantom) -> bp.Phantom:
@@ -176,9 +212,11 @@ def main():
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
     ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
+    ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
+                    help="birdcage: B1+ of the full-wave 3 T body coil map (b1_plus)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
-                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 (no --age: open_sulci's 1 mm "
+                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage (no --age: open_sulci's 1 mm "
                          "ridges make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
@@ -188,6 +226,7 @@ def main():
         args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric", "protocol", 3.8
         args.quality = "real"
         args.readout_os = 2
+        args.b1 = "birdcage"
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -225,6 +264,8 @@ def main():
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
                                  mt=args.mt)
+            if args.b1 == "birdcage":
+                ph.b1 = b1_plus(head, ph.pos).to(ph.pos.dtype)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"])
@@ -244,7 +285,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "stack": args.stack, "readout_os": args.readout_os, "quality": args.quality,
+                "age": head.meta.get("age"), "stack": args.stack, "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
                 "seconds": round(time.perf_counter() - t0)}
