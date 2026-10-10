@@ -213,9 +213,25 @@ _REFERENCE = {
 }
 
 
+# Lipids are J-coupled: a single spin echo or STEAM at a long TE loses signal to J modulation (40-75 ms
+# apparent T2 for fat at 3 T), which a train of closely spaced refocusing pulses suppresses (Henkelman
+# et al. 1992, JMRI 2:533; Keene et al. 2020: 140-159 ms by CPMG at 8 ms spacing). A Bloch simulation
+# has no J coupling and plays the refocusing train itself, so its lipid T2 is the J-suppressed one:
+# multi-echo trains only (docs/LESSONS.md).
+LIPIDS = ("fat", "bone_marrow.yellow")
+_LIPID_T2 = re.compile(r"CPMG|multi[- ]echo|\bM[E]?SE\b|\b(TSE|FSE|GraSE)\b", re.I)
+
+
+def is_lipid(tissue: str) -> bool:
+    return any(tissue == x or tissue.startswith(x + ".") for x in LIPIDS)
+
+
 def reference_method(m: Measurement) -> bool:
-    """Whether a T1 or T2 row was measured by the reference method (see _REFERENCE)."""
+    """Whether a T1 or T2 row was measured by the reference method (see _REFERENCE; lipid T2: a
+    multi-echo train, see LIPIDS)."""
     ref, model = _REFERENCE[m.property]
+    if m.property == "t2" and is_lipid(m.tissue):
+        return bool(_LIPID_T2.search(m.method)) and not model.search(m.method)
     return bool(ref.search(m.method)) and not model.search(m.method)
 
 
@@ -250,7 +266,7 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
                            if len(ref) < len(use) else "")
             use = ref
         else:
-            method_note = "; no reference-method rows (model-based mapping)"
+            method_note = "; no reference-method rows"
     mean, sd, keys = combine(use)
     unit = PROPERTIES[property]
     scale = _SCALE.get(property, 1.)
@@ -305,4 +321,4 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
 
 
 __all__ = ["Database", "Measurement", "Source", "Tissue", "PROPERTIES", "load", "query", "pooled", "combine",
-           "reference_method", "tissue_table"]
+           "reference_method", "is_lipid", "LIPIDS", "tissue_table"]

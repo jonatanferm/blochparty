@@ -70,7 +70,11 @@ protons) have their own ids (`bone.cortical.bound_water`, ...), so they are neve
    (IR, SE-IR, SIR, SR, SE with variable TR). The simulator plays the acquisition itself, so it needs
    the intrinsic times; model-based mapping (MRF, synthetic MRI, GESFIDE, VFA, Look-Locker/MOLLI,
    MP2RAGE, MPRAGE, IR-TFE) carries its method's bias and is used only when the tier has no
-   reference rows. The citation names the sources left out.
+   reference rows. The citation names the sources left out. Lipids (`fat`, `fat.*`,
+   `bone_marrow.yellow`) take T2 from multi-echo trains only (CPMG, multi-echo SE/TSE, GraSE): their
+   J coupling makes a single spin echo or STEAM at long TE read 40-75 ms at 3 T, which closely
+   spaced refocusing suppresses (Henkelman 1992; Keene 2020: 140-159 ms at 8 ms spacing), and a
+   Bloch simulation has no J coupling but plays the refocusing train itself.
 3. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
    their SDs (an SE becomes SD x sqrt(n)).
 4. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within

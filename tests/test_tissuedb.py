@@ -129,6 +129,7 @@ AGREEMENT_EXCEPTIONS = {
     ("brain.gm", "fa", 3.): "Veenith 2013 atlas ROIs (partial volume with WM) 0.29 vs Acosta-Franco 2025 age-fit cortex 0.12",
     ("lung", "t2star", 1.5): "UTE echo times differ: 0.98 ms (Stock 1999) to 2.11 ms (Yu 2011)",
     ("muscle.skeletal", "t2", 3.): "Serrao 2020 abdominal MRF 74 ms (flagged high) vs multi-echo SE 29-31 ms",
+    ("fat.subcutaneous", "t2", 3.): "J coupling: single-echo SE 48-68 ms vs CPMG at 8 ms spacing 140-159 ms (Keene 2020)",
 }
 
 
