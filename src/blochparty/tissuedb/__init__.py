@@ -25,8 +25,9 @@ ROOT = Path(__file__).resolve().parent
 # property -> SI unit
 PROPERTIES = {"t1": "s", "t2": "s", "t2star": "s", "bound_t2": "s", "md": "m^2/s", "fa": "1",
               "bound_fraction": "1", "exchange_rate": "1/s", "water_content_mass": "1", "pd": "1",
-              "fat_fraction": "1", "chi": "ppm", "chi_qsm": "ppm", "permittivity_rel": "1", "conductivity": "S/m"}
-FRACTIONS = {"fa", "bound_fraction", "water_content_mass", "pd", "fat_fraction"}
+              "fat_fraction": "1", "chi": "ppm", "chi_qsm": "ppm", "permittivity_rel": "1", "conductivity": "S/m",
+              "myelin_water_fraction": "1", "myelin_water_t2": "s"}
+FRACTIONS = {"fa", "bound_fraction", "water_content_mass", "pd", "fat_fraction", "myelin_water_fraction"}
 FIELD_DEPENDENT = {"t1", "t2", "t2star", "permittivity_rel", "conductivity"}  # field_T required, no field fallback
 FIELD_PREFERRED = {"bound_fraction", "exchange_rate", "bound_t2"}  # other field allowed, marked assumed
 SD_KINDS = {"between_subject", "within_subject", "specimen", "across_studies", "se", "unknown"}
@@ -35,7 +36,8 @@ KINDS = {"article", "abstract", "review", "database"}
 # TissueProperties field -> database property
 TABLE_PROPERTIES = {"pd": "pd", "t1": "t1", "t2": "t2", "chi": "chi", "t2star": "t2star",
                     "bound_fraction": "bound_fraction", "exchange_rate": "exchange_rate", "bound_t2": "bound_t2",
-                    "diffusivity": "md", "fat_fraction": "fat_fraction"}
+                    "diffusivity": "md", "fat_fraction": "fat_fraction",
+                    "myelin_water_fraction": "myelin_water_fraction", "myelin_water_t2": "myelin_water_t2"}
 _SCALE = {"chi": 1e-6}  # database ppm -> TissueProperties SI
 
 

@@ -451,3 +451,21 @@ def test_open_sulci_puts_csf_on_the_midline_between_two_banks():
     assert float(inner.sum()) == pytest.approx(2 * inner.shape[0] * inner.shape[1], rel=0.25)
     assert float(inner[..., 19:21].mean()) > 0.5
     assert torch.equal(bp.open_sulci(an, 0.).fractions["csf"], an.fractions["csf"])
+
+
+def test_myelin_water_is_a_second_free_water_species():
+    """myelin_water_fraction m: the water splits into (1 - m) at T2 and m at myelin_water_t2, total PD
+    unchanged; None leaves one compartment (bit-identical spins)."""
+    from blochparty.anatomy import Distribution
+    a = torch.full((3, 3, 3), .6, dtype=torch.float64)
+    an = Anatomy({"wm": a}, (1e-3,) * 3, (0., 0., 0.))
+    base = DEFAULT_TISSUES[3.]["wm"]
+    kw = dict(spins_per_voxel=1, chi_to_b0=False, t2star="off")
+    one = bp.to_phantom(an, {3.: {"wm": base}}, 3., **kw)
+    two = bp.to_phantom(an, {3.: {"wm": replace(base, myelin_water_fraction=Distribution(.12, None, "test"),
+                                                myelin_water_t2=Distribution(.02, None, "test"))}}, 3., **kw)
+    assert len(two) == 2 * len(one)
+    assert float(two.pd.sum()) == pytest.approx(float(one.pd.sum()), rel=1e-12)
+    short = torch.isclose(two.t2, torch.tensor(.02, dtype=two.t2.dtype))
+    assert float(two.pd[short].sum()) == pytest.approx(.12 * float(one.pd.sum()), rel=1e-12)
+    assert torch.allclose(two.t2[~short], one.t2)

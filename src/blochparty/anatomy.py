@@ -60,6 +60,10 @@ class TissueProperties:
     bound_t2: Distribution | None = None
     diffusivity: Distribution | None = None  # isotropic m^2/s
     fat_fraction: Distribution | None = None
+    # free water with a short T2 (myelin water: water between the myelin lamellae, T2 15-40 ms), as a
+    # fraction of the free water; the rest has ``t2``. None: one water compartment.
+    myelin_water_fraction: Distribution | None = None
+    myelin_water_t2: Distribution | None = None
 
     def __post_init__(self):
         if self.pd.mean < 0 or self.t1.mean <= 0 or self.t2.mean <= 0:
@@ -77,6 +81,11 @@ class TissueProperties:
             raise ValueError("exchange rate must be nonnegative")
         if self.bound_t2 is not None and self.bound_t2.mean <= 0:
             raise ValueError("bound T2 must be positive")
+        if self.myelin_water_fraction is not None:
+            if not 0 <= self.myelin_water_fraction.mean < 1:
+                raise ValueError("myelin water fraction must lie in [0, 1)")
+            if self.myelin_water_fraction.mean > 0 and (self.myelin_water_t2 is None or self.myelin_water_t2.mean <= 0):
+                raise ValueError("a myelin water fraction needs a positive myelin_water_t2")
 
 
 # Every fallback explicitly says it is an assumption. These are simulation priors,
@@ -968,17 +977,21 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
             raise ValueError(f"missing MT properties for {name}")
         if diffusion and p.diffusivity is None:
             raise ValueError(f"missing diffusivity for {name}")
-        # Chemical species share spatial/relaxation/MT parameters within this class.
+        # Chemical species share spatial/relaxation/MT parameters within this class (the myelin water,
+        # if any, has its own T2).
         ff = p.fat_fraction.mean if p.fat_fraction else 0.
-        species = [(1-ff,0.)] if ff < 1 else []
+        mwf = p.myelin_water_fraction.mean if p.myelin_water_fraction else 0.
+        species = [((1-ff)*(1-mwf),0.,None)] if ff < 1 else []
+        if ff < 1 and mwf > 0:
+            species.append(((1-ff)*mwf,0.,p.myelin_water_t2.mean))
         if ff > 0:
             total_amp = sum(amp for _,amp in FAT_PEAKS)
-            species += [(ff*amp/total_amp,shift*1e-6*GAMMA_BAR*field_T) for shift,amp in FAT_PEAKS]
-        for weight,shift in species:
+            species += [(ff*amp/total_amp,shift*1e-6*GAMMA_BAR*field_T,None) for shift,amp in FAT_PEAKS]
+        for weight,shift,t2_own in species:
             parts["pos"].append(pos)
             parts["pd"].append(pd*weight)
             parts["t1"].append(1/expand(r1))
-            parts["t2"].append(1/expand(r2))
+            parts["t2"].append(1/expand(r2) if t2_own is None else torch.full_like(pd,t2_own))
             parts["db0"].append(db0+shift)
             if mt:
                 parts["f"].append(torch.full_like(pd,f/(1-f)))
@@ -1311,7 +1324,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
             centre = tuple(float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
                            for k, h in enumerate(anatomy.voxel))
         yaw = math.radians(yaw_sd) * float(rng.standard_normal()) if yaw_sd else 0.
-        pose = {"yaw_deg": math.degrees(yaw)}
+        pose = {"yaw_deg": math.degrees(yaw), "centre": list(centre), "factors": list(factors)}
         dt = displacement.dtype
         s = torch.tensor(factors, dtype=dt).view(3, 1, 1, 1)
         grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=dt) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
