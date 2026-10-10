@@ -120,6 +120,12 @@ direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 rel
   path on the realism TSE (`test_metal_nufft.py`). For static spins without diffusion, motion,
   free pools, the generalized bound pool or concomitant fields (raises `ValueError`); other readouts
   and threadgroups whose spins span more than `NUFFT_WMAX` grid cells keep the per-sample path.
+- Metal, `pulses="reuse"` (forward only, opt-in): a pulse of two or more RF segments that recurs up to
+  a global RF phase is stepped once per spin into its affine map and applied at every occurrence,
+  turned about z by its phase (relaxation and exchange commute with z-rotations: the same map, 1e-7
+  from stepping, `test_metal_reuse.py`). Maps take 12 (20 with a bound pool) floats per spin and
+  pulse, at most `PULSE_MEMORY` bytes (2 GiB), most-used pulses first. Same eligibility as NUFFT
+  readouts.
 - Metal: `mma=False` (one `simd_sum` per coil and sample) takes at most 32 coils; the default for
   two or more coils is the matrix-product reduction, which has no limit. Moving spins in mapped
   coils (`FieldMaps.coils` with motion or diffusion) always use the direct reduction, so at most

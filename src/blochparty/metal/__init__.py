@@ -927,7 +927,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
                                     constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
                                     constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
-                                    constant uint* prm         [[buffer(24)]],  // (16,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped fmove
+                                    constant uint* prm         [[buffer(24)]],  // (19,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped fmove nufft reuse pbase
                                     device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
                                     constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                     constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
@@ -947,7 +947,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     threadgroup float psi[8];
     threadgroup int tgred[2 * MAX_SG];  // NUFFT readouts: per-simdgroup window ends
     threadgroup int tgwin[2];
-    const uint nuon = prm[16];
+    const uint nuon = prm[16], pon = prm[17], pbase = prm[18];
     threadgroup float* mine = buf + sg * MMA_REGION;
     const bool active = i < n;
     const uint j = active ? i : 0;
@@ -1069,6 +1069,33 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                 continue;
             }
         }
+        if (@V@ < 2 && pon && run_of[s] <= -2) {
+            // A reused pulse (simulate_metal(pulses="reuse")): the spin's affine map of this pulse,
+            // m += D m + c (pulse_maps, from the pulse's first occurrence), turned about z by this
+            // occurrence's phase q[6]: P_phi = Rz(phi) P Rz(-phi), since relaxation and exchange
+            // commute with Rz. U holds the maps (P, K, n_pad), K = R (R + 1) for R rows (x y z [b]).
+            const uint pid = uint(-2 - run_of[s]);
+            const uint R = (@V@ != 0 && mt) ? 4u : 3u;
+            mx += st.lx, my += st.ly, mz += st.lz, st.lx = st.ly = st.lz = 0.0f;
+            if (R == 4) st.mb += st.lb, st.lb = 0.0f;
+            float cph;
+            const float sph = precise::sincos(q[6], cph);
+            const float ux = cph * mx + sph * my, uy = cph * my - sph * mx;
+            device const float* D = U + pid * R * (R + 1) * n_pad + j;
+            float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (uint r = 0; r < R; ++r) {
+                device const float* row = D + r * (R + 1) * n_pad;
+                float a = row[R * n_pad] + row[0] * ux + row[n_pad] * uy + row[2 * n_pad] * mz;
+                if (R == 4) a += row[3 * n_pad] * st.mb;
+                v[r] = a;
+            }
+            two_sum(mx, st.lx, cph * v[0] - sph * v[1]), two_sum(my, st.ly, sph * v[0] + cph * v[1]);
+            two_sum(mz, st.lz, v[2]);
+            if (R == 4) two_sum(st.mb, st.lb, v[3]);
+            s += uint(nu[pbase + pid]) - 1;
+            if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+            continue;
+        }
         advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx + st.lx;
@@ -1087,6 +1114,51 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
         for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
         if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
         if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
+    }
+}
+"""
+
+_PULSE_KERNEL = r"""
+// ==== Reused pulses (simulate_metal(pulses="reuse")): per spin, the affine map of each distinct pulse,
+// m -> m + D m + c over the rows x, y, z (and the bound pool's Mz), from the same steps as the main
+// kernel on the pulse's first occurrence: the columns of D from unit vectors with pd = 0 (no
+// recovery), c from zero with the spin's pd. Thread (p, j): pulse p, spin j; maps (P, K, T).
+kernel void pulse_maps@SUFFIX@(device float* maps      [[buffer(0)]],
+                              constant float* spins   [[buffer(1)]],
+                              constant float* segs    [[buffer(2)]],
+                              constant int* flags     [[buffer(3)]],
+                              constant float* pool    [[buffer(4)]],
+                              constant float* frf     [[buffer(5)]],
+                              constant float* line    [[buffer(6)]],
+                              constant float* log_f   [[buffer(7)]],
+                              constant int* pinfo     [[buffer(8)]],  // (P, 2): first segment, length
+                              constant uint* prm      [[buffer(9)]],  // n T P mt
+                              uint i [[thread_position_in_grid]]) {
+    const uint n = prm[0], T = prm[1], P = prm[2], mt = prm[3];
+    const uint pid = i / T, j = i % T;
+    if (pid >= P || j >= n) return;
+    const uint R = (@V@ != 0 && mt) ? 4u : 3u, K = R * (R + 1);
+    const Spin p0 = load_spin(spins, n, j);
+    Pool b = Pool{0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    if (@V@ != 0 && mt) b = load_pool(pool, n, j);
+    const int a = pinfo[2 * pid], len = pinfo[2 * pid + 1];
+    Conc cc;
+    for (uint col = 0; col <= R; ++col) {
+        Spin p = p0;
+        if (col < R) p.pd = 0.0f;
+        float mx = col == 0 ? 1.0f : 0.0f, my = col == 1 ? 1.0f : 0.0f, mz = col == 2 ? 1.0f : 0.0f;
+        float mb = col == 3 ? 1.0f : 0.0f, lx = 0.0f, ly = 0.0f, lz = 0.0f, lb = 0.0f;
+        Cache k;
+        ZCache zc;
+        for (int s = a; s < a + len; ++s) {
+            constant float* q = segs + 8 * s;
+            const float bz = offset(p, cc, 0u, q);
+            if (@V@ != 0 && mt) step_mt(q, flags[s], bz, frf[s], mx, my, mz, mb, lx, ly, lz, lb, p, b, line, log_f, k, zc);
+            else step(q, flags[s], bz, mx, my, mz, lx, ly, lz, p, k);
+        }
+        const float v[4] = {(mx - (col == 0 ? 1.0f : 0.0f)) + lx, (my - (col == 1 ? 1.0f : 0.0f)) + ly,
+                            (mz - (col == 2 ? 1.0f : 0.0f)) + lz, (mb - (col == 3 ? 1.0f : 0.0f)) + lb};
+        for (uint r = 0; r < R; ++r) maps[(pid * K + r * (R + 1) + col) * T + j] = v[r];
     }
 }
 """
@@ -1631,6 +1703,8 @@ def _lib():
         for suffix, v in (("", "0"), ("_full", "1")):
             kernels += replay.replace("@SUFFIX@", suffix).replace("@V@", v)
             kernels += "".join(adjoint.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@NC@", str(c)) for c in ADJOINT_COILS)
+        for suffix, v in (("", "0"), ("_full", "1")):
+            kernels += _PULSE_KERNEL.replace("@SUFFIX@", suffix).replace("@V@", v)
         _LIB = torch.mps.compile_shader(_SOURCE + _ADJOINT_COMMON + kernels)
     return _LIB
 
@@ -1660,7 +1734,7 @@ def _requires_grad(*objs) -> bool:
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
                    chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
                    seed: int = 0, maps=None, checkpoint_every: int | None = None, readouts: str = "direct",
-                   nufft_width: int = 6, nufft_terms: int = 3) -> SimResult:
+                   nufft_width: int = 6, nufft_terms: int = 3, pulses: str = "step") -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
@@ -1679,14 +1753,24 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     onto a 2x oversampled grid with an exponential-of-semicircle kernel of ``nufft_width`` cells, and
     jumps over the readout in one step; an FFT on the CPU gives the samples. For static spins without
     concomitant fields, diffusion, motion, free pools or the generalized bound pool (raises otherwise).
-    Width 6 and 3 terms: ~1e-5 of the signal (float32's level)."""
+    Width 6 and 3 terms: ~1e-5 of the signal (float32's level).
+
+    ``pulses="reuse"`` (forward only): a pulse (two or more consecutive RF segments) that recurs, up to a
+    global RF phase, is stepped once per spin into its affine map (``pulse_maps``, from its first
+    occurrence), and every occurrence applies that map turned about z by its phase (relaxation and
+    exchange commute with z-rotations, so this is the same map, not an approximation). Costs
+    ``PULSE_MEMORY`` bytes at most of maps (12 or 20 floats per spin and pulse, the most-used pulses
+    first); for static spins without concomitant fields, diffusion, motion, free pools or the
+    generalized bound pool (raises otherwise)."""
     if readouts not in ("direct", "nufft"):
         raise ValueError(f"readouts must be 'direct' or 'nufft', not {readouts!r}")
+    if pulses not in ("step", "reuse"):
+        raise ValueError(f"pulses must be 'step' or 'reuse', not {pulses!r}")
     if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
         return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every)
     with torch.no_grad():
         return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps,
-                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None)
+                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None, reuse=pulses == "reuse")
 
 
 def default_checkpoint_every(n_segments: int) -> int:
@@ -1952,6 +2036,59 @@ def _readout_runs(seq: Sequence) -> list[tuple[int, int]]:
     return max(kinds.values(), key=len)
 
 
+PULSE_MEMORY = 2 << 30  # bytes of per-spin pulse maps at most (pulses="reuse")
+
+
+def _reused_pulses(seq: Sequence, flags: Tensor, frf: Tensor | None, tol: float = 1e-6):
+    """[(first segment, length, [(segment, phase), ...])] of every pulse that recurs: a run of >= 2
+    consecutive RF segments without ADC (a spoil only on its last) with the dt, gradient, b0_offset, RF
+    frequency and flags of an earlier run and its RF times e^{i phase} (to ``tol`` of the peak; phase by
+    least squares). Most segments saved first. ``flags``: the kernel's (bound-only bits applied)."""
+    f = flags[: len(seq)].numpy()
+    S = len(seq)
+    live = ((f & 1) != 0) & ((f & 2) == 0)
+    runs, a = [], None
+    for s in range(S):
+        if live[s]:
+            a = s if a is None else a
+            if f[s] & 4:
+                runs.append((a, s + 1 - a))
+                a = None
+        elif a is not None:
+            runs.append((a, s - a))
+            a = None
+    if a is not None:
+        runs.append((a, S - a))
+    dt = seq.dt.detach().double().cpu().numpy()
+    rf = seq.rf.detach().double().cpu().numpy()
+    z = rf[:, 0] + 1j * rf[:, 1]
+    g = seq.grad.detach().double().cpu().numpy()
+    b0 = np.zeros(S) if seq.b0_offset is None else seq.b0_offset.detach().double().cpu().numpy()
+    fr = np.zeros(S) if frf is None else frf[:S].detach().cpu().double().numpy()
+    close = lambda x, y: np.abs(x - y).max() <= tol * max(np.abs(x).max(), np.abs(y).max(), 1e-300)
+    groups, bucket = [], {}
+    for a, k in runs:
+        if k < 2:
+            continue
+        i, key = slice(a, a + k), (k, round(float(dt[a:a + k].sum()) * 1e9))
+        for gi in bucket.get(key, ()):
+            r = groups[gi][0]
+            j = slice(r, r + k)
+            if not (np.array_equal(f[i], f[j]) and close(dt[i], dt[j]) and close(g[i], g[j]) and close(b0[i], b0[j])
+                    and close(fr[i], fr[j])):
+                continue
+            c = np.vdot(z[j], z[i])
+            ph = float(np.angle(c)) if c != 0 else 0.0
+            if close(z[i], z[j] * np.exp(1j * ph)):
+                groups[gi][2].append((a, ph))
+                break
+        else:
+            bucket.setdefault(key, []).append(len(groups))
+            groups.append((a, k, [(a, 0.0)]))
+    groups = [p for p in groups if len(p[2]) > 1]
+    return sorted(groups, key=lambda p: -(len(p[2]) - 1) * p[1])
+
+
 def _es_hat(kp: np.ndarray, ng: int, w: int, beta: float) -> np.ndarray:
     """Fourier transform of the exponential-of-semicircle kernel exp(beta (sqrt(1 - (2t/w)^2) - 1)), t in grid
     cells, at modes kp of an ng-cell grid (Barnett, Magland, af Klinteberg 2019); trapezoid quadrature."""
@@ -1972,20 +2109,25 @@ def _take(phantom: Phantom, idx: Tensor) -> Phantom:
 
 
 def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None):
+             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None, reuse: bool = False):
     """The forward kernels. ``fields_in``: the field model's inputs (``fields.SpinFields``) in place of
     spin_fields(scanner, pos). ``keep``: also return what the adjoint needs, with the state before every
-    ``chunk`` segments (one dispatch each). ``nufft``: (width, terms) of NUFFT readouts (simulate_metal)."""
+    ``chunk`` segments (one dispatch each). ``nufft``: (width, terms) of NUFFT readouts; ``reuse``: reused
+    pulse maps (simulate_metal)."""
     runs = []
-    if nufft is not None:
+    for opt, on in (("readouts='nufft'", nufft is not None), ("pulses='reuse'", reuse)):
+        if not on:
+            continue
         if keep:
-            raise ValueError("NUFFT readouts are forward only")
+            raise ValueError(f"{opt} is forward only")
         for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
                               ("free pools", bool(getattr(phantom, "pools", None))),
                               ("the generalized bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
                               ("concomitant fields", bool(spin_fields(scanner, phantom.pos).mode))):
             if present:
-                raise ValueError(f"readouts='nufft' is for static spins without {what}")
+                raise ValueError(f"{opt} is for static spins without {what}")
+        mma = True
+    if nufft is not None:
         runs = _readout_runs(seq)
         mma = True
         if runs and not ordered:  # sorted along the readout's phase: a threadgroup covers a few grid cells
@@ -1998,7 +2140,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             inv = torch.argsort(order)
             r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
                          None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
-                         nufft=nufft)
+                         nufft=nufft, reuse=reuse)
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv])
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as bloch.simulate
@@ -2077,6 +2219,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             raise NotImplementedError("bound-pool-only RF segments with free pools or the generalized bound pool")
         bo = torch.tensor(bound_only, dtype=torch.int32)
         flags = flags | (bo << 4) if phantom.bound is not None else flags & ~bo  # no bound pool: free segments
+    flags_cpu = flags
     flags = flags.to(dev)
     rows = (torch.cumsum(adc, 0) - 1).clamp_min(0).to(torch.int32).to(dev)
     n_adc = int(adc.sum())
@@ -2250,12 +2393,35 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             mt_bufs = [MB, pool_b, frf_b, line_b, logf_b, mt_flag]
             bufs = (MB, pool_b, frf_b, *bufs[3:])
         sig = torch.zeros((n_adc + len(runs) * terms * ng) * n_coils * 2, device=dev, dtype=f32)
+    # reused pulses: maps per spin from each pulse's first occurrence; occurrences marked -2 - id in
+    # run_of with their phase in the psi column; lengths after the NUFFT data in nu
+    pulses, pbase = (_reused_pulses(seq, flags_cpu, frf_b if pool is not None else None) if reuse else []), 0
+    if pulses:
+        R = 4 if pool is not None else 3
+        K = R * (R + 1)
+        pulses = pulses[: max(0, PULSE_MEMORY // (4 * K * threads))]
+    if pulses:
+        pbase = len(nu)
+        nu = torch.cat([nu, torch.tensor([k for _, k, _ in pulses], dtype=torch.float64)])
+        idx, phase = [], []
+        for pid, (a, k, occ) in enumerate(pulses):
+            for s_, ph in occ:
+                run_of[s_] = -2 - pid
+                idx.append(s_), phase.append(ph % (2 * math.pi))
+        segs[torch.tensor(idx, device=dev), 6] = torch.tensor(phase, dtype=f32, device=dev)
+        pinfo = torch.tensor([[a, k] for a, k, _ in pulses], dtype=torch.int32).reshape(-1).to(dev)
+        U_b = torch.zeros(len(pulses) * K * threads, device=dev, dtype=f32)
+        prm_p = torch.tensor([n, threads, len(pulses), int(pool is not None)], dtype=torch.int32).to(dev)
+        getattr(lib, "pulse_maps" + suffix)(U_b, spins, segs, flags, mt_bufs[1], mt_bufs[2], mt_bufs[3], mt_bufs[4],
+                                            pinfo, prm_p, threads=len(pulses) * threads, group_size=group)
+        bufs = (*bufs[:6], U_b, *bufs[7:])
     run_of, nu_b = run_of.to(dev), nu.to(dev, f32).contiguous()
-    bounds, s0 = [], 0  # dispatches never split a run
+    spans = runs + [(s_, k) for _, k, occ in pulses for s_, _ in occ]
+    bounds, s0 = [], 0  # dispatches never split a run or a reused pulse
     while s0 < S:
         bounds.append(s0)
         e = min(S, s0 + chunk)
-        for a, k in runs:
+        for a, k in spans:
             if a < e < a + k:
                 e = a if a > s0 else a + k
                 break
@@ -2265,7 +2431,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     tiles = (n_tiles, threads) if mma else (0, 0)
     prms = torch.from_numpy(np.array([[n, n_coils, s0, s1, *tiles, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
                                        kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped,
-                                       int(fmove), int(bool(runs))] for s0, s1 in zip(starts, ends)],
+                                       int(fmove), int(bool(runs)), int(bool(pulses)), pbase] for s0, s1 in zip(starts, ends)],
                                      dtype=np.uint32).view(np.int32)).to(dev)
 
     ckpts = []
