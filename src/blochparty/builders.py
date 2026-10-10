@@ -311,6 +311,9 @@ def se_2d(n: int = 64, fov: float = 0.22, te: float = 20e-3, tr: float = 0.5, **
     return seq
 
 
+_GHOST_OFFSET = 1e6  # [Hz] where tse_2d's bound-pool-only pulses are played: no free water follows
+
+
 def tse_2d(
     n: int = 64,
     fov: float = 0.22,
@@ -336,7 +339,8 @@ def tse_2d(
     apodization: float = 0.5,
     rf_steps: int | None = None,
     slice_order=None,
-    other_rf_raster: float = 1e-4,
+    other_rf_raster: float | None = None,
+    bound_only_beyond: float | None = None,
 ) -> Sequence:
     """2D turbo spin echo (CPMG): per shot a ``excite_flip_deg`` pulse along x, then ``etl``
     refocusing pulses along y every ``esp`` (None: the shortest possible), echoes at
@@ -356,14 +360,21 @@ def tse_2d(
     The z offsets [m] from this slice of every slice played in each TR, in playing order, with
     this slice as the one ``0.0``; the other slices' echo trains are played at their times as
     their RF pulses and slice-select gradients only (their crushers and readouts move no
-    longitudinal magnetization here). ``other_rf_raster=None`` plays them exactly: the real
-    phase-ramped pulses on the system's RF raster (a reference, slow at large offsets). Otherwise
-    those pulses are sampled on ``other_rf_raster`` without
-    their phase ramp, and moved to their slice by ``Sequence.b0_offset`` = -G z_j during their RF
-    segments, so a spin at z is off resonance by G (z - z_j), as under the real pulse, and its
-    bound pool is saturated at that offset (``rf_freq`` 0 there): incidental magnetization
-    transfer and slice cross-talk without the cost of resolving a 30 kHz phase ramp. Such a
-    sequence simulates, but is not a scanner sequence (``write_pulseq`` refuses ``b0_offset``).
+    longitudinal magnetization here), as their real phase-ramped pulses on ``other_rf_raster``
+    (default: the system's RF raster), which must resolve the ramp (|G z_j| raster < 1/2).
+    Their 180 deg pulses still nutate this slice's water a few kHz outside their band:
+    cross-talk, and incidental magnetization transfer through the bound pool.
+    ``bound_only_beyond`` [m] (default None): slices at least this far away act on the bound pool
+    only: each pulse becomes one segment of the same RF energy (sum |B1|^2 dt), played 1 MHz off
+    resonance (``Sequence.b0_offset``) where the free water does not follow it, with ``rf_freq``
+    placing it at G (z_j - z) from every spin's bound pool (saturation per pulse is linear in the
+    energy there: W T ~ 4e-4 for a 180 deg 2 ms pulse at 6 kHz). One segment per pulse instead
+    of one per raster step, and no 30 kHz ramp to resolve. Against every pulse exact (white
+    matter with MT, 16 slices 4.7 mm apart, TR 6.5 s, ETL 16, spins every 0.05 mm over +-3.5 mm):
+    this slice on 100 us, slices within 2.5 spacings on 50 us, the rest bound-only: 0.74 % of the
+    signal at 1/13-1/27 of the time (``tests/test_multislice.py``); the white matter loses 31-39 %
+    against one slice. Such a sequence simulates, but is not a scanner sequence (``write_pulseq``
+    refuses ``b0_offset``).
 
     Returns ``meta["matrix"] = (n, n)`` and ``meta["kspace_index"]`` (grid index of every
     ADC sample; use ``cartesian_kspace`` / ``cartesian_recon``), ``te`` (effective),
@@ -408,33 +419,46 @@ def tse_2d(
     elif esp < 2 * max(h0, h1, h2) - _T_TOL:
         raise ValueError(f"echo spacing too short: minimum {2 * max(h0, h1, h2) * 1e3:.3f} ms")
 
-    others = []  # (first, last) segment of every other slice's RF block, and its offset [m]
+    ghosts = []  # (first, last) segment of every bound-pool-only RF block, and its slice's offset [m]
     pulses = {}  # offset -> (excitation, refocusing pulses) as played for that slice
     if slice_order is not None:
-        exact = other_rf_raster is None  # the real phase-ramped pulses on the system's raster (a reference)
-        coarse = sysm if exact else replace(sysm, rf_raster=other_rf_raster)
+        other_sys = sysm if other_rf_raster is None else replace(sysm, rf_raster=other_rf_raster)
         for dz in slice_order:
-            cargs = (rf_duration, slice_thickness, (slice_offset + dz) if exact else 0.0, time_bw_product,
-                     apodization, coarse, dtype, rf_steps)
+            cargs = (rf_duration, slice_thickness, slice_offset + dz, time_bw_product, apodization, other_sys, dtype,
+                     rf_steps)
             pulses[dz] = (_excitation(excite_flip_deg, *cargs), [_excitation(f, *cargs) for f in flips])
             if abs(pulses[dz][0].duration - exc.duration) > _T_TOL or abs(pulses[dz][1][0].duration - ref.duration) > _T_TOL:
                 raise ValueError("other_rf_raster changes the pulse blocks' durations; choose a divisor of the RF timing")
+            g = float(pulses[dz][0].grads[0].amplitude[2])
+            near = bound_only_beyond is None or abs(dz) < bound_only_beyond
+            if near and abs(g * (slice_offset + dz)) * other_sys.rf_raster >= 0.5:
+                raise ValueError(f"other_rf_raster cannot resolve the {g * (slice_offset + dz):.0f} Hz ramp of the slice "
+                                 f"at {dz * 1e3:+.1f} mm; refine it or set bound_only_beyond")
         spoiler = _lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype)
         t_spoil = block_duration(spoiler, system=sysm)
 
+    def ghost(rf: RFPulse) -> RFPulse:
+        """One segment over the pulse with its RF energy (amplitude: the RMS of |B1|)."""
+        rms = (rf.signal.square().sum(-1).mean()).sqrt()
+        return RFPulse(torch.stack([rms, torch.zeros_like(rms)])[None], rf.duration, rf.delay, rf.duration / 2)
+
     def other_train(dz):
         exc_o, refs_o = pulses[dz]
+        far = bound_only_beyond is not None and abs(dz) >= bound_only_beyond
+        if far:
+            exc_o = exc_o._replace(rf=ghost(exc_o.rf))
+            refs_o = [r._replace(rf=ghost(r.rf)) for r in refs_o]
         start = len(b._is_rf)
         b.block(*exc_o.grads, rf=exc_o.rf)
-        if not exact:
-            others.append((start, len(b._is_rf), dz))
+        if far:
+            ghosts.append((start, len(b._is_rf), dz))
         _pad(b, t_p)
         _pad(b, esp / 2 - h0)
         for r in refs_o:
             start = len(b._is_rf)
             b.block(*r.grads, rf=_with_phase(r.rf, math.pi / 2))
-            if not exact:
-                others.append((start, len(b._is_rf), dz))
+            if far:
+                ghosts.append((start, len(b._is_rf), dz))
             for t_gap in (t_c, esp / 2 - h1, ro.duration, esp / 2 - h2, t_c):
                 _pad(b, t_gap)
         if spoiling == "gradient":
@@ -481,16 +505,17 @@ def tse_2d(
                   etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
                   line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
                   system=sysm, **({} if slice_order is None else {"slice_order": slice_order}))
-    if others:
+    if ghosts:  # free water 1 MHz away; the bound pool at G (z_j - z)
         from .exchange import rf_frequency
 
         f_rf = rf_frequency(seq).clone()
         offset = torch.zeros_like(seq.dt)
         is_rf = torch.tensor(seq.is_rf)
-        for a, e, dz in others:
+        for a, e, dz in ghosts:
             rf_seg = torch.arange(a, e)[is_rf[a:e]]
-            offset[rf_seg] = -seq.grad[rf_seg, 2].detach() * dz
+            offset[rf_seg] = _GHOST_OFFSET
             f_rf[a:e] = 0.0
+            f_rf[rf_seg] = seq.grad[rf_seg, 2].detach() * (slice_offset + dz) + _GHOST_OFFSET
         seq = replace(seq, b0_offset=offset, rf_freq=f_rf)
     return seq
 

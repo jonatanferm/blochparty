@@ -15,6 +15,18 @@ the image left, as fastMRI shows it).
 Noise-free k-space (coils, 128, 128; k = 0 at index 64) is saved per slice; noise is added later,
 calibrated to the real images' noise floor, so the noise model can change without simulating again.
 
+Quality (``--quality``), measured on one 64 x 64 slice against 27 spins per tissue and voxel
+(whose own seed-to-seed RMS difference is 0.0073 of the normalised image):
+
+* ``full``: 8 spins per voxel drawing their tissue (``sampling="categorical"``), a +-3 mm slab,
+  RF on a 100 us raster: 1.8 M spins, RMS 0.014;
+* ``fast``: 4 such spins per voxel: 0.9 M spins, RMS 0.022;
+* ``legacy``: what the first runs used, 8 spins per tissue and voxel, +-4 mm, 10 us: 9.4 M spins,
+  RMS 0.013, about 14 times the GPU time of ``full``.
+
+The RF raster costs nothing in accuracy (100 us against 10 us: RMS 0.001) and the +-3 mm slab
+nothing against +-4 mm; ``--spins`` overrides the spin count.
+
 Variants (for ablations, same seeds = same heads): ``--multislice`` plays the other 15 slices'
 pulses in the real interleaved order (odd slices, then even; ``tse_2d(slice_order=...)``), so the
 imaged slice gets their incidental magnetization transfer and cross-talk; ``--mt`` gives the spins
@@ -78,9 +90,20 @@ def interleaved(count=SLICES) -> list[int]:
     return list(range(0, count, 2)) + list(range(1, count, 2))
 
 
-def sequence(n: int, tr: float, te: float, slice_order=None) -> bp.Sequence:
+QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF raster [s]
+    "full": ((2, 2, 2), "categorical", 3, 1e-4),
+    "fast": ((1, 2, 2), "categorical", 3, 1e-4),
+    "legacy": ((2, 2, 2), "per_tissue", 4, 1e-5),
+}
+
+
+def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None) -> bp.Sequence:
+    """The paired protocol. With ``slice_order``: the slices within 2.5 spacings as their real pulses
+    on 50 us, the rest on the bound pool only (0.74 % against every pulse exact, ``tse_2d``)."""
+    multi = {} if slice_order is None else dict(other_rf_raster=5e-5, bound_only_beyond=2.5 * spacing)
     return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
-                     spoiling="gradient", ramps=True, system=System(rf_raster=1e-5), slice_order=slice_order)
+                     spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
+                     **multi)
 
 
 def simulate(ph, seq, coils):
@@ -104,13 +127,17 @@ def main():
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
-    ap.add_argument("--spins", default="2,2,2", help="spins per tissue and voxel along z,y,x")
+    ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
+    ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
         return range(int(rng.split("-")[0]), int(rng.split("-")[-1]) + 1, int(step or 1))
 
+    spins, sampling, half, rf_raster = QUALITY[args.quality]
+    if args.spins:
+        spins = tuple(int(c) for c in args.spins.split(","))
     table = bp.DEFAULT_TISSUES
     if args.table == "tissuedb":
         from blochparty import tissuedb
@@ -131,10 +158,10 @@ def main():
         for i in span(args.slices):
             t = time.perf_counter()
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
-            seq = sequence(args.n, proto["TR"], proto["TE"], order)
+            seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]))
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
-            region = (slice(max(k - 4, 0), k + 5), slice(None), slice(None))
-            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=tuple(int(c) for c in args.spins.split(",")),
+            region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
+            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling,
                                  mt=args.mt)
             ph.pos = ph.pos - torch.tensor([0.0, 0.0, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
@@ -144,7 +171,8 @@ def main():
             timing.append(time.perf_counter() - t)
             print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.0f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
-                "multislice": args.multislice, "mt": args.mt, "table": args.table, "spins": args.spins,
+                "multislice": args.multislice, "mt": args.mt, "table": args.table, "quality": args.quality,
+                "spins": list(spins), "sampling": sampling, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
         print(json.dumps(meta), flush=True)
