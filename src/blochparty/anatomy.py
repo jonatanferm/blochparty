@@ -730,8 +730,10 @@ def gaussian_random_field(anatomy: Anatomy, length: float, generator: torch.Gene
     return field / spectrum.mean().sqrt(), tuple(lo), (h, h, h)
 
 
-def _variability_factors(anatomy, names, variability):
-    """{(tissue, property): (nz, ny, nx) mean-1 log-normal factor} with relative SD per property."""
+def _variability_factors(anatomy, names, variability, region=None):
+    """{(tissue, property): (nz, ny, nx) mean-1 log-normal factor} with relative SD per property.
+    The fields span the whole anatomy (one realisation for every crop); ``region`` (three unit-step
+    slices, z/y/x) evaluates them at its voxels only, with the same values as cropping afterwards."""
     import zlib
 
     unknown = set(variability) - {*_VARIABLE, "length", "seed"}
@@ -739,8 +741,10 @@ def _variability_factors(anatomy, names, variability):
         raise ValueError(f"variability takes {_VARIABLE} relative SDs, 'length' [m] and optional 'seed'; got {sorted(variability)}")
     seed = int(variability.get("seed", 0))
     ref = next(iter(anatomy.fractions.values()))
-    nz, ny, nx = anatomy.shape
-    idx = torch.cartesian_prod(torch.arange(nz), torch.arange(ny), torch.arange(nx)).to(torch.float64)
+    bounds = [s.indices(n)[:2] for s, n in zip(region, anatomy.shape)] if region is not None else \
+        [(0, n) for n in anatomy.shape]
+    nz, ny, nx = (hi - lo for lo, hi in bounds)
+    idx = torch.cartesian_prod(*(torch.arange(lo, hi) for lo, hi in bounds)).to(torch.float64)
     centres = torch.tensor(anatomy.origin, dtype=torch.float64) + idx.flip(-1) * torch.tensor(anatomy.voxel[::-1])
     out = {}
     for name in names:
@@ -839,20 +843,28 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
             macro = macro[fov_region]
     else:
         macro = 0.
+    if fov_region is not None:
+        if len(fov_region) != 3 or any(not isinstance(s, slice) or s.indices(n)[2] != 1
+                                       for s, n in zip(fov_region, anatomy.shape)):
+            raise ValueError("fov_region needs three unit-step slices in z/y/x order")
+        bounds = [s.indices(n)[:2] for s, n in zip(fov_region, anatomy.shape)]
     factors = {}
-    if variability:  # on the full anatomy, so crops and slabs share one realisation
+    if variability:  # one realisation on the full anatomy, evaluated where the spins are
         live = [n for n, p in props.items() if n in anatomy.fractions and p.pd.mean > 0]
-        factors = _variability_factors(anatomy, live, variability)
+        factors = _variability_factors(anatomy, live, variability, region=fov_region)
     macro_est = None
     if t2star == "separate" and "intrinsic_r2prime" not in anatomy.maps and macroscopic_r2prime is None:
         if any(tuple(fm.b0.shape) != anatomy.shape for fm in maps_pair):
             raise ValueError("t2star='separate' needs field maps on the anatomy grid (anatomy_field_maps)")
-        macro_est = estimate_macroscopic_r2prime(sum(fm.b0.to(torch.float64) for fm in maps_pair), anatomy.voxel,
-                                        r2star_acquisition)
+        df = sum(fm.b0.to(torch.float64) for fm in maps_pair)
+        if fov_region is None:
+            macro_est = estimate_macroscopic_r2prime(df, anatomy.voxel, r2star_acquisition)
+        else:  # the region and a 1-voxel margin: the central differences inside it are unchanged
+            pad = tuple(slice(max(lo - 1, 0), min(hi + 1, n)) for (lo, hi), n in zip(bounds, anatomy.shape))
+            est = estimate_macroscopic_r2prime(df[pad], anatomy.voxel, r2star_acquisition)
+            macro_est = est[tuple(slice(lo - p.start, hi - p.start) for (lo, hi), p in zip(bounds, pad))]
     if fov_region is not None:
         anatomy = anatomy.crop(fov_region)
-        factors = {key: value[fov_region] for key, value in factors.items()}
-        macro_est = None if macro_est is None else macro_est[fov_region]
     ref = next(iter(anatomy.fractions.values()))
     gen = torch.Generator().manual_seed(seed)
     qgen = torch.Generator().manual_seed(0)
