@@ -72,7 +72,7 @@ def stack(anatomy, mode: str = "landmarks") -> np.ndarray:
     apart whatever the head's size; fitted to the real stacks' head-area profile (area / slice-0 area
     1.0 to slice 7, 0.53 at 12, 0.23 at 15; the fit alone trades offset against spacing)."""
     csf = anatomy.fractions["csf"].numpy()
-    brain = (anatomy.fractions["wm"] + anatomy.fractions["gm"]).numpy()
+    brain = sum(v for k, v in anatomy.fractions.items() if k in ("wm", "gm", *bp.anatomy.DEEP_GREY)).numpy()
     z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
     inside = ndimage.binary_erosion((brain + csf) > 0.5, iterations=round(15e-3 / anatomy.voxel[1]))
     deep = (csf * inside).reshape(len(z), -1).sum(1)
@@ -212,11 +212,14 @@ def main():
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
     ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
+    ap.add_argument("--deep-grey", action="store_true",
+                    help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
+    ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
     ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
                     help="birdcage: B1+ of the full-wave 3 T body coil map (b1_plus)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
-                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage (no --age: open_sulci's 1 mm "
+                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey (no --age: open_sulci's 1 mm "
                          "ridges make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
@@ -227,6 +230,7 @@ def main():
         args.quality = "real"
         args.readout_os = 2
         args.b1 = "birdcage"
+        args.deep_grey = True
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -250,7 +254,7 @@ def main():
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
-                              size=args.size, yaw_sd=args.yaw_sd, age=age)
+                              size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3)
         fields = head.field_maps()
         zs = stack(head.anatomy, args.stack)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
@@ -285,7 +289,8 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "stack": args.stack, "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
+                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "stack": args.stack,
+                "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
                 "seconds": round(time.perf_counter() - t0)}
