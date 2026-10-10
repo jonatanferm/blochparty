@@ -55,7 +55,7 @@ to_phantom(anatomy, {3.0: table}, 3.0)
 Dotted ids (`brain.gm.deep.putamen`), with `parent` the next level up. `brainweb_class` names the one
 tissue that stands for each BrainWeb class: background = air, csf, gm = brain.gm, wm = brain.wm,
 fat = fat.subcutaneous, muscle = muscle.skeletal, skin, skull = bone.cortical, vessels = blood,
-connective, dura, marrow = bone_marrow (pooled over red and yellow marrow when it has no rows of its own).
+connective, dura, marrow = bone_marrow.yellow (the skull diploe: adult calvarial marrow is mostly fatty, Loevner et al. 2002).
 Compartments that add up rather than average (cortical bone's bound water, pore water and collagen
 protons) have their own ids (`bone.cortical.bound_water`, ...), so they are never pooled together.
 

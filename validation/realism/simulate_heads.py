@@ -178,7 +178,8 @@ def main():
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
-                         "--stack protocol --yaw-sd 3.8 --quality real --age 25,75 --readout-os 2")
+                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 (no --age: open_sulci's 1 mm "
+                         "ridges make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
@@ -186,7 +187,6 @@ def main():
         args.multislice = args.mt = args.centre = True
         args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric", "protocol", 3.8
         args.quality = "real"
-        args.age = args.age or "25,75"  # fastMRI publishes no demographics: a broad clinical adult range
         args.readout_os = 2
 
     def span(s):  # "a-b" or "a-b:step"

@@ -1170,7 +1170,8 @@ def open_sulci(anatomy: Anatomy, width: float, depth_max: float = 20e-3) -> Anat
     straight through on the far side, no CSF next to it, within ``depth_max`` of the CSF around the
     brain), grey matter within width / 2 of that midline becomes CSF (voxel-weighted at the edges).
     BrainWeb's fuzzy segmentation lets many banks touch without CSF between them; real sulci hold
-    CSF, more with age (``SULCAL_WIDENING``)."""
+    CSF, more with age (``SULCAL_WIDENING``). Experimental: on a 1 mm grid the ridges are broken,
+    and the CSF comes out as specks that make simulated T2w images look more fake, not less."""
     from scipy import ndimage
 
     if width <= 0:

@@ -15,9 +15,9 @@ bone.cortical.bound_water,cortical bone: collagen-bound water,bone.cortical,,"wa
 bone.cortical.collagen,cortical bone: collagen protons,bone.cortical,,"semi-solid compartment, not a tissue: collagen backbone protons (T2 ~60 us)"
 bone.cortical.pore_water,cortical bone: pore water,bone.cortical,,"water compartment, not a tissue: Haversian/lacuno-canalicular pore water (T2 ~ms-tens of ms)"
 bone.skull,skull (cranial bone),bone.cortical,,calvarium/cranial bone (inner+outer tables and diploe unless region says otherwise)
-bone_marrow,bone marrow,,marrow,"marrow (unspecified red/yellow); BrainWeb marrow (skull diploe), pooled over children when it has no rows of its own"
+bone_marrow,bone marrow,,,marrow (unspecified red/yellow)
 bone_marrow.red,red (haematopoietic) bone marrow,bone_marrow,,
-bone_marrow.yellow,yellow (fatty) bone marrow,bone_marrow,,
+bone_marrow.yellow,yellow (fatty) bone marrow,bone_marrow,marrow,"BrainWeb marrow (skull diploe): adult calvarial marrow is mostly fatty (Loevner et al. 2002, AJNR 23:248, PMC7975248: in young adults haematopoietic marrow has usually converted; 84 % of 44 healthy adults iso- or hyperintense to white matter on T1)"
 brain,brain,,,whole brain or unspecified brain tissue
 brain.brainstem,brainstem,brain,,"midbrain, pons, medulla (region column)"
 brain.cerebellum,cerebellum,brain,,cerebellum (unspecified)
