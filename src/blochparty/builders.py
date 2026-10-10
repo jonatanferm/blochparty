@@ -371,9 +371,9 @@ def tse_2d(
     energy there: W T ~ 4e-4 for a 180 deg 2 ms pulse at 6 kHz). One segment per pulse instead
     of one per raster step, and no 30 kHz ramp to resolve. Against every pulse exact (white
     matter with MT, 16 slices 4.7 mm apart, TR 6.5 s, ETL 16, spins every 0.05 mm over +-3.5 mm):
-    this slice on 100 us, slices within 2.5 spacings on 50 us, the rest bound-only: 0.74 % of the
-    signal at 1/13-1/27 of the time (``tests/test_multislice.py``); the white matter loses 31-39 %
-    against one slice. Such a sequence simulates, but is not a scanner sequence (``write_pulseq``
+    all RF on 100 us, the neighbours exact, the rest bound-only: 0.71 % of the signal (0.73 % with
+    slices within 2.5 spacings on 50 us; ``tests/test_multislice.py``), at 1/13-1/27 of the time;
+    the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a scanner sequence (``write_pulseq``
     refuses ``b0_offset``).
 
     Returns ``meta["matrix"] = (n, n)`` and ``meta["kspace_index"]`` (grid index of every
@@ -437,32 +437,39 @@ def tse_2d(
         spoiler = _lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype)
         t_spoil = block_duration(spoiler, system=sysm)
 
-    def ghost(rf: RFPulse) -> RFPulse:
-        """One segment over the pulse with its RF energy (amplitude: the RMS of |B1|)."""
-        rms = (rf.signal.square().sum(-1).mean()).sqrt()
-        return RFPulse(torch.stack([rms, torch.zeros_like(rms)])[None], rf.duration, rf.delay, rf.duration / 2)
-
     def other_train(dz):
+        """Slice dz's echo train as this slice sees it: its RF pulses (with their slice-select
+        gradient) at their times, one merged delay in every gap. Far slices' pulses (beyond
+        ``bound_only_beyond``) become one RF segment with the pulse's energy over its duration, on
+        the flat slice-select gradient alone (their ramps only add phase to spoiled coherences)."""
         exc_o, refs_o = pulses[dz]
         far = bound_only_beyond is not None and abs(dz) >= bound_only_beyond
-        if far:
-            exc_o = exc_o._replace(rf=ghost(exc_o.rf))
-            refs_o = [r._replace(rf=ghost(r.rf)) for r in refs_o]
-        start = len(b._is_rf)
-        b.block(*exc_o.grads, rf=exc_o.rf)
-        if far:
-            ghosts.append((start, len(b._is_rf), dz))
-        _pad(b, t_p)
-        _pad(b, esp / 2 - h0)
-        for r in refs_o:
-            start = len(b._is_rf)
-            b.block(*r.grads, rf=_with_phase(r.rf, math.pi / 2))
+        wait = 0.0
+
+        def pulse(blk, rf):
+            nonlocal wait
             if far:
+                g = blk.grads[0].amplitude.detach().to(dtype)
+                wait += rf.delay
+                _pad(b, wait)
+                rms = (rf.signal.square().sum(-1).mean()).sqrt()
+                start = len(b._is_rf)
+                b.rf_waveform(torch.stack([rms, torch.zeros_like(rms)])[None], rf.duration, grad=g)
                 ghosts.append((start, len(b._is_rf), dz))
-            for t_gap in (t_c, esp / 2 - h1, ro.duration, esp / 2 - h2, t_c):
-                _pad(b, t_gap)
+                wait = blk.duration - rf.delay - rf.duration
+            else:
+                _pad(b, wait)
+                b.block(*blk.grads, rf=rf)
+                wait = 0.0
+
+        pulse(exc_o, exc_o.rf)
+        wait += t_p + esp / 2 - h0
+        for r in refs_o:
+            pulse(r, _with_phase(r.rf, math.pi / 2))
+            wait += t_c + (esp / 2 - h1) + ro.duration + (esp / 2 - h2) + t_c
         if spoiling == "gradient":
-            _pad(b, t_spoil)
+            wait += t_spoil
+        _pad(b, wait)
 
     b = SequenceBuilder(dtype=dtype, system=sysm)
     kspace_index = []

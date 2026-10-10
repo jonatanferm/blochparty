@@ -53,9 +53,8 @@ def test_single_slice_untouched_timing_kept_and_offsets_on_far_pulses_only():
 @pytest.mark.slow
 def test_realism_setting_equals_every_pulse_exact():
     """The setting of validation/realism/simulate_heads.py: 16 slices 4.7 mm apart (interleaved),
-    TR 6.5 s, ETL 16; this slice's RF on 100 us, the slices within 2.5 spacings as their real
-    phase-ramped pulses on 50 us, the rest on the bound pool only; against every pulse exact on
-    10 us. Spins every 0.05 mm along z, so the spoilers dephase what they would in a voxel (a
+    TR 6.5 s, ETL 16; all RF on 100 us, the neighbours as their real phase-ramped pulses, the rest
+    on the bound pool only; against every pulse exact on 10 us. Spins every 0.05 mm along z, so the spoilers dephase what they would in a voxel (a
     sparse column keeps coherences a voxel would lose, and its error is several times larger)."""
     ph = wm_column(141)
     sp, i = 4.7e-3, 6
@@ -63,12 +62,12 @@ def test_realism_setting_equals_every_pulse_exact():
     kw = dict(n=16, etl=16, esp=12.56e-3, tr=6.5, slice_thickness=5e-3, spoiling="gradient", n_dummy=1)
     single = bp.simulate(ph, bp.tse_2d(**kw, system=System(rf_raster=1e-4))).signal
     exact = bp.simulate(ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-5))).signal
-    fast = bp.simulate(ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-4), other_rf_raster=5e-5,
-                                     bound_only_beyond=2.5 * sp)).signal
+    fast = bp.simulate(ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-4),
+                                     bound_only_beyond=1.5 * sp)).signal
     loss = 1 - float(exact.abs().max() / single.abs().max())
     print(f"16 slices: {loss:.1%} white-matter loss; realism setting vs exact {rel(fast, exact):.1e}")
     assert loss > 0.2  # the other slices' pulses cost signal (MT and cross-talk)
-    assert rel(fast, exact) < 0.015  # measured 0.74 % (n = 32)
+    assert rel(fast, exact) < 0.015  # measured 0.71 % (n = 16)
 
 
 def test_gpu_equals_core():

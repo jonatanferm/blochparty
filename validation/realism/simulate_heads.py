@@ -98,9 +98,9 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 
 
 def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None) -> bp.Sequence:
-    """The paired protocol. With ``slice_order``: the slices within 2.5 spacings as their real pulses
-    on 50 us, the rest on the bound pool only (0.74 % against every pulse exact, ``tse_2d``)."""
-    multi = {} if slice_order is None else dict(other_rf_raster=5e-5, bound_only_beyond=2.5 * spacing)
+    """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
+    the bound pool only (0.71 % against every pulse exact, ``tse_2d``)."""
+    multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
     return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
                      spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
                      **multi)
