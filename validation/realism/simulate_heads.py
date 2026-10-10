@@ -60,9 +60,16 @@ def real_protocols(manifest: Path) -> list[dict]:
             for k, v in sorted(m.items()) if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2]
 
 
-def stack(anatomy) -> np.ndarray:
-    """z [m] of slices 0..15: slice 0 at the largest lateral-ventricle cross-section, the brain
-    top at slice 13.5 (how the real stacks sit: ventricles in slice 0, a scalp cap in slice 15)."""
+PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
+MONRO_BELOW_BODIES = 10e-3  # the foramen of Monro / basal-ganglia level below the ventricle bodies
+
+
+def stack(anatomy, mode: str = "landmarks") -> np.ndarray:
+    """z [m] of slices 0..15. "landmarks": slice 0 at the largest lateral-ventricle cross-section, the
+    brain top at slice 13.5. "protocol": slice 0 ``MONRO_BELOW_BODIES`` below that (the real slice 0
+    shows frontal horns, caudate heads, thalami and the third ventricle), then ``PROTOCOL_SPACING``
+    apart whatever the head's size; fitted to the real stacks' head-area profile (area / slice-0 area
+    1.0 to slice 7, 0.53 at 12, 0.23 at 15; the fit alone trades offset against spacing)."""
     csf = anatomy.fractions["csf"].numpy()
     brain = (anatomy.fractions["wm"] + anatomy.fractions["gm"]).numpy()
     z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
@@ -70,7 +77,21 @@ def stack(anatomy) -> np.ndarray:
     deep = (csf * inside).reshape(len(z), -1).sum(1)
     top = z[np.nonzero(brain.reshape(len(z), -1).sum(1) * np.prod(anatomy.voxel[1:]) > 50e-6)[0].max()]
     z0 = z[np.argmax(deep)]
+    if mode == "protocol":
+        return z0 - MONRO_BELOW_BODIES + np.arange(SLICES) * PROTOCOL_SPACING
     return z0 + np.arange(SLICES) * (top - z0) / 13.5
+
+
+def centre(anatomy, zs) -> tuple[float, float]:
+    """(x, y) [m] of the head's bounding-box centre over the slice stack's z range: where an
+    operator puts the field of view on the localiser (and the head sits in the coil).
+    ``anatomy.origin`` is (x, y, z), ``voxel`` (z, y, x)."""
+    head = (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
+    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
+    rows = head[(z >= zs[0] - 2.5e-3) & (z <= zs[-1] + 2.5e-3)]
+    ys, xs = np.nonzero(rows.any((0, 2)))[0], np.nonzero(rows.any((0, 1)))[0]
+    return (anatomy.origin[0] + (xs[0] + xs[-1]) / 2 * anatomy.voxel[2],
+            anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1])
 
 
 def turn(ph: bp.Phantom) -> bp.Phantom:
@@ -91,10 +112,12 @@ def interleaved(count=SLICES) -> list[int]:
     return list(range(0, count, 2)) + list(range(1, count, 2))
 
 
-QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF raster [s]
-    "full": ((2, 2, 2), "categorical", 3, 1e-4),
-    "fast": ((1, 2, 2), "categorical", 3, 1e-4),
-    "legacy": ((2, 2, 2), "per_tissue", 4, 1e-5),
+QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF raster [s], jitter
+    "full": ((2, 2, 2), "categorical", 3, 1e-4, "stratified"),
+    "fast": ((1, 2, 2), "categorical", 3, 1e-4, "stratified"),
+    "legacy": ((2, 2, 2), "per_tissue", 4, 1e-5, "stratified"),
+    # each voxel's composition exact, z a quadrature through the slice profile: no visible grain
+    "real": ((4, 2, 2), "proportional", 3, 1e-4, "inplane"),
 }
 
 
@@ -131,15 +154,29 @@ def main():
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
     ap.add_argument("--scalp", choices=("brainweb", "layered"), default="brainweb",
                     help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp)")
+    ap.add_argument("--size", choices=("brainweb", "anthropometric"), default="brainweb",
+                    help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized)")
+    ap.add_argument("--centre", action="store_true", help="field of view centred on the head (as an operator would)")
+    ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
+    ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
+    ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
+    ap.add_argument("--preset", choices=("realistic",), default=None,
+                    help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
+                         "--stack protocol --yaw-sd 3.8 --quality real --age 25,75")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
+    if args.preset == "realistic":
+        args.multislice = args.mt = args.centre = True
+        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric", "protocol", 3.8
+        args.quality = "real"
+        args.age = args.age or "25,75"  # fastMRI publishes no demographics: a broad clinical adult range
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
         return range(int(rng.split("-")[0]), int(rng.split("-")[-1]) + 1, int(step or 1))
 
-    spins, sampling, half, rf_raster = QUALITY[args.quality]
+    spins, sampling, half, rf_raster, jitter = QUALITY[args.quality]
     if args.spins:
         spins = tuple(int(c) for c in args.spins.split(","))
     table = bp.DEFAULT_TISSUES
@@ -148,6 +185,7 @@ def main():
 
         table = {3.0: tissuedb.tissue_table(3.0)}
     protocols = real_protocols(args.manifest)
+    age = None if args.age is None else (tuple(float(a) for a in args.age.split(",")) if "," in args.age else float(args.age))
     args.out.mkdir(parents=True, exist_ok=True)
     for seed in span(args.seeds):
         dest = args.out / f"sim_{seed:03d}.npz"
@@ -155,9 +193,11 @@ def main():
             continue
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
-        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp)
+        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
+                              size=args.size, yaw_sd=args.yaw_sd, age=age)
         fields = head.field_maps()
-        zs = stack(head.anatomy)
+        zs = stack(head.anatomy, args.stack)
+        cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
         kspace, timing = {}, []
 
         def prepare(i):
@@ -166,9 +206,9 @@ def main():
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]))
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
-            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling,
+            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
                                  mt=args.mt)
-            ph.pos = ph.pos - torch.tensor([0.0, 0.0, zs[i]], dtype=ph.pos.dtype)
+            ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"])
 
@@ -185,8 +225,10 @@ def main():
                 timing.append(time.perf_counter() - t)
                 print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.1f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
-                "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp, "quality": args.quality,
-                "spins": list(spins), "sampling": sampling, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
+                "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
+                "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
+                "age": head.meta.get("age"), "stack": args.stack, "quality": args.quality,
+                "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
                 "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
