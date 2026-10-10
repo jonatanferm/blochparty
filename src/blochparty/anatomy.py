@@ -1158,6 +1158,41 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
 
 
+# Deep grey nuclei in BrainWeb's models, which lie in MNI (ICBM) space and label them grey matter:
+# ellipsoids (centre |x|, y, z; semi-axes) [mm], drawn around the nuclei in the models' grey-matter
+# maps (subjects 4, 38, 44 and 54 by eye) and centred near their usual MNI centroids. They hold no
+# cortex: the insula, cingulate and amygdala lie outside them. The caudate is a head and a body.
+DEEP_GREY = {"caudate": (((14., 14., 9.), (6., 13., 12.)), ((17., -6., 21.), (5., 14., 8.))),
+             "putamen": (((25., 1., 1.), (7., 20., 13.)),),
+             "pallidum": (((19., -4., -1.), (5., 9., 6.)),),
+             "thalamus": (((11., -19., 6.), (9., 15., 10.)),)}
+
+
+def label_deep_grey(anatomy: Anatomy) -> Anatomy:
+    """Split the deep grey nuclei (caudate, putamen, pallidum, thalamus: ``DEEP_GREY``) out of the
+    ``gm`` class: at 3 T their iron gives them T2 near white matter's (57-76 ms against cortex's
+    ~95), so T2-weighted scans show them dark where a single grey-matter class makes them bright.
+    Grey-matter membership inside a nucleus's region moves to that nucleus (the nearest region's
+    where they overlap); white matter and CSF stay. Needs MNI coordinates, i.e. a BrainWeb model
+    before ``deform``; much of the pallidum is white matter there (bright on T1) and stays so."""
+    fr = anatomy.fractions
+    if "gm" not in fr or set(DEEP_GREY) & set(fr):
+        raise ValueError("label_deep_grey needs a gm class and no deep grey classes yet (BrainWeb)")
+    x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1]))
+    score = np.full((len(DEEP_GREY),) + tuple(anatomy.shape), -np.inf, dtype=np.float32)
+    for i, regions in enumerate(DEEP_GREY.values()):
+        for (cx, cy, cz), (ax, ay, az) in regions:
+            r2 = ((((z - cz) / az) ** 2)[:, None, None] + (((y - cy) / ay) ** 2)[None, :, None]
+                  + (((np.abs(x) - cx) / ax) ** 2)[None, None, :])
+            np.maximum(score[i], 1 - r2, out=score[i])
+    best, inside = torch.from_numpy(score.argmax(0)), torch.from_numpy(score.max(0) > 0)
+    gm, zero = fr["gm"], torch.zeros_like(fr["gm"])
+    out = {k: torch.where(inside, zero, gm) if k == "gm" else v for k, v in fr.items()}
+    for i, name in enumerate(DEEP_GREY):
+        out[name] = torch.where(inside & (best == i), gm, zero)
+    return replace(anatomy, fractions=out)
+
+
 # Sulcal width grows 0.71 mm per decade (0.45-0.94 by sulcus) in 90 healthy adults aged 20-82
 # (Kochunov et al. 2005, Hum Brain Mapp 26:210, doi:10.1002/hbm.20198, Table III); BrainWeb's models
 # are young adults, taken as 30.
@@ -1278,7 +1313,7 @@ DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation
 def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
                 magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
-                age: float | tuple[float, float] | None = None) -> DigitalPhantom:
+                age: float | tuple[float, float] | None = None, deep_grey: bool = False) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1294,7 +1329,10 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     [deg]: the head turned about the scanner's z axis through its centre by N(0, yaw_sd^2) (0: as
     the model lies; BrainWeb is aligned to MNI space, scanned heads are not). ``age`` [years] (a
     number, or (low, high) to draw uniformly): sulci widened by ``SULCAL_WIDENING`` per year beyond
-    ``BRAINWEB_AGE`` (``open_sulci``); None leaves them as the model has them."""
+    ``BRAINWEB_AGE`` (``open_sulci``); None leaves them as the model has them. ``deep_grey``: the
+    caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
+    ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
+    the other classes' draws do not change."""
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
     if size not in ("brainweb", "anthropometric"):
@@ -1304,10 +1342,14 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T")
+    if deep_grey and (missing := [k for k in DEEP_GREY if k not in table[field_T]]):
+        raise ValueError(f"deep_grey needs tissue properties for {missing} (tissuedb.tissue_table)")
     streams = [int(s.generate_state(1)[0]) for s in np.random.SeedSequence(int(seed)).spawn(5)]
     if subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
+    if deep_grey:
+        anatomy = label_deep_grey(anatomy)  # in MNI space, before the deformation
     displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
                                                magnitude=magnitude, spacing=spacing)
     size_draw, pose = None, None
@@ -1339,7 +1381,12 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     scale = 1.
     while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
         scale /= 2
-    tissues, draws = draw_tissues(table[field_T], torch.Generator().manual_seed(streams[2]))
+    tissues, draws = draw_tissues({k: v for k, v in table[field_T].items() if k not in DEEP_GREY},
+                                  torch.Generator().manual_seed(streams[2]))
+    if deep_grey:
+        stream = int(np.random.SeedSequence(int(seed)).spawn(8)[7].generate_state(1)[0])
+        more, more_draws = draw_tissues({k: table[field_T][k] for k in DEEP_GREY}, torch.Generator().manual_seed(stream))
+        tissues, draws = tissues | more, draws | more_draws
     options = {"seed": streams[4]}
     if texture:
         options["variability"] = dict(texture) | {"seed": streams[3]}
@@ -1352,6 +1399,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         meta["size"] = size_draw
     if pose is not None:
         meta["pose"] = pose
+    if deep_grey:
+        meta["deep_grey"] = list(DEEP_GREY)
     anatomy = deform(anatomy, total(displacement * scale))
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)

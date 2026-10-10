@@ -279,11 +279,28 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0)
 
 
+def _from_ancestor(t: Tissue, name: str, prop: str, field_T: float, db: Database, base_table: dict):
+    """The nearest ancestor's pooled ``prop`` (over it and its descendants), else its class's base-table
+    ``name``: assumed=True, citing the ancestor."""
+    a = db.tissues.get(t.parent)
+    while a is not None:
+        d = pooled(a.id, prop, field_T, db=db, descendants=True)
+        if d is None and a.brainweb_class in base_table:
+            d = getattr(base_table[a.brainweb_class], name)
+        if d is not None:
+            return replace(d, citation=f"Assumption: {a.id} used for {t.id}: " + d.citation.removeprefix("Assumption: "),
+                           assumed=True)
+        a = db.tissues.get(a.parent)
+    return None
+
+
 def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, TissueProperties]:
     """A candidate {BrainWeb class: TissueProperties} at ``field_T`` from the database (tissues.csv
     names one tissue per class). Each property is pooled from that tissue's rows, else from its
-    descendants' (assumed=True), else the current ``DEFAULT_TISSUES[field_T]`` entry is used. A class
-    is left out when a required property (pd, t1, t2, chi) has neither. T2* above T2 is clipped to T2
+    descendants' (assumed=True), else the current ``DEFAULT_TISSUES[field_T]`` entry is used; a class
+    with no such entry (the deep grey nuclei) takes the nearest ancestor's value instead: its pooled
+    rows and descendants', else its class's ``DEFAULT_TISSUES`` entry (assumed=True). A class is left
+    out when a required property (pd, t1, t2, chi) has none of these. T2* above T2 is clipped to T2
     (assumed=True). A bound pool without an exchange rate and bound T2 is omitted (assumed). A signalling class without MT or diffusion data gets bound_fraction 0 and
     diffusivity 0, marked as assumptions, so ``to_phantom(mt=True, diffusion=True)`` runs."""
     db = db or load()
@@ -303,6 +320,8 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
                     d = replace(d, citation=d.citation + "; pooled over descendant tissues", assumed=True)
             if d is None and base is not None:
                 d = getattr(base, name)
+            if d is None and base is None:
+                d = _from_ancestor(t, name, prop, field_T, db, base_table)
             values[name] = d
         if any(values[k] is None for k in ("pd", "t1", "t2", "chi")):
             continue

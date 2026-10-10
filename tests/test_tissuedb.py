@@ -4,6 +4,7 @@ candidate table that assembles a phantom. The independent checks of a literature
 cross-checks; the values themselves keep their source and location per row."""
 import csv
 import math
+import re
 import statistics
 from collections import defaultdict
 from dataclasses import fields
@@ -12,7 +13,7 @@ import pytest
 import torch
 
 from blochparty import tissuedb
-from blochparty.anatomy import DEFAULT_TISSUES, Anatomy, Distribution, TissueProperties, to_phantom
+from blochparty.anatomy import DEEP_GREY, DEFAULT_TISSUES, Anatomy, Distribution, TissueProperties, to_phantom
 from blochparty.tissuedb import FIELD_DEPENDENT, FRACTIONS, PROPERTIES, load, pooled, query, tissue_table
 
 DB = load()
@@ -31,7 +32,7 @@ def test_schema():
     for t in DB.tissues.values():
         assert not t.parent or t.parent in DB.tissues, t.id
     classes = [t.brainweb_class for t in DB.tissues.values() if t.brainweb_class]
-    assert sorted(classes) == sorted(CLASSES)  # exactly one tissue per BrainWeb class
+    assert sorted(classes) == sorted(CLASSES + tuple(DEEP_GREY))  # one tissue per BrainWeb / anatomy class
     seen = set()
     for m in DB.measurements:
         where = f"{m.source} {m.tissue} {m.property} {m.field_T} {m.region}"
@@ -297,13 +298,31 @@ def test_default_tissues_unchanged_by_import():
 @pytest.mark.parametrize("strength", (1.5, 3.))
 def test_tissue_table_assembles_a_phantom(strength):
     table = tissue_table(strength)
-    assert set(table) == set(CLASSES)
+    assert set(table) == set(CLASSES) | set(DEEP_GREY)
     for name, p in table.items():
         assert isinstance(p, TissueProperties)
         for f in fields(p):
             d = getattr(p, f.name)
             assert d is None or d.citation
-    a = Anatomy({k: torch.full((2, 2, 2), 1 / 12, dtype=torch.float64) for k in CLASSES}, (.001,) * 3, (0, 0, 0))
+    a = Anatomy({k: torch.full((2, 2, 2), 1 / 16, dtype=torch.float64) for k in table}, (.001,) * 3, (0, 0, 0))
     ph = to_phantom(a, {strength: table}, strength, mt=True, diffusion=True, chi_to_b0=False, t2star="off")
     assert ph.bound is not None and (ph.diffusion >= 0).all() and len(ph) > 0
     assert torch.isfinite(ph.t1).all() and (ph.t2 <= ph.t1).all()
+
+
+def test_deep_grey_nuclei_from_their_rows_then_the_nearest_ancestor():
+    """3 T: the nuclei's T2 are their own spin-echo rows (Krug 2022: putamen 65, pallidum 57 ms), below
+    cortex; what a nucleus lacks (pallidum PD, every nucleus's susceptibility) comes from the nearest
+    ancestor, assumed; classes with a DEFAULT_TISSUES entry never use the ancestor rule."""
+    table = tissue_table(3.)
+    for name in DEEP_GREY:
+        t2 = table[name].t2
+        assert not t2.assumed and f"brain.gm.deep.{name} t2" in t2.citation and t2.mean < table["gm"].t2.mean
+    assert table["putamen"].t2.mean == pytest.approx(.065) and table["pallidum"].t2.mean == pytest.approx(.057)
+    pd = table["pallidum"].pd
+    assert pd.assumed and pd.citation.startswith("Assumption: brain.gm.deep used for brain.gm.deep.pallidum")
+    assert table["caudate"].chi.assumed and "brain.gm used for brain.gm.deep.caudate" in table["caudate"].chi.citation
+    for name in CLASSES:
+        if name in table:
+            assert not any(re.match(r"Assumption: \S+ used for \S+: ", getattr(table[name], f.name).citation or "")
+                           for f in fields(table[name]) if getattr(table[name], f.name) is not None)

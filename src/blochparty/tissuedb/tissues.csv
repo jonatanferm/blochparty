@@ -26,15 +26,15 @@ brain.cerebellum.wm,cerebellar white matter,brain.cerebellum,,
 brain.gm,grey matter,brain,gm,cortical (or whole) grey matter; deep nuclei are children of brain.gm.deep
 brain.gm.amygdala,amygdala,brain.gm,,amygdaloid nuclear complex (medial temporal)
 brain.gm.deep,deep grey matter,brain.gm,,basal ganglia and thalamus taken together
-brain.gm.deep.caudate,caudate nucleus,brain.gm.deep,,
+brain.gm.deep.caudate,caudate nucleus,brain.gm.deep,caudate,
 brain.gm.deep.dentate,dentate nucleus,brain.gm.deep,,cerebellar nucleus
 brain.gm.deep.hypothalamus,hypothalamus,brain.gm.deep,,
-brain.gm.deep.pallidum,globus pallidus,brain.gm.deep,,
-brain.gm.deep.putamen,putamen,brain.gm.deep,,
+brain.gm.deep.pallidum,globus pallidus,brain.gm.deep,pallidum,
+brain.gm.deep.putamen,putamen,brain.gm.deep,putamen,
 brain.gm.deep.red_nucleus,red nucleus,brain.gm.deep,,
 brain.gm.deep.substantia_nigra,substantia nigra,brain.gm.deep,,
 brain.gm.deep.subthalamic_nucleus,subthalamic nucleus,brain.gm.deep,,small iron-rich diencephalic nucleus (STN)
-brain.gm.deep.thalamus,thalamus,brain.gm.deep,,
+brain.gm.deep.thalamus,thalamus,brain.gm.deep,thalamus,
 brain.gm.hippocampus,hippocampus,brain.gm,,
 brain.wm,cerebral white matter,brain,wm,white matter (regions in the region column)
 brain.wm.corpus_callosum,corpus callosum,brain.wm,,

@@ -469,3 +469,31 @@ def test_myelin_water_is_a_second_free_water_species():
     short = torch.isclose(two.t2, torch.tensor(.02, dtype=two.t2.dtype))
     assert float(two.pd[short].sum()) == pytest.approx(.12 * float(one.pd.sum()), rel=1e-12)
     assert torch.allclose(two.t2[~short], one.t2)
+
+
+def test_label_deep_grey_moves_grey_matter_inside_the_nuclei_only():
+    """On a 2 mm grid in MNI coordinates: grey matter at each nucleus's centre (either side) moves to
+    that nucleus, cortex-like positions (insula, cingulate, a frontal gyrus) stay gm, white matter and
+    the total do not change; a second call refuses."""
+    from blochparty.anatomy import DEEP_GREY
+    h = 2e-3
+    shape = (31, 51, 51)  # z -20..40, y -60..40, x -50..50 mm
+    gm = torch.full(shape, .7, dtype=torch.float64)
+    an = Anatomy({"gm": gm, "wm": torch.full(shape, .3, dtype=torch.float64)}, (h, h, h), (-.05, -.06, -.02))
+    out = bp.label_deep_grey(an)
+    fr = out.fractions
+    assert torch.equal(fr["wm"], an.fractions["wm"])
+    assert torch.allclose(sum(fr[k] for k in ("gm", *DEEP_GREY)), gm, rtol=0, atol=1e-15)
+
+    def at(x, y, z):  # mm -> (z, y, x) index
+        return round((z + 20) / 2), round((y + 60) / 2), round((x + 50) / 2)
+
+    for name, regions in DEEP_GREY.items():
+        (cx, cy, cz), _ = regions[0]
+        for x in (-cx, cx):
+            assert float(fr[name][at(x, cy, cz)]) == .7 and float(fr["gm"][at(x, cy, cz)]) == 0
+    for x, y, z in ((40, 0, 0), (4, 20, 30), (30, 36, 10)):
+        assert float(fr["gm"][at(x, y, z)]) == .7
+        assert all(float(fr[k][at(x, y, z)]) == 0 for k in DEEP_GREY)
+    with pytest.raises(ValueError):
+        bp.label_deep_grey(out)

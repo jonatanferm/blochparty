@@ -120,3 +120,27 @@ def test_realistic_head_options():
     assert old.meta["age"]["sulcal_widening"] == pytest.approx(40 * 0.71e-4)
     assert float(old.anatomy.fractions["csf"].sum()) > float(sized.anatomy.fractions["csf"].sum())
     assert float(old.anatomy.fractions["gm"].sum()) < float(sized.anatomy.fractions["gm"].sum())
+
+
+@pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
+def test_deep_grey_nuclei():
+    """deep_grey: the four nuclei become classes with adult-like volumes (MNI-sized model, both sides:
+    caudate and putamen ~7 and ~10 mL; BrainWeb labels much of the thalamus and pallidum white
+    matter, which stays), drawn from their own stream (every other class's draw unchanged); a table
+    without them refuses."""
+    from blochparty import tissuedb
+    from blochparty.anatomy import DEEP_GREY
+
+    table = {3.: tissuedb.tissue_table(3.)}
+    with pytest.raises(ValueError, match="deep_grey"):
+        sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, deep_grey=True)
+    plain = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, table=table)
+    deep = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, table=table, deep_grey=True)
+    assert not set(DEEP_GREY) & set(plain.anatomy.fractions) and not set(DEEP_GREY) & set(plain.tissues)
+    assert all(deep.meta["draws"][k] == v for k, v in plain.meta["draws"].items())
+    assert deep.meta["deep_grey"] == list(DEEP_GREY)
+    ml = {k: float(deep.anatomy.fractions[k].sum()) * 8e-3 for k in DEEP_GREY}
+    assert 5 < ml["caudate"] < 9 and 7 < ml["putamen"] < 12 and 3 < ml["thalamus"] < 10 and 0 < ml["pallidum"] < 2
+    grey = lambda h: sum(float(h.anatomy.fractions[k].sum()) for k in ("gm", *DEEP_GREY) if k in h.anatomy.fractions)
+    assert grey(deep) == pytest.approx(grey(plain), rel=1e-5)
+    assert deep.tissues["putamen"].t2.mean < deep.tissues["gm"].t2.mean
