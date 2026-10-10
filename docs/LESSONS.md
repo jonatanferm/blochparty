@@ -593,6 +593,12 @@ says where it came from so it can be re-checked.
 - **Count segments by kind before optimising a sequence**: delays padded in pieces and gradient
   ramps of pulses that only matter through their energy made up half of a multi-slice TSE
   (42k -> 23k segments after merging delays and dropping those ramps).
+- **Fewer spins: the sampling error was not crusher aliasing** (PERFORMANCE 2.6, 2026-10-10):
+  against 27 spins per tissue and voxel (seed-to-seed RMS 0.0073) on the realism TSE, systematic
+  tissue assignment matched categorical draws (8 spins: 0.0139 vs 0.0138; 4: 0.0206 vs 0.0216)
+  and unjittered z-lattices matched random spins at equal count (2: 0.0301, 4: 0.0200, 8 on a
+  2x2x2 lattice: 0.0147). The predicted 4x from lattice quadrature along the crusher axis did not
+  appear; the error scales as 1/sqrt(K) whatever the placement.
 - **fastMRI brain k-space is (slices, coils, readout x2, phase)** (realism score, 2026-10-10):
   the inverse FFT, then the central rows of the oversampled readout and the central columns of the
   phase direction (to the reconstruction matrix, 384 x 384 over 220 mm), reproduces the files'

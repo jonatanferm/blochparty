@@ -773,7 +773,10 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     ``per_tissue`` gives K spins to each nonzero tissue/voxel, PD=fraction*PD/K
     (exact conservation). ``categorical`` draws K tissue identities per voxel;
     missing mass is air. It is unbiased but only conserves each tissue's PD in
-    expectation. K is a perfect cube or (kz,ky,kx). Jitter samples each subcell;
+    expectation. ``systematic`` assigns them from the evenly spaced (j + U) / K, one U per
+    voxel (systematic resampling), dealt to the subcells at random: each tissue gets
+    floor(K f) or ceil(K f) spins, unbiased, with a voxel error O(1/K) instead of O(1/sqrt K)
+    (docs/PERFORMANCE.md 2.6). K is a perfect cube or (kz,ky,kx). Jitter samples each subcell;
     None uses subcell centres. Seeds change positions (and categorical draws),
     not material properties. Sampled B0 necessarily changes with positions.
     PD is per anatomy voxel, matching phantom_from_maps; multiply by physical
@@ -817,7 +820,7 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     from ``seed`` (positions), so jitter does not change the texture. It models within-tissue
     texture, not the population SDs of the table (``Distribution.sd``).
     """
-    if sampling not in ("per_tissue","categorical") or jitter not in (None,"stratified"):
+    if sampling not in ("per_tissue","categorical","systematic") or jitter not in (None,"stratified"):
         raise ValueError("invalid sampling or jitter mode")
     if t2star not in ("auto","off","table","separate"):
         raise ValueError("t2star must be auto, separate, off or table")
@@ -877,9 +880,12 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
         if (density < 0).any() or ((density > 0) & (signal_fraction == 0)).any():
             raise ValueError("M0 must be nonnegative and supported by signal-producing tissue")
     category = None
-    if sampling == "categorical":
+    if sampling in ("categorical", "systematic"):
         # Sequential thresholds avoid a (voxels,K,tissues) temporary.
         u = torch.rand((*anatomy.shape,k),dtype=ref.dtype,generator=gen)
+        if sampling == "systematic":  # (j + U) / K, one U per voxel, dealt to the subcells at random
+            u = (torch.arange(k,dtype=ref.dtype)+u[...,:1])/k
+            u = torch.gather(u,-1,torch.argsort(torch.rand(u.shape,generator=gen),dim=-1))
         category = torch.full(u.shape,-1,dtype=torch.long)
         cumulative = torch.zeros_like(ref)
         for i,name in enumerate(names):

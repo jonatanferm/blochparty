@@ -366,3 +366,28 @@ def test_measured_r2star_round_trip_without_double_counting(grad_hz_per_mm):
         assert measured("off") < r2s_in - 1.0  # microscopic R2' lost
     else:  # 8 Hz/mm alone dephases faster (7.7 /s) than R2* - R2 allows: R2' clips at 0
         assert out == pytest.approx(measured("off"), rel=1e-12) and out > r2s_in
+
+
+def test_systematic_sampling_counts_and_unbiased_pd():
+    # docs/PERFORMANCE.md 2.6: floor or ceil of K f spins per tissue and voxel, PD unbiased over seeds
+    g = torch.Generator().manual_seed(1)
+    f = torch.rand(3, 4, 4, 4, generator=g, dtype=torch.float64)
+    f = f / f.sum(0) * torch.rand(1, 4, 4, 4, generator=g, dtype=torch.float64).clamp(0.6, 1.0)  # some air
+    a = Anatomy(dict(wm=f[0], gm=f[1], csf=f[2]), (.001,) * 3, (0., 0., 0.))
+    k = 8
+    totals = []
+    for seed in range(200):
+        ph = to_phantom(a, spins_per_voxel=(2, 2, 2), sampling="systematic", seed=seed, chi_to_b0=False, t2star="off")
+        vox = torch.floor((ph.pos - torch.tensor(a.origin)) / torch.tensor(a.voxel).flip(0) + .5).long()
+        lin = (vox[:, 2] * 4 + vox[:, 1]) * 4 + vox[:, 0]
+        for i, name in enumerate(("wm", "gm", "csf")):
+            sel = torch.isclose(ph.t1, ph.t1.new_tensor(DEFAULT_TISSUES[3.][name].t1.mean), rtol=0, atol=1e-12)
+            count = torch.zeros(64, dtype=torch.float64).index_add_(0, lin[sel], torch.ones(int(sel.sum()), dtype=torch.float64))
+            assert ((count - k * f[i].reshape(-1)).abs() < 1 + 1e-9).all()
+        totals.append(float(ph.pd.sum()))
+    exact = sum(float(f[i].sum()) * DEFAULT_TISSUES[3.][n].pd.mean for i, n in enumerate(("wm", "gm", "csf")))
+    mean, se = np.mean(totals), np.std(totals) / np.sqrt(len(totals))
+    assert abs(mean - exact) < 4 * se + 1e-12
+    cat = [float(to_phantom(a, spins_per_voxel=(2, 2, 2), sampling="categorical", seed=s, chi_to_b0=False,
+                            t2star="off").pd.sum()) for s in range(200)]
+    assert np.std(totals) < 0.5 * np.std(cat)  # the point of it: far less draw noise
