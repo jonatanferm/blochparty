@@ -940,7 +940,8 @@ says where it came from so it can be re-checked.
 - **Abstract labels lie**: Wansapura 1999 calls T2* "T2" and lists "GM and WM 80 and 110 ms" in the
   order opposite to physics (GM T2 > WM T2); Shin 2025 swaps WM/GM in the abstract (Table 3 is GM,
   WM); the ISMRM archive page of Peters et al. 2006 lists Hoogenraad first (the PDF has Peters).
-  `validation/anatomy_brainweb.py` uses Wansapura's abstract order (WM T2 .110, GM .080 s).
+  `validation/anatomy_brainweb.py` used the abstract order until 2026-10-10 (now GM .110, WM .080 s;
+  see the Wansapura entry under "Pulseq, data and reference values").
 - **The CSF T1 the project quotes (4.4 s, via Spijkerman 2018 ref. 13) is 4.3 +- 0.2 s in Rooney
   2007's abstract** (across 3 subjects and all fields; Rooney did not scan at 3 T). Spijkerman's
   2.03 s 3 T CSF T2 is a median from the longest-TE (partial-volume) analysis. Caan 2019 scanned 8
