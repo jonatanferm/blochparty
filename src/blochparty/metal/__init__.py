@@ -721,6 +721,8 @@ inline void flush(threadgroup float* partial, threadgroup int* block_rows, devic
 // Demodulation by exp(-i psi) is the same for every spin, so it is applied after the sum.
 #define MMA_REGION 768  // floats per simdgroup: Mr, Mi, -Mi (32 x 8 each); then P, Q of <= 6 coil tiles
 #define MMA_TILES 6
+#define MAX_TERMS 8     // NUFFT readouts: decay terms (time segmentation)
+#define NU_HEAD 14      // NUFFT header floats: mg w terms beta n_adc wmax tau[8]
 
 inline void flush_mma(threadgroup float* buf, threadgroup float* mine, threadgroup const int* rows,
                       threadgroup const float* psi, device const float* sens, device atomic_float* sig, uint nb,
@@ -774,7 +776,7 @@ kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3
                                 constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
                                 constant float* sens       [[buffer(2)]],  // (2C, N) per coil: real, imag
                                 constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
-                                constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil
+                                constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil, 16 bound-only rf
                                 constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
                                 device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
                                 device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
@@ -905,7 +907,7 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
                                     device const float* sens   [[buffer(2)]],  // (2, 8T, N_pad): real, imag; zero-padded
                                     constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
-                                    constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil
+                                    constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil, 16 bound-only rf
                                     constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
                                     device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
                                     device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
@@ -930,6 +932,8 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
                                     constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
                                     constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
                                     device float* L            [[buffer(28)]],  // (4, N) low parts of m, mb (two_sum), in/out
+                                    constant int* run_of       [[buffer(29)]],  // (S',) NUFFT readout starting at s, else -1
+                                    constant float* nu         [[buffer(30)]],  // NUFFT: header (NU_HEAD), per run n, row, shift
                                     uint i    [[thread_position_in_grid]],
                                     uint lane [[thread_index_in_simdgroup]],
                                     uint sg   [[simdgroup_index_in_threadgroup]],
@@ -941,6 +945,9 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     threadgroup float buf[MAX_SG * MMA_REGION];
     threadgroup int rows[8];
     threadgroup float psi[8];
+    threadgroup int tgred[2 * MAX_SG];  // NUFFT readouts: per-simdgroup window ends
+    threadgroup int tgwin[2];
+    const uint nuon = prm[16];
     threadgroup float* mine = buf + sg * MMA_REGION;
     const bool active = i < n;
     const uint j = active ? i : 0;
@@ -998,6 +1005,70 @@ kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  /
     for (uint s = s0; s < s1; ++s) {
         constant float* q = segs + 8 * s;
         const int f = flags[s];
+        if (nuon && run_of[s] >= 0) {
+            // A readout as a type-1 NUFFT (docs/PERFORMANCE.md 2.1): sample i of the run is
+            // m e^{-(i+1) dt R2} e^{-i (i+1) phi}, phi = 2 pi dt bz; each spin spreads its decay terms
+            // m e^{-tau_m R2} e^{-i shift phi} onto an oversampled grid in phi with an ES kernel (the
+            // coil sums by the same matrix products as the samples, a few columns of grid cells instead
+            // of n samples), then jumps over the run in one free step. The grid is transformed on the
+            // CPU. The window of cells is common to the threadgroup (spins sorted along phi); a
+            // threadgroup whose window is wider than wmax keeps the per-sample path.
+            if (nb > 0) { flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg); nb = 0; }
+            const int r = run_of[s];
+            constant float* rp = nu + NU_HEAD + 3 * r;
+            const uint nr = uint(rp[0]), mrow = uint(rp[1]);
+            const float shift = rp[2];
+            const int ng = int(nu[0]), nadc = int(nu[4]);
+            const uint w = uint(nu[1]), nterm = uint(nu[2]), wmax = uint(nu[5]);
+            const float beta = nu[3];
+            const float phi = TWO_PI * q[0] * offset(st.p, st.conc, 0u, q);
+            const float turns = phi / TWO_PI;
+            const float xg = (turns - floor(turns)) * float(ng);
+            const int base = int(floor(xg - 0.5f * float(w))) + 1;
+            int lo_b = active ? base : 0x7fffffff, hi_b = active ? base : -0x7fffffff;
+            lo_b = simd_min(lo_b), hi_b = simd_max(hi_b);
+            if (lane == 0) tgred[sg] = lo_b, tgred[MAX_SG + sg] = hi_b;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            if (tid == 0) {
+                int a = 0x7fffffff, b = -0x7fffffff;
+                for (uint g = 0; g < nsg; ++g) a = min(a, tgred[g]), b = max(b, tgred[MAX_SG + g]);
+                tgwin[0] = a, tgwin[1] = b;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            const int wb = tgwin[0], we = tgwin[1];
+            if (wb > we || uint(we - wb) + w <= wmax) {  // all inactive, or a narrow window
+                if (wb <= we) {
+                    const uint ncol = (uint(we - wb) + w) * nterm;
+                    const float ax = mx + st.lx, ay = my + st.ly;
+                    const float cs = precise::cos(shift * phi), sn = precise::sin(shift * phi);
+                    const float sr = ax * cs + ay * sn, si = ay * cs - ax * sn;  // (ax + i ay) e^{-i shift phi}
+                    float er[MAX_TERMS];
+                    for (uint m = 0; m < nterm; ++m) er[m] = exp(-nu[6 + m] * st.p.r2);
+                    for (uint c0 = 0; c0 < ncol; c0 += 8) {
+                        const uint nbk = min(8u, ncol - c0);
+                        for (uint b = 0; b < nbk; ++b) {
+                            const uint col = c0 + b, cell = col / nterm, m = col % nterm;
+                            const float z = 2.0f * (float(wb + int(cell)) - xg) / float(w);
+                            const float kv = (active && fabs(z) < 1.0f) ? exp(beta * (sqrt(1.0f - z * z) - 1.0f)) * er[m] : 0.0f;
+                            mine[8 * lane + b] = kv * sr;
+                            mine[256 + 8 * lane + b] = kv * si;
+                            mine[512 + 8 * lane + b] = -kv * si;
+                            if (tid == 0) {
+                                int u = (wb + int(cell)) % ng;
+                                if (u < 0) u += ng;
+                                rows[b] = nadc + (r * int(nterm) + int(m)) * ng + u;
+                                psi[b] = 0.0f;
+                            }
+                        }
+                        flush_mma(buf, mine, rows, psi, sens, sig, nbk, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
+                    }
+                }
+                advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, mrow, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+                s += nr - 1;
+                if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+                continue;
+            }
+        }
         advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
         if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
             mine[8 * lane + nb] = mx + st.lx;
@@ -1588,7 +1659,8 @@ def _requires_grad(*objs) -> bool:
 
 def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
                    chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
-                   seed: int = 0, maps=None, checkpoint_every: int | None = None) -> SimResult:
+                   seed: int = 0, maps=None, checkpoint_every: int | None = None, readouts: str = "direct",
+                   nufft_width: int = 6, nufft_terms: int = 3) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
@@ -1599,11 +1671,22 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     db0, b1, the rate-model bound pool), coils, m_init and, through the encoding positions and concomitant
     coefficients, the scanner field model. The forward stores the state before every ``checkpoint_every``
     segments (a multiple of 64; default about sqrt(segments)); the backward replays one interval at a time.
-    Not with diffusion, motion, free pools or the generalized bound pool (raises)."""
+    Not with diffusion, motion, free pools or the generalized bound pool (raises).
+
+    ``readouts="nufft"`` (forward only; gradients keep the per-sample path): every readout of at least
+    16 samples with one dt, gradient and B0 offset is evaluated as a type-1 NUFFT (docs/PERFORMANCE.md
+    2.1): the spins are sorted along the readout's phase, each spreads its ``nufft_terms`` decay terms
+    onto a 2x oversampled grid with an exponential-of-semicircle kernel of ``nufft_width`` cells, and
+    jumps over the readout in one step; an FFT on the CPU gives the samples. For static spins without
+    concomitant fields, diffusion, motion, free pools or the generalized bound pool (raises otherwise).
+    Width 6 and 3 terms: ~1e-5 of the signal (float32's level)."""
+    if readouts not in ("direct", "nufft"):
+        raise ValueError(f"readouts must be 'direct' or 'nufft', not {readouts!r}")
     if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
         return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every)
     with torch.no_grad():
-        return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps)
+        return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps,
+                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None)
 
 
 def default_checkpoint_every(n_segments: int) -> int:
@@ -1833,21 +1916,90 @@ def _cost_order(phantom: Phantom, seq: Sequence) -> Tensor | None:
     return torch.argsort(cost, stable=True)
 
 
+NUFFT_MIN_SAMPLES = 16  # readouts shorter than this keep the per-sample path
+NU_HEAD = 14  # = the shader's NU_HEAD: mg w terms beta n_adc wmax tau[8]
+NUFFT_WMAX = 32  # widest threadgroup window of grid cells for the NUFFT path
+
+
+def _readout_runs(seq: Sequence) -> list[tuple[int, int]]:
+    """(first segment, samples) of every run of >= NUFFT_MIN_SAMPLES consecutive ADC segments without RF,
+    with one dt, gradient and b0_offset to 1e-9 (a spoil only on the last), of the most common (samples, dt).
+    A builder readout's first sample sits half a dwell in, so its run starts at the second sample."""
+    adc, rf, sp = (np.asarray(f, dtype=bool) for f in (seq.adc, seq.is_rf, seq.spoil))
+    dt = seq.dt.detach().double().cpu().numpy()
+    g = seq.grad.detach().double().cpu().numpy()
+    b0 = np.zeros_like(dt) if seq.b0_offset is None else seq.b0_offset.detach().double().cpu().numpy()
+    ok = adc & ~rf
+    same = np.zeros(len(dt), dtype=bool)
+    # equal to the last bits: segment edges come from absolute times (dt 9.999999999999999e-06 vs 1e-05)
+    tol_g = 1e-9 * max(float(np.abs(g).max()), 1.0)
+    same[1:] = (ok[1:] & ok[:-1] & ~sp[:-1] & (np.abs(dt[1:] - dt[:-1]) <= 1e-9 * dt[1:])
+                & (np.abs(g[1:] - g[:-1]) <= tol_g).all(1) & (np.abs(b0[1:] - b0[:-1]) <= 1e-9))
+    starts = np.flatnonzero(ok & ~same)
+    ends = np.append(starts[1:], len(dt))
+    runs = []
+    for a, e in zip(starts, ends):
+        k = a + 1
+        while k < e and same[k]:
+            k += 1
+        if k - a >= NUFFT_MIN_SAMPLES:
+            runs.append((int(a), int(k - a)))
+    if not runs:
+        return []
+    kinds = {}
+    for a, k in runs:
+        kinds.setdefault((k, round(float(dt[a]) * 1e12)), []).append((a, k))
+    return max(kinds.values(), key=len)
+
+
+def _es_hat(kp: np.ndarray, ng: int, w: int, beta: float) -> np.ndarray:
+    """Fourier transform of the exponential-of-semicircle kernel exp(beta (sqrt(1 - (2t/w)^2) - 1)), t in grid
+    cells, at modes kp of an ng-cell grid (Barnett, Magland, af Klinteberg 2019); trapezoid quadrature."""
+    t = np.linspace(-w / 2, w / 2, 400 * w + 1)
+    z = 2 * t / w
+    v = np.where(np.abs(z) < 1, np.exp(beta * (np.sqrt(np.clip(1 - z * z, 0, None)) - 1)), 0.0)
+    return np.trapezoid(v[None, :] * np.cos(2 * np.pi * np.outer(kp, t) / ng), t, axis=1)
+
+
 def _take(phantom: Phantom, idx: Tensor) -> Phantom:
     """The (static) spins ``idx`` of a phantom with free pools."""
     n, pd = len(phantom), phantom.pd
     pick = lambda t: None if t is None else t[idx]
-    pools = tuple(type(q)(*(getattr(q.expand(n, pd), a)[idx] for a in ("f", "k", "t1", "t2", "dw"))) for q in phantom.pools)
+    pools = tuple(type(q)(*(getattr(q.expand(n, pd), a)[idx] for a in ("f", "k", "t1", "t2", "dw"))) for q in phantom.pools or ())
     bound = None if phantom.bound is None else phantom.bound.expand(n, pd)[idx]
     return dataclasses.replace(phantom, pos=phantom.pos[idx], pd=pd[idx], t1=phantom.t1[idx], t2=phantom.t2[idx],
                                db0=phantom.db0[idx], b1=pick(phantom.b1), bound=bound, pools=pools)
 
 
 def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-             ordered: bool = False, fields_in=None, keep: bool = False):
+             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None):
     """The forward kernels. ``fields_in``: the field model's inputs (``fields.SpinFields``) in place of
     spin_fields(scanner, pos). ``keep``: also return what the adjoint needs, with the state before every
-    ``chunk`` segments (one dispatch each)."""
+    ``chunk`` segments (one dispatch each). ``nufft``: (width, terms) of NUFFT readouts (simulate_metal)."""
+    runs = []
+    if nufft is not None:
+        if keep:
+            raise ValueError("NUFFT readouts are forward only")
+        for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
+                              ("free pools", bool(getattr(phantom, "pools", None))),
+                              ("the generalized bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
+                              ("concomitant fields", bool(spin_fields(scanner, phantom.pos).mode))):
+            if present:
+                raise ValueError(f"readouts='nufft' is for static spins without {what}")
+        runs = _readout_runs(seq)
+        mma = True
+        if runs and not ordered:  # sorted along the readout's phase: a threadgroup covers a few grid cells
+            a = runs[0][0]
+            off = 0.0 if seq.b0_offset is None else float(seq.b0_offset[a])
+            pos_enc = spin_fields(scanner, phantom.pos).pos
+            turns = float(seq.dt[a]) * (pos_enc.detach().double().cpu() @ seq.grad[a].detach().double().cpu()
+                                        + phantom.db0.detach().double().cpu() + off)
+            order = torch.argsort(turns - torch.floor(turns), stable=True)
+            inv = torch.argsort(order)
+            r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
+                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
+                         nufft=nufft)
+            return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv])
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as bloch.simulate
         if phantom.bound is not None and phantom.bound.model == "generalized":
@@ -2068,11 +2220,53 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs,
             *map_bufs)
 
-    starts = list(range(0, S, chunk))
+    # NUFFT readouts: run starts, one merged free segment per run appended after the sequence (the jump),
+    # the grid rows after the samples in sig
+    run_of = torch.full((S + len(runs),), -1, dtype=torch.int32)
+    nu = torch.zeros(NU_HEAD + 3 * len(runs) if runs else 1, dtype=torch.float64)
+    ng = 0
+    if runs:
+        width, terms = nufft
+        if not 1 <= terms <= 8:
+            raise ValueError("nufft_terms must be 1..8")
+        n_r, dt_r = runs[0][1], float(seq.dt[runs[0][0]])
+        ng = 2 * n_r + (2 * n_r) % 2
+        nodes = 0.5 * (dt_r + n_r * dt_r) + 0.5 * (n_r * dt_r - dt_r) * np.cos(np.pi * (2 * np.arange(terms) + 1) / (2 * terms))
+        nu[:6] = torch.tensor([ng, width, terms, 2.30 * width, n_adc, NUFFT_WMAX], dtype=torch.float64)
+        nu[6:6 + terms] = torch.from_numpy(nodes)
+        merged = []
+        for r, (a, k) in enumerate(runs):
+            run_of[a] = r
+            nu[NU_HEAD + 3 * r: NU_HEAD + 3 * r + 3] = torch.tensor([k, S + r, k // 2 + 1], dtype=torch.float64)
+            row = segs[a].clone()
+            row[0], row[1], row[2], row[6] = k * float(seq.dt[a]), 0.0, 0.0, 0.0
+            merged.append(row)
+        segs = torch.cat([segs, torch.stack(merged)]).contiguous()
+        flags = torch.cat([flags, torch.zeros(len(runs), dtype=torch.int32, device=dev)]).contiguous()
+        rows = torch.cat([rows, torch.zeros(len(runs), dtype=torch.int32, device=dev)]).contiguous()
+        if pool is not None:
+            MB, pool_b, frf_b, line_b, logf_b, mt_flag = mt_bufs
+            frf_b = torch.cat([frf_b, torch.zeros(len(runs), device=dev, dtype=f32)]).contiguous()
+            mt_bufs = [MB, pool_b, frf_b, line_b, logf_b, mt_flag]
+            bufs = (MB, pool_b, frf_b, *bufs[3:])
+        sig = torch.zeros((n_adc + len(runs) * terms * ng) * n_coils * 2, device=dev, dtype=f32)
+    run_of, nu_b = run_of.to(dev), nu.to(dev, f32).contiguous()
+    bounds, s0 = [], 0  # dispatches never split a run
+    while s0 < S:
+        bounds.append(s0)
+        e = min(S, s0 + chunk)
+        for a, k in runs:
+            if a < e < a + k:
+                e = a if a > s0 else a + k
+                break
+        s0 = e
+    starts = bounds
+    ends = bounds[1:] + [S]
     tiles = (n_tiles, threads) if mma else (0, 0)
-    prms = torch.from_numpy(np.array([[n, n_coils, s0, min(S, s0 + chunk), *tiles, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
+    prms = torch.from_numpy(np.array([[n, n_coils, s0, s1, *tiles, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
                                        kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped,
-                                       int(fmove)] for s0 in starts], dtype=np.uint32).view(np.int32)).to(dev)
+                                       int(fmove), int(bool(runs))] for s0, s1 in zip(starts, ends)],
+                                     dtype=np.uint32).view(np.int32)).to(dev)
 
     ckpts = []
     mb_row = mt_bufs[0][None] if pool is not None else torch.zeros(1, n, device=dev, dtype=f32)
@@ -2081,13 +2275,38 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             ckpts.append(torch.cat([M, mb_row, lo_buf]).clone())
         if mma:
             getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
-                                                     *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
+                                                     *bm_bufs, fm_buf, lo_buf, run_of, nu_b, threads=threads,
+                                                     group_size=group)
         else:
             getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
                                                  *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
     torch.mps.synchronize()
-    sig = sig[: n_adc * n_coils * 2].cpu().view(n_adc, n_coils, 2)
+    full = sig.cpu()
+    sig = full[: n_adc * n_coils * 2].view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
+    if runs:  # the grids: FFT, deconvolve the kernel, recombine the decay terms, demodulate, add to the samples
+        width, terms = nufft
+        grid = full[n_adc * n_coils * 2:].view(len(runs), terms, ng, n_coils, 2).double()
+        F = torch.fft.fft(torch.complex(grid[..., 0], grid[..., 1]), dim=2)
+        n_r, dt_r = runs[0][1], float(seq.dt[runs[0][0]])
+        kp = np.arange(-(n_r // 2), n_r - n_r // 2)
+        hat = torch.from_numpy(_es_hat(kp, ng, width, 2.30 * width))
+        Fk = F[:, :, torch.from_numpy(kp % ng), :] / hat[None, None, :, None]  # (runs, terms, n, C)
+        tt = (np.arange(n_r) + 1) * dt_r
+        nodes = nu[6:6 + terms].numpy()
+        lag = np.ones((terms, n_r))
+        for a_ in range(terms):
+            for b_ in range(terms):
+                if a_ != b_:
+                    lag[a_] *= (tt - nodes[b_]) / (nodes[a_] - nodes[b_])
+        vals = torch.einsum("mi,rmic->ric", torch.from_numpy(lag).to(Fk.dtype), Fk)  # (runs, n, C)
+        seg_idx = torch.tensor([a + i for a, k in runs for i in range(k)])
+        psi_r = torch.remainder(seq.adc_phase.detach().double().cpu()[seg_idx], 2 * math.pi)
+        vals = vals.reshape(-1, n_coils) * torch.exp(-1j * psi_r)[:, None]
+        adc_row = (torch.cumsum(torch.tensor(seq.adc, dtype=torch.int64), 0) - 1)[seg_idx]
+        signal = signal.to(torch.complex128)
+        signal[:, adc_row] += vals.T
+        signal = signal.to(torch.complex64)
     if pools:
         st = bm_bufs[0].cpu().double()
         st = (st[:len(st) // 2] + st[len(st) // 2:]).float()

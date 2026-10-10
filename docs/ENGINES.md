@@ -115,6 +115,11 @@ direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 rel
   exchange over a long free segment (40 kHz over 5 ms: ~280). Static spins are sorted by that cost
   before the dispatch, since a simdgroup waits for its slowest lane (5× at 30k spins on benchmark
   9), and returned in order; moving spins are not (their walks are keyed by spin index).
+- Metal, `readouts="nufft"` (forward only, opt-in): every readout of at least 16 samples with one
+  dt, gradient and B0 offset (the most common length) is a type-1 NUFFT, 3e-6 from the per-sample
+  path on the realism TSE (`test_metal_nufft.py`). For static spins without diffusion, motion,
+  free pools, the generalized bound pool or concomitant fields (raises `ValueError`); other readouts
+  and threadgroups whose spins span more than `NUFFT_WMAX` grid cells keep the per-sample path.
 - Metal: `mma=False` (one `simd_sum` per coil and sample) takes at most 32 coils; the default for
   two or more coils is the matrix-product reduction, which has no limit. Moving spins in mapped
   coils (`FieldMaps.coils` with motion or diffusion) always use the direct reduction, so at most

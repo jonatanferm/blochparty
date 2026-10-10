@@ -111,7 +111,8 @@ def simulate(ph, seq, coils):
     from blochparty import metal
 
     if metal.available():
-        out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64))
+        out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64),
+                                   readouts="nufft")  # PERFORMANCE 2.1: readouts as NUFFTs, 2.7e-6 from per-sample
         return out.signal.to(torch.complex128), "metal"
     return bp.simulate(ph, seq, coils).signal, "core"
 
@@ -184,7 +185,8 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
-                "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "seconds": round(time.perf_counter() - t0)}
+                "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft",
+                "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
         print(json.dumps(meta), flush=True)
 

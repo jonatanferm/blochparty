@@ -754,6 +754,18 @@ says where it came from so it can be re-checked.
   the two-sum low parts with the state (8 rows instead of 3 per block start) cost ~25 % of the
   backward, and the recomputation does not need them (one ulp, and block starts are global
   multiples of 4, so results stay independent of `checkpoint_every`).
+- **Assert that the fast path ran before comparing it with the slow one** (NUFFT readouts,
+  2026-10-10): the first readout-run detector compared dt and gradients exactly, but builder
+  segments' dt come from differences of absolute times (9.999999999999999e-06 vs 1e-05) and a
+  readout's first sample sits half a dwell in, so it found no runs. "NUFFT vs per-sample" then
+  differed by 2.5e-5, which looked like a NUFFT error and was the per-sample path twice: the
+  order of float32 atomic adds over threadgroups differs run to run. Compare within 1e-9
+  relative, start runs at the second sample, and make the test assert `_readout_runs(seq)`.
+- **NUFFT readouts on the realism TSE** (PERFORMANCE 2.1): one realism slice (16 coils, 0.9-1.8 M
+  spins, laptop) 3.8 -> 1.5 s (2.5x) single slice, 10.4 -> 6.3 s (1.6x) with 16 slices' pulses and
+  MT, where the slices' RF is the larger share; signal 3e-6 from the per-sample path, images 3e-5.
+  The kernel's spreading reuses the coil MMA; a threadgroup whose sorted spins span more than
+  `NUFFT_WMAX` grid cells (fat, steep B0) falls back to per-sample for that readout.
 - **A GPU shared with another process gives 2x timing swings** (here a desktop app kept the GPU at
   up to 93 %): the same 8-coil adjoint ran in 1.19 s and 2.60 s back to back. Alternate the old and
   new code in one process (load the old module from a saved copy under another name) and compare

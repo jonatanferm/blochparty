@@ -2,14 +2,28 @@
 
 Written 2026-10-10 from reading the engines, the benchmark history and the realism workload,
 plus a few measurements on the Metal kernel (this laptop's 8-core M4 GPU; the Mac mini's 10-core
-GPU runs the same cases about 1.5-2x faster, the ratios are what matter). Nothing here is
-implemented; each item names its independent check and an estimate of the gain, marked
+GPU runs the same cases about 1.5-2x faster, the ratios are what matter). Nothing here was
+implemented then (see Status); each item names its independent check and an estimate of the gain, marked
 **measured** where it was timed and **estimated** where it comes from a cost model.
 
 The short version: the Metal kernel is already a good *isochromat stepper*. The remaining
 factor of 10-100x is not in the stepping but in the structure of what is stepped: readouts are
 Fourier transforms, pulses are low-rank in their parameters, repeated TRs are a periodic map,
 ramps need no raster, and the adjoint need not store or recompute anything. Most of it is exact.
+
+## Status (2026-10-10)
+
+Implemented and measured on the realism TSE (one slice, 128², 16 coils, laptop GPU):
+
+| item | where | measured |
+|---|---|---|
+| 2.4 merge RF- and ADC-free stretches | `Sequence.merge_free` | 36 335 -> 19 726 segments; 1.98 -> 1.33 s (400k spins); exact (2e-15 core, 2e-6 Metal) |
+| 2.6 fewer spins | `to_phantom(sampling="systematic")` | systematic = categorical, lattice = random at equal count: no gain |
+| 2.7 overlap phantom build and GPU | `simulate_heads.py` | fast mode 2.3 s per slice (legacy ~128 s) |
+| 2.1 NUFFT readouts | `simulate_metal(readouts="nufft")` | 2.5x single slice, 1.6x with 16 slices' pulses and MT; 3e-6 from per-sample |
+
+Along the way the far slices' pulses became `Sequence.bound_only` segments (a frame offset broke
+float32: LESSONS). Not started: 2.2 periodicity, 2.3 tabulated pulses, 2.5 reversible adjoint.
 
 ## 1. Where the time goes today
 
