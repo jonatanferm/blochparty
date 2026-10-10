@@ -908,3 +908,47 @@ says where it came from so it can be re-checked.
   Also: jackknife the final aggregate, not its parts (sqrt(Σ se²)/n underestimated by 1.65×),
   and 4-seed SEs are themselves noisy (0.31 vs 0.19 on disjoint seed sets). Source: Benchmark 1
   recheck, 2026-10-08.
+
+## Tissue-property database — 2026-10-10
+
+- **Getting at full texts.** Through this environment's proxy: Wiley, RSNA, AJR, ScienceDirect and
+  the Wayback Machine answer 403 / Cloudflare / captcha; PMC article pages start serving reCAPTCHA
+  after ~20 quick requests. What works: PMC OAI-PMH
+  (`https://pmc.ncbi.nlm.nih.gov/api/oai/v1/mh/?verb=GetRecord&identifier=oai:pubmedcentral.nih.gov:<digits>&metadataPrefix=pmc`)
+  and NCBI `efetch db=pmc` return clean JATS XML for open-access papers AND NIH author manuscripts;
+  Europe PMC `fullTextXML` returns HTTP 500 for author manuscripts. In NIH-manuscript JATS the
+  tables sit in `<floats-group>`, outside `<body>`. ISMRM proceedings PDFs before ~2010 download
+  from `cds.ismrm.org/protected/<yy>MProceedings/PDFfiles/<nnnnn>.pdf` without login. Some
+  "tables" are images (Campbell-Washburn 2019 Table 1). Source: the eight row-extraction passes.
+- **IT'IS proxies are copies, and the copies reveal them**: Eye Retina = Brain GM, Iris/Ciliary
+  body/Diaphragm = Muscle, Choroid/Heart lumen/Placenta = Blood, Connective tissue's water content =
+  WM's. A (mean, SD, n, min, max) tuple shared by several names is a proxy; the owner must be chosen
+  per table (the Gabriel 1996 dielectric sets have other owners than the relaxation rows: Testis,
+  Thyroid, Tendon, Nerve, Stomach, Colon, inflated Lung). `tools/tissuedb_import_itis.py` keeps 212
+  blocks and logs 459 skipped. IT'IS "Breast Fat" has T1 0.9-1 s (breast tissue, not adipose), and
+  the T1 of WM there falls from 1.0 s at 1.5 T to 0.87 s at 3 T because each field pools other studies.
+- **Abstract labels lie**: Wansapura 1999 calls T2* "T2" and lists "GM and WM 80 and 110 ms" in the
+  order opposite to physics (GM T2 > WM T2); Shin 2025 swaps WM/GM in the abstract (Table 3 is GM,
+  WM); the ISMRM archive page of Peters et al. 2006 lists Hoogenraad first (the PDF has Peters).
+  `validation/anatomy_brainweb.py` uses Wansapura's abstract order (WM T2 .110, GM .080 s).
+- **The CSF T1 the project quotes (4.4 s, via Spijkerman 2018 ref. 13) is 4.3 +- 0.2 s in Rooney
+  2007's abstract** (across 3 subjects and all fields; Rooney did not scan at 3 T). Spijkerman's
+  2.03 s 3 T CSF T2 is a median from the longest-TE (partial-volume) analysis. Caan 2019 scanned 8
+  but analysed 6 subjects.
+- **Method beats tissue in many cells**: myocardial T1 depends on MOLLI/ShMOLLI/SASHA, kidney T1 on
+  the readout (>200 ms between IR SE-EPI and bFFE, Cox 2017), cortical-bone T1 by a factor ~2.5
+  (in vivo UTE-IR vs ex vivo IR-CPMG), MRF T2 runs low in kidney and high in abdominal muscle, VFA
+  T1 is 16-28 % above Look-Locker in the same subjects (Krug 2022), blood T2 depends on the CPMG
+  spacing, tendon "T2*" on the echo set. The `method` column is part of the value.
+- **MT conventions in practice**: Vanderbilt SIR kmf and Bayer's bSSFP kmf already are the
+  bound -> free R; Yarnykh/CRI k is free -> bound (R = k(1-f)/f); PSR/F = M0b/M0f -> f = PSR/(1+PSR),
+  SD scaled by 1/(1+PSR)^2; the Gloor 2008 bSSFP equation overestimates F by ~40 % (Bayer 2022).
+  Stanisz 2006 prints blood T2B 280 +- 50 us next to T2 275 +- 50 ms: probably a typo, kept flagged.
+- **QSM numbers carry their reference**: CSF, a deep-WM ROI set to -0.030 ppm, the whole-brain mean
+  and phantom ground truth all occur; the database keeps them as `chi_qsm` with the reference in
+  `method`, separate from absolute `chi`. Susceptometry papers report cgs: SI = 4 pi cgs.
+- **Most blood-oxygenation calibrations are bovine blood** (Lu 2012, Qin 2011, Krishnamurthy 2014,
+  Grgac 2013/2017), and Liu 2016's printed T2 coefficients do not reproduce its own 191 ms.
+- **Fractions of a compartmentalised tissue must not be pooled as one tissue**: cortical-bone pd rows
+  of bound and pore water add up, an average of them means nothing; they are separate ids
+  (`bone.cortical.bound_water`, `.pore_water`, `.collagen`).

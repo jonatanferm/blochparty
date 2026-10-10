@@ -1,0 +1,127 @@
+id,name,parent,brainweb_class,description
+adrenal_gland,adrenal gland,,,
+air,air,,background,air outside the body and in sinuses; BrainWeb background
+bladder.urine,urine,,,
+bladder.wall,urinary bladder wall,,,
+blood,blood,,vessels,whole blood (unspecified oxygenation); BrainWeb vessels
+blood.arterial,arterial blood,blood,,oxygen saturation ~0.97-0.99
+blood.plasma,blood plasma,blood,,
+blood.serum,blood serum,blood,,
+blood.venous,venous blood,blood,,oxygen saturation ~0.6-0.75
+bone,bone,,,bone (unspecified)
+bone.cancellous,cancellous (trabecular) bone,bone,,
+bone.cortical,cortical bone,bone,skull,BrainWeb skull
+bone.cortical.bound_water,cortical bone: collagen-bound water,bone.cortical,,"water compartment, not a tissue: bound water (UTE T2* ~0.3-0.5 ms); pd rows add with pore water"
+bone.cortical.collagen,cortical bone: collagen protons,bone.cortical,,"semi-solid compartment, not a tissue: collagen backbone protons (T2 ~60 us)"
+bone.cortical.pore_water,cortical bone: pore water,bone.cortical,,"water compartment, not a tissue: Haversian/lacuno-canalicular pore water (T2 ~ms-tens of ms)"
+bone.skull,skull (cranial bone),bone.cortical,,calvarium/cranial bone (inner+outer tables and diploe unless region says otherwise)
+bone_marrow,bone marrow,,marrow,"marrow (unspecified red/yellow); BrainWeb marrow (skull diploe), pooled over children when it has no rows of its own"
+bone_marrow.red,red (haematopoietic) bone marrow,bone_marrow,,
+bone_marrow.yellow,yellow (fatty) bone marrow,bone_marrow,,
+brain,brain,,,whole brain or unspecified brain tissue
+brain.brainstem,brainstem,brain,,"midbrain, pons, medulla (region column)"
+brain.cerebellum,cerebellum,brain,,cerebellum (unspecified)
+brain.cerebellum.gm,cerebellar grey matter,brain.cerebellum,,
+brain.cerebellum.wm,cerebellar white matter,brain.cerebellum,,
+brain.gm,grey matter,brain,gm,cortical (or whole) grey matter; deep nuclei are children of brain.gm.deep
+brain.gm.amygdala,amygdala,brain.gm,,amygdaloid nuclear complex (medial temporal)
+brain.gm.deep,deep grey matter,brain.gm,,basal ganglia and thalamus taken together
+brain.gm.deep.caudate,caudate nucleus,brain.gm.deep,,
+brain.gm.deep.dentate,dentate nucleus,brain.gm.deep,,cerebellar nucleus
+brain.gm.deep.hypothalamus,hypothalamus,brain.gm.deep,,
+brain.gm.deep.pallidum,globus pallidus,brain.gm.deep,,
+brain.gm.deep.putamen,putamen,brain.gm.deep,,
+brain.gm.deep.red_nucleus,red nucleus,brain.gm.deep,,
+brain.gm.deep.substantia_nigra,substantia nigra,brain.gm.deep,,
+brain.gm.deep.subthalamic_nucleus,subthalamic nucleus,brain.gm.deep,,small iron-rich diencephalic nucleus (STN)
+brain.gm.deep.thalamus,thalamus,brain.gm.deep,,
+brain.gm.hippocampus,hippocampus,brain.gm,,
+brain.wm,cerebral white matter,brain,wm,white matter (regions in the region column)
+brain.wm.corpus_callosum,corpus callosum,brain.wm,,
+breast,breast,,,
+breast.fat,breast adipose tissue,breast,,
+breast.fibroglandular,fibroglandular breast tissue,breast,,
+bronchi,bronchi,,,
+cartilage,articular (hyaline) cartilage,,,
+colon,large intestine,,,
+connective,connective tissue,,connective,
+csf,cerebrospinal fluid,,csf,
+ductus_deferens,ductus deferens,,,
+dura,dura mater,,dura,
+epididymis,epididymis,,,
+esophagus,oesophagus,,,
+extracellular_fluid,extracellular fluid,,,
+eye,eye (globe),,,whole eye
+eye.aqueous,aqueous humour,eye,,
+eye.chorioretina,chorioretina,eye,,retina + choroid (not separable at clinical resolution)
+eye.choroid,choroid,eye,,
+eye.ciliary_body,ciliary body,eye,,
+eye.cornea,cornea,eye,,
+eye.extraocular_muscle,extraocular muscle,muscle.skeletal,,rectus and oblique muscles of the orbit
+eye.iris,iris,eye,,
+eye.lens,lens,eye,,
+eye.retina,retina,eye,,
+eye.sclera,sclera,eye,,
+eye.vitreous,vitreous humour,eye,,
+fat,adipose tissue,,,adipose tissue (generic)
+fat.brown,brown adipose tissue,fat,,"brown (or supraclavicular presumed-brown) adipose tissue: multilocular adipocytes, higher water fraction than white fat"
+fat.orbital,orbital fat,fat,,
+fat.subcutaneous,subcutaneous adipose tissue,fat,fat,BrainWeb fat (scalp and facial fat)
+fat.visceral,visceral adipose tissue,fat,,
+gallbladder,gallbladder,,,
+gallbladder.bile,bile,gallbladder,,
+heart.myocardium,myocardium,,,
+intervertebral_disc,intervertebral disc,,,
+kidney,kidney,,,
+kidney.cortex,renal cortex,kidney,,
+kidney.medulla,renal medulla,kidney,,
+larynx,larynx,,,
+ligament,ligament,tendon,,
+liver,liver,,,
+lung,lung parenchyma,,,
+lymph,lymph,,,
+lymph_node,lymph node,,,
+meniscus,meniscus,,,
+mucosa,mucous membrane,,,
+muscle.skeletal,skeletal muscle,,muscle,muscle (regions in the region column)
+nerve,nerve,,,peripheral and cranial nerve
+nerve.optic,optic nerve,nerve,,
+oral_cavity,oral cavity (soft tissue),,,oral cavity soft tissue incl. tongue and floor of mouth (radiotherapy OAR definition)
+ovary,ovary,,,
+pancreas,pancreas,,,
+penis,penis,,,
+pineal,pineal body,,,
+pituitary,pituitary gland (hypophysis),,,
+placenta,placenta,,,
+prostate,prostate,,,
+prostate.peripheral_zone,prostate peripheral zone,prostate,,
+prostate.transition_zone,prostate transition zone,prostate,,
+salivary_gland,salivary gland,,,parotid and submandibular glands
+salivary_gland.parotid,parotid gland,salivary_gland,,
+salivary_gland.sublingual,sublingual gland,salivary_gland,,
+salivary_gland.submandibular,submandibular gland,salivary_gland,,
+scalp,scalp,,,scalp (skin and subcutis)
+seminal_vesicle,seminal vesicle,,,
+skin,skin,,skin,epidermis and dermis
+small_intestine,small intestine,,,
+spinal_cord,spinal cord,,,
+spleen,spleen,,,
+stomach,stomach,,,
+synovial_fluid,synovial fluid,,,
+tendon,tendon and ligament,,,
+testis,testis,,,
+thymus,thymus,,,
+thyroid,thyroid gland,,,
+tongue,tongue,,,
+tooth,tooth,,,
+tooth.dentin,dentin,tooth,,
+tooth.enamel,enamel,tooth,,
+trachea,trachea,,,
+urethra,ureter and urethra,,,
+uterus,uterus,,,
+uterus.cervix,uterine cervix,uterus,,cervical stroma
+uterus.endometrium,endometrium,uterus,,mucosal lining of the uterine cavity
+uterus.myometrium,myometrium,uterus,,smooth-muscle wall of the uterine body
+vagina,vagina,,,
+vessel_wall,blood vessel wall,,,
+water,pure water,,,physical reference (not a tissue)

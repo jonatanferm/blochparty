@@ -1,0 +1,674 @@
+# https://itis.swiss/_resources/vendor/oetiker/spreadbutler/fcgi/sb.fcgi/fetch?file=materialparameterdatabasecurrent20240604.xls sha256=807205b28413091f754c1dd50e7597d623f4a217ff0b4889e456096be893044a
+# https://itis.swiss/_resources/vendor/oetiker/spreadbutler/fcgi/sb.fcgi/fetch?file=watercontent20250821.xls sha256=af1747ed52c6bcf952e3aa0503891aa46ac60c57d10bcfb506f4377185e09ab0
+itis_name,xls_row,block,decision,reason,tissue
+Adrenal Gland,4,t1 1.5 T,skip,no data,adrenal_gland
+Adrenal Gland,4,t2 1.5 T,skip,no data,adrenal_gland
+Adrenal Gland,4,t1 3 T,skip,no data,adrenal_gland
+Adrenal Gland,4,t2 3 T,skip,no data,adrenal_gland
+Adrenal Gland,4,dielectric,take,,adrenal_gland
+Air,5,t1 1.5 T,skip,not mapped (lumen content or air),
+Air,5,t2 1.5 T,skip,not mapped (lumen content or air),
+Air,5,t1 3 T,skip,not mapped (lumen content or air),
+Air,5,t2 3 T,skip,not mapped (lumen content or air),
+Air,5,dielectric,skip,not mapped (lumen content or air),
+Bile,6,t1 1.5 T,skip,no data,gallbladder.bile
+Bile,6,t2 1.5 T,skip,no data,gallbladder.bile
+Bile,6,t1 3 T,skip,no data,gallbladder.bile
+Bile,6,t2 3 T,skip,no data,gallbladder.bile
+Bile,6,dielectric,take,,gallbladder.bile
+Blood,7,t1 1.5 T,take,,blood
+Blood,7,t2 1.5 T,take,,blood
+Blood,7,t1 3 T,take,,blood
+Blood,7,t2 3 T,take,,blood
+Blood,7,dielectric,take,,blood
+Blood Plasma,8,t1 1.5 T,skip,no data,blood.plasma
+Blood Plasma,8,t2 1.5 T,skip,no data,blood.plasma
+Blood Plasma,8,t1 3 T,skip,no data,blood.plasma
+Blood Plasma,8,t2 3 T,skip,no data,blood.plasma
+Blood Plasma,8,dielectric,skip,no data,blood.plasma
+Blood Serum,9,t1 1.5 T,skip,no data,blood.serum
+Blood Serum,9,t2 1.5 T,skip,no data,blood.serum
+Blood Serum,9,t1 3 T,skip,no data,blood.serum
+Blood Serum,9,t2 3 T,skip,no data,blood.serum
+Blood Serum,9,dielectric,skip,no data,blood.serum
+Blood Vessel Wall,10,t1 1.5 T,skip,no data,vessel_wall
+Blood Vessel Wall,10,t2 1.5 T,skip,"duplicate of Bronchi, Ductus Deferens, Penis, Ureter\Urethra with no owner",vessel_wall
+Blood Vessel Wall,10,t1 3 T,skip,"duplicate of Bronchi, Ductus Deferens, Penis, Ureter\Urethra with no owner",vessel_wall
+Blood Vessel Wall,10,t2 3 T,skip,"duplicate of Bronchi, Ductus Deferens, Penis, Ureter\Urethra with no owner",vessel_wall
+Blood Vessel Wall,10,dielectric,take,,vessel_wall
+Bone (Cancellous),11,t1 1.5 T,skip,no data,bone.cancellous
+Bone (Cancellous),11,t2 1.5 T,skip,no data,bone.cancellous
+Bone (Cancellous),11,t1 3 T,skip,no data,bone.cancellous
+Bone (Cancellous),11,t2 3 T,skip,no data,bone.cancellous
+Bone (Cancellous),11,dielectric,take,,bone.cancellous
+Bone (Cortical),12,t1 1.5 T,skip,no data,bone.cortical
+Bone (Cortical),12,t2 1.5 T,skip,no data,bone.cortical
+Bone (Cortical),12,t1 3 T,skip,no data,bone.cortical
+Bone (Cortical),12,t2 3 T,skip,no data,bone.cortical
+Bone (Cortical),12,dielectric,take,,bone.cortical
+Bone Marrow (Red),13,t1 1.5 T,take,,bone_marrow.red
+Bone Marrow (Red),13,t2 1.5 T,take,,bone_marrow.red
+Bone Marrow (Red),13,t1 3 T,take,,bone_marrow.red
+Bone Marrow (Red),13,t2 3 T,take,,bone_marrow.red
+Bone Marrow (Red),13,dielectric,take,,bone_marrow.red
+Bone Marrow (Yellow),14,t1 1.5 T,take,,bone_marrow.yellow
+Bone Marrow (Yellow),14,t2 1.5 T,take,,bone_marrow.yellow
+Bone Marrow (Yellow),14,t1 3 T,take,,bone_marrow.yellow
+Bone Marrow (Yellow),14,t2 3 T,take,,bone_marrow.yellow
+Bone Marrow (Yellow),14,dielectric,take,,bone_marrow.yellow
+Brain,15,t1 1.5 T,skip,no data,brain
+Brain,15,t2 1.5 T,skip,no data,brain
+Brain,15,t1 3 T,skip,no data,brain
+Brain,15,t2 3 T,skip,no data,brain
+Brain,15,dielectric,take,,brain
+Brain (Grey Matter),16,t1 1.5 T,take,,brain.gm
+Brain (Grey Matter),16,t2 1.5 T,take,,brain.gm
+Brain (Grey Matter),16,t1 3 T,take,,brain.gm
+Brain (Grey Matter),16,t2 3 T,take,,brain.gm
+Brain (Grey Matter),16,dielectric,take,,brain.gm
+Brain (White Matter),17,t1 1.5 T,take,,brain.wm
+Brain (White Matter),17,t2 1.5 T,take,,brain.wm
+Brain (White Matter),17,t1 3 T,take,,brain.wm
+Brain (White Matter),17,t2 3 T,take,,brain.wm
+Brain (White Matter),17,dielectric,take,,brain.wm
+Breast Fat,18,t1 1.5 T,take,,breast.fat
+Breast Fat,18,t2 1.5 T,take,,breast.fat
+Breast Fat,18,t1 3 T,take,,breast.fat
+Breast Fat,18,t2 3 T,take,,breast.fat
+Breast Fat,18,dielectric,take,,breast.fat
+Breast Gland,19,t1 1.5 T,skip,no data,breast.fibroglandular
+Breast Gland,19,t2 1.5 T,skip,no data,breast.fibroglandular
+Breast Gland,19,t1 3 T,skip,no data,breast.fibroglandular
+Breast Gland,19,t2 3 T,skip,no data,breast.fibroglandular
+Breast Gland,19,dielectric,skip,proxy: copy of Thyroid Gland,breast.fibroglandular
+Bronchi,20,t1 1.5 T,skip,no data,bronchi
+Bronchi,20,t2 1.5 T,skip,"duplicate of Blood Vessel Wall, Ductus Deferens, Penis, Ureter\Urethra with no owner",bronchi
+Bronchi,20,t1 3 T,skip,"duplicate of Blood Vessel Wall, Ductus Deferens, Penis, Ureter\Urethra with no owner",bronchi
+Bronchi,20,t2 3 T,skip,"duplicate of Blood Vessel Wall, Ductus Deferens, Penis, Ureter\Urethra with no owner",bronchi
+Bronchi,20,dielectric,skip,proxy: copy of Trachea,bronchi
+Bronchi lumen,21,t1 1.5 T,skip,not mapped (lumen content or air),
+Bronchi lumen,21,t2 1.5 T,skip,not mapped (lumen content or air),
+Bronchi lumen,21,t1 3 T,skip,not mapped (lumen content or air),
+Bronchi lumen,21,t2 3 T,skip,not mapped (lumen content or air),
+Bronchi lumen,21,dielectric,skip,not mapped (lumen content or air),
+Cartilage,22,t1 1.5 T,take,,cartilage
+Cartilage,22,t2 1.5 T,take,,cartilage
+Cartilage,22,t1 3 T,take,,cartilage
+Cartilage,22,t2 3 T,take,,cartilage
+Cartilage,22,dielectric,take,,cartilage
+Cerebellum,23,t1 1.5 T,skip,no data,brain.cerebellum
+Cerebellum,23,t2 1.5 T,skip,no data,brain.cerebellum
+Cerebellum,23,t1 3 T,take,,brain.cerebellum
+Cerebellum,23,t2 3 T,take,,brain.cerebellum
+Cerebellum,23,dielectric,skip,proxy: copy of Brain,brain.cerebellum
+Cerebrospinal Fluid,24,t1 1.5 T,take,,csf
+Cerebrospinal Fluid,24,t2 1.5 T,skip,no data,csf
+Cerebrospinal Fluid,24,t1 3 T,skip,no data,csf
+Cerebrospinal Fluid,24,t2 3 T,skip,no data,csf
+Cerebrospinal Fluid,24,dielectric,take,,csf
+Cervix,25,t1 1.5 T,skip,proxy: copy of Breast Fat,uterus.cervix
+Cervix,25,t2 1.5 T,skip,no data,uterus.cervix
+Cervix,25,t1 3 T,skip,no data,uterus.cervix
+Cervix,25,t2 3 T,skip,no data,uterus.cervix
+Cervix,25,dielectric,take,,uterus.cervix
+Commissura Anterior,26,t1 1.5 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Anterior,26,t2 1.5 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Anterior,26,t1 3 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Anterior,26,t2 3 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Anterior,26,dielectric,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Posterior,27,t1 1.5 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Posterior,27,t2 1.5 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Posterior,27,t1 3 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Posterior,27,t2 3 T,skip,proxy: copy of Brain (White Matter),brain.wm
+Commissura Posterior,27,dielectric,skip,proxy: copy of Brain (White Matter),brain.wm
+Connective Tissue,28,t1 1.5 T,skip,no data,connective
+Connective Tissue,28,t2 1.5 T,skip,no data,connective
+Connective Tissue,28,t1 3 T,skip,no data,connective
+Connective Tissue,28,t2 3 T,skip,no data,connective
+Connective Tissue,28,dielectric,skip,proxy: copy of Tendon\Ligament,connective
+Diaphragm,29,t1 1.5 T,skip,proxy: copy of Muscle,muscle.skeletal
+Diaphragm,29,t2 1.5 T,skip,proxy: copy of Muscle,muscle.skeletal
+Diaphragm,29,t1 3 T,skip,no data,muscle.skeletal
+Diaphragm,29,t2 3 T,skip,no data,muscle.skeletal
+Diaphragm,29,dielectric,skip,proxy: copy of Muscle,muscle.skeletal
+Ductus Deferens,30,t1 1.5 T,skip,no data,ductus_deferens
+Ductus Deferens,30,t2 1.5 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Penis, Ureter\Urethra with no owner",ductus_deferens
+Ductus Deferens,30,t1 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Penis, Ureter\Urethra with no owner",ductus_deferens
+Ductus Deferens,30,t2 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Penis, Ureter\Urethra with no owner",ductus_deferens
+Ductus Deferens,30,dielectric,skip,proxy: copy of Blood Vessel Wall,ductus_deferens
+Dura,31,t1 1.5 T,skip,no data,dura
+Dura,31,t2 1.5 T,skip,no data,dura
+Dura,31,t1 3 T,skip,no data,dura
+Dura,31,t2 3 T,skip,no data,dura
+Dura,31,dielectric,take,,dura
+Epididymis,32,t1 1.5 T,skip,no data,epididymis
+Epididymis,32,t2 1.5 T,skip,no data,epididymis
+Epididymis,32,t1 3 T,skip,no data,epididymis
+Epididymis,32,t2 3 T,skip,no data,epididymis
+Epididymis,32,dielectric,skip,proxy: copy of Testis,epididymis
+Esophagus,33,t1 1.5 T,skip,no data,esophagus
+Esophagus,33,t2 1.5 T,skip,no data,esophagus
+Esophagus,33,t1 3 T,skip,no data,esophagus
+Esophagus,33,t2 3 T,skip,no data,esophagus
+Esophagus,33,dielectric,skip,proxy: copy of Stomach,esophagus
+Esophagus Lumen,34,t1 1.5 T,skip,not mapped (lumen content or air),
+Esophagus Lumen,34,t2 1.5 T,skip,not mapped (lumen content or air),
+Esophagus Lumen,34,t1 3 T,skip,not mapped (lumen content or air),
+Esophagus Lumen,34,t2 3 T,skip,not mapped (lumen content or air),
+Esophagus Lumen,34,dielectric,skip,not mapped (lumen content or air),
+Extracellular Fluids,35,t1 1.5 T,skip,proxy: copy of Cerebrospinal Fluid,extracellular_fluid
+Extracellular Fluids,35,t2 1.5 T,skip,no data,extracellular_fluid
+Extracellular Fluids,35,t1 3 T,skip,no data,extracellular_fluid
+Extracellular Fluids,35,t2 3 T,skip,no data,extracellular_fluid
+Extracellular Fluids,35,dielectric,skip,proxy: copy of Cerebrospinal Fluid,extracellular_fluid
+Eye (Aqueous Humor),36,t1 1.5 T,skip,proxy: copy of Cerebrospinal Fluid,eye.aqueous
+Eye (Aqueous Humor),36,t2 1.5 T,skip,no data,eye.aqueous
+Eye (Aqueous Humor),36,t1 3 T,skip,no data,eye.aqueous
+Eye (Aqueous Humor),36,t2 3 T,skip,no data,eye.aqueous
+Eye (Aqueous Humor),36,dielectric,skip,proxy: copy of Cerebrospinal Fluid,eye.aqueous
+Eye (Choroid),37,t1 1.5 T,skip,proxy: copy of Blood,eye.choroid
+Eye (Choroid),37,t2 1.5 T,skip,proxy: copy of Blood,eye.choroid
+Eye (Choroid),37,t1 3 T,skip,proxy: copy of Blood,eye.choroid
+Eye (Choroid),37,t2 3 T,skip,proxy: copy of Blood,eye.choroid
+Eye (Choroid),37,dielectric,skip,proxy: copy of Blood,eye.choroid
+Eye (Ciliary Body),38,t1 1.5 T,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Ciliary Body),38,t2 1.5 T,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Ciliary Body),38,t1 3 T,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Ciliary Body),38,t2 3 T,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Ciliary Body),38,dielectric,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Cornea),39,t1 1.5 T,skip,no data,eye.cornea
+Eye (Cornea),39,t2 1.5 T,skip,no data,eye.cornea
+Eye (Cornea),39,t1 3 T,skip,no data,eye.cornea
+Eye (Cornea),39,t2 3 T,skip,no data,eye.cornea
+Eye (Cornea),39,dielectric,take,,eye.cornea
+Eye (Iris),40,t1 1.5 T,skip,proxy: copy of Muscle,eye.iris
+Eye (Iris),40,t2 1.5 T,skip,proxy: copy of Muscle,eye.iris
+Eye (Iris),40,t1 3 T,skip,proxy: copy of Muscle,eye.iris
+Eye (Iris),40,t2 3 T,skip,proxy: copy of Muscle,eye.iris
+Eye (Iris),40,dielectric,skip,proxy: copy of Muscle,eye.iris
+Eye (Lens),41,t1 1.5 T,skip,no data,eye.lens
+Eye (Lens),41,t2 1.5 T,skip,no data,eye.lens
+Eye (Lens),41,t1 3 T,skip,no data,eye.lens
+Eye (Lens),41,t2 3 T,skip,no data,eye.lens
+Eye (Lens),41,dielectric,skip,proxy: copy of Eye Lens (Nucleus),eye.lens
+Eye (Retina),42,t1 1.5 T,skip,proxy: copy of Brain (Grey Matter),eye.retina
+Eye (Retina),42,t2 1.5 T,skip,proxy: copy of Brain (Grey Matter),eye.retina
+Eye (Retina),42,t1 3 T,skip,proxy: copy of Brain (Grey Matter),eye.retina
+Eye (Retina),42,t2 3 T,skip,proxy: copy of Brain (Grey Matter),eye.retina
+Eye (Retina),42,dielectric,skip,proxy: copy of Brain (Grey Matter),eye.retina
+Eye (Sclera),43,t1 1.5 T,skip,no data,eye.sclera
+Eye (Sclera),43,t2 1.5 T,skip,no data,eye.sclera
+Eye (Sclera),43,t1 3 T,skip,no data,eye.sclera
+Eye (Sclera),43,t2 3 T,skip,no data,eye.sclera
+Eye (Sclera),43,dielectric,take,,eye.sclera
+Eye (Vitreous Humor),44,t1 1.5 T,skip,no data,eye.vitreous
+Eye (Vitreous Humor),44,t2 1.5 T,skip,no data,eye.vitreous
+Eye (Vitreous Humor),44,t1 3 T,skip,no data,eye.vitreous
+Eye (Vitreous Humor),44,t2 3 T,skip,no data,eye.vitreous
+Eye (Vitreous Humor),44,dielectric,take,,eye.vitreous
+Eye Lens (Cortex),45,t1 1.5 T,skip,no data,eye.lens
+Eye Lens (Cortex),45,t2 1.5 T,skip,no data,eye.lens
+Eye Lens (Cortex),45,t1 3 T,skip,no data,eye.lens
+Eye Lens (Cortex),45,t2 3 T,skip,no data,eye.lens
+Eye Lens (Cortex),45,dielectric,take,,eye.lens
+Eye Lens (Nucleus),46,t1 1.5 T,skip,no data,eye.lens
+Eye Lens (Nucleus),46,t2 1.5 T,skip,no data,eye.lens
+Eye Lens (Nucleus),46,t1 3 T,skip,no data,eye.lens
+Eye Lens (Nucleus),46,t2 3 T,skip,no data,eye.lens
+Eye Lens (Nucleus),46,dielectric,take,,eye.lens
+Fat,47,t1 1.5 T,skip,no data,fat
+Fat,47,t2 1.5 T,skip,no data,fat
+Fat,47,t1 3 T,skip,no data,fat
+Fat,47,t2 3 T,skip,no data,fat
+Fat,47,dielectric,take,,fat
+Fat (Average Infiltrated),48,t1 1.5 T,skip,no data,fat
+Fat (Average Infiltrated),48,t2 1.5 T,skip,no data,fat
+Fat (Average Infiltrated),48,t1 3 T,skip,no data,fat
+Fat (Average Infiltrated),48,t2 3 T,skip,no data,fat
+Fat (Average Infiltrated),48,dielectric,skip,proxy: copy of Fat,fat
+Fat (Not Infiltrated),49,t1 1.5 T,skip,no data,fat
+Fat (Not Infiltrated),49,t2 1.5 T,skip,no data,fat
+Fat (Not Infiltrated),49,t1 3 T,skip,no data,fat
+Fat (Not Infiltrated),49,t2 3 T,skip,no data,fat
+Fat (Not Infiltrated),49,dielectric,take,,fat
+Gallbladder,50,t1 1.5 T,skip,no data,gallbladder
+Gallbladder,50,t2 1.5 T,skip,no data,gallbladder
+Gallbladder,50,t1 3 T,skip,no data,gallbladder
+Gallbladder,50,t2 3 T,skip,no data,gallbladder
+Gallbladder,50,dielectric,take,,gallbladder
+Heart Lumen,51,t1 1.5 T,skip,proxy: copy of Blood,blood
+Heart Lumen,51,t2 1.5 T,skip,proxy: copy of Blood,blood
+Heart Lumen,51,t1 3 T,skip,proxy: copy of Blood,blood
+Heart Lumen,51,t2 3 T,skip,proxy: copy of Blood,blood
+Heart Lumen,51,dielectric,skip,proxy: copy of Blood,blood
+Heart Muscle,52,t1 1.5 T,take,,heart.myocardium
+Heart Muscle,52,t2 1.5 T,take,,heart.myocardium
+Heart Muscle,52,t1 3 T,take,,heart.myocardium
+Heart Muscle,52,t2 3 T,take,,heart.myocardium
+Heart Muscle,52,dielectric,take,,heart.myocardium
+Hippocampus,53,t1 1.5 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.hippocampus
+Hippocampus,53,t2 1.5 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.hippocampus
+Hippocampus,53,t1 3 T,take,,brain.gm.hippocampus
+Hippocampus,53,t2 3 T,take,,brain.gm.hippocampus
+Hippocampus,53,dielectric,skip,proxy: copy of Brain (Grey Matter),brain.gm.hippocampus
+Hypophysis,54,t1 1.5 T,skip,no data,pituitary
+Hypophysis,54,t2 1.5 T,skip,no data,pituitary
+Hypophysis,54,t1 3 T,skip,no data,pituitary
+Hypophysis,54,t2 3 T,skip,no data,pituitary
+Hypophysis,54,dielectric,skip,proxy: copy of Thyroid Gland,pituitary
+Hypothalamus,55,t1 1.5 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Hypothalamus,55,t2 1.5 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Hypothalamus,55,t1 3 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Hypothalamus,55,t2 3 T,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Hypothalamus,55,dielectric,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Intervertebral Disc,56,t1 1.5 T,skip,proxy: copy of Cartilage,intervertebral_disc
+Intervertebral Disc,56,t2 1.5 T,take,,intervertebral_disc
+Intervertebral Disc,56,t1 3 T,skip,proxy: copy of Cartilage,intervertebral_disc
+Intervertebral Disc,56,t2 3 T,skip,no data,intervertebral_disc
+Intervertebral Disc,56,dielectric,take,,intervertebral_disc
+Kidney,57,t1 1.5 T,skip,no data,kidney
+Kidney,57,t2 1.5 T,skip,no data,kidney
+Kidney,57,t1 3 T,skip,no data,kidney
+Kidney,57,t2 3 T,skip,no data,kidney
+Kidney,57,dielectric,take,,kidney
+Kidney (Cortex),58,t1 1.5 T,take,,kidney.cortex
+Kidney (Cortex),58,t2 1.5 T,take,,kidney.cortex
+Kidney (Cortex),58,t1 3 T,take,,kidney.cortex
+Kidney (Cortex),58,t2 3 T,take,,kidney.cortex
+Kidney (Cortex),58,dielectric,skip,proxy: copy of Kidney,kidney.cortex
+Kidney (Medulla),59,t1 1.5 T,take,,kidney.medulla
+Kidney (Medulla),59,t2 1.5 T,take,,kidney.medulla
+Kidney (Medulla),59,t1 3 T,take,,kidney.medulla
+Kidney (Medulla),59,t2 3 T,take,,kidney.medulla
+Kidney (Medulla),59,dielectric,skip,proxy: copy of Kidney,kidney.medulla
+Large Intestine,60,t1 1.5 T,skip,no data,colon
+Large Intestine,60,t2 1.5 T,skip,no data,colon
+Large Intestine,60,t1 3 T,skip,no data,colon
+Large Intestine,60,t2 3 T,skip,no data,colon
+Large Intestine,60,dielectric,take,,colon
+Large Intestine Lumen,61,t1 1.5 T,skip,not mapped (lumen content or air),
+Large Intestine Lumen,61,t2 1.5 T,skip,not mapped (lumen content or air),
+Large Intestine Lumen,61,t1 3 T,skip,not mapped (lumen content or air),
+Large Intestine Lumen,61,t2 3 T,skip,not mapped (lumen content or air),
+Large Intestine Lumen,61,dielectric,skip,not mapped (lumen content or air),
+Larynx,62,t1 1.5 T,skip,proxy: copy of Cartilage,larynx
+Larynx,62,t2 1.5 T,skip,proxy: copy of Cartilage,larynx
+Larynx,62,t1 3 T,skip,proxy: copy of Cartilage,larynx
+Larynx,62,t2 3 T,skip,proxy: copy of Cartilage,larynx
+Larynx,62,dielectric,skip,proxy: copy of Cartilage,larynx
+Liver,63,t1 1.5 T,take,,liver
+Liver,63,t2 1.5 T,take,,liver
+Liver,63,t1 3 T,take,,liver
+Liver,63,t2 3 T,take,,liver
+Liver,63,dielectric,take,,liver
+Lung,64,t1 1.5 T,skip,no data,lung
+Lung,64,t2 1.5 T,take,,lung
+Lung,64,t1 3 T,skip,no data,lung
+Lung,64,t2 3 T,skip,no data,lung
+Lung,64,dielectric,skip,proxy: copy of Lung (Inflated),lung
+Lung (Deflated),65,t1 1.5 T,skip,no data,lung
+Lung (Deflated),65,t2 1.5 T,skip,no data,lung
+Lung (Deflated),65,t1 3 T,skip,no data,lung
+Lung (Deflated),65,t2 3 T,skip,no data,lung
+Lung (Deflated),65,dielectric,take,,lung
+Lung (Inflated),66,t1 1.5 T,skip,no data,lung
+Lung (Inflated),66,t2 1.5 T,skip,no data,lung
+Lung (Inflated),66,t1 3 T,skip,no data,lung
+Lung (Inflated),66,t2 3 T,skip,no data,lung
+Lung (Inflated),66,dielectric,take,,lung
+Lymph,67,t1 1.5 T,skip,no data,lymph
+Lymph,67,t2 1.5 T,skip,no data,lymph
+Lymph,67,t1 3 T,skip,no data,lymph
+Lymph,67,t2 3 T,skip,no data,lymph
+Lymph,67,dielectric,skip,no data,lymph
+Lymphnode,68,t1 1.5 T,skip,no data,lymph_node
+Lymphnode,68,t2 1.5 T,skip,no data,lymph_node
+Lymphnode,68,t1 3 T,skip,no data,lymph_node
+Lymphnode,68,t2 3 T,skip,no data,lymph_node
+Lymphnode,68,dielectric,take,,lymph_node
+Mandible,69,t1 1.5 T,skip,no data,bone.cortical
+Mandible,69,t2 1.5 T,skip,no data,bone.cortical
+Mandible,69,t1 3 T,skip,no data,bone.cortical
+Mandible,69,t2 3 T,skip,no data,bone.cortical
+Mandible,69,dielectric,skip,proxy: copy of Bone (Cortical),bone.cortical
+Medulla Oblongata,70,t1 1.5 T,take,,brain.brainstem
+Medulla Oblongata,70,t2 1.5 T,skip,no data,brain.brainstem
+Medulla Oblongata,70,t1 3 T,take,,brain.brainstem
+Medulla Oblongata,70,t2 3 T,take,,brain.brainstem
+Medulla Oblongata,70,dielectric,skip,proxy: copy of Brain,brain.brainstem
+Meniscus,71,t1 1.5 T,skip,proxy: copy of Cartilage,meniscus
+Meniscus,71,t2 1.5 T,skip,proxy: copy of Cartilage,meniscus
+Meniscus,71,t1 3 T,skip,proxy: copy of Cartilage,meniscus
+Meniscus,71,t2 3 T,skip,proxy: copy of Cartilage,meniscus
+Meniscus,71,dielectric,skip,proxy: copy of Cartilage,meniscus
+Midbrain,72,t1 1.5 T,skip,no data,brain.brainstem
+Midbrain,72,t2 1.5 T,skip,no data,brain.brainstem
+Midbrain,72,t1 3 T,skip,number of studies/samples is 0,brain.brainstem
+Midbrain,72,t2 3 T,skip,proxy: copy of Pons,brain.brainstem
+Midbrain,72,dielectric,skip,proxy: copy of Brain,brain.brainstem
+Mucous Membrane,73,t1 1.5 T,skip,no data,mucosa
+Mucous Membrane,73,t2 1.5 T,skip,no data,mucosa
+Mucous Membrane,73,t1 3 T,skip,no data,mucosa
+Mucous Membrane,73,t2 3 T,skip,no data,mucosa
+Mucous Membrane,73,dielectric,skip,proxy: copy of Muscle,mucosa
+Muscle,74,t1 1.5 T,take,,muscle.skeletal
+Muscle,74,t2 1.5 T,take,,muscle.skeletal
+Muscle,74,t1 3 T,take,,muscle.skeletal
+Muscle,74,t2 3 T,take,,muscle.skeletal
+Muscle,74,dielectric,take,,muscle.skeletal
+Nerve,75,t1 1.5 T,take,,nerve
+Nerve,75,t2 1.5 T,take,,nerve
+Nerve,75,t1 3 T,take,,nerve
+Nerve,75,t2 3 T,skip,duplicate of Spinal Cord with no owner,nerve
+Nerve,75,dielectric,take,,nerve
+Ovary,76,t1 1.5 T,skip,no data,ovary
+Ovary,76,t2 1.5 T,skip,no data,ovary
+Ovary,76,t1 3 T,skip,no data,ovary
+Ovary,76,t2 3 T,skip,no data,ovary
+Ovary,76,dielectric,take,,ovary
+Pancreas,77,t1 1.5 T,take,,pancreas
+Pancreas,77,t2 1.5 T,take,,pancreas
+Pancreas,77,t1 3 T,take,,pancreas
+Pancreas,77,t2 3 T,take,,pancreas
+Pancreas,77,dielectric,skip,proxy: copy of Thyroid Gland,pancreas
+Penis,78,t1 1.5 T,skip,no data,penis
+Penis,78,t2 1.5 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Ureter\Urethra with no owner",penis
+Penis,78,t1 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Ureter\Urethra with no owner",penis
+Penis,78,t2 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Ureter\Urethra with no owner",penis
+Penis,78,dielectric,skip,proxy: copy of Blood Vessel Wall,penis
+Pharynx,79,t1 1.5 T,skip,not mapped (lumen content or air),
+Pharynx,79,t2 1.5 T,skip,not mapped (lumen content or air),
+Pharynx,79,t1 3 T,skip,not mapped (lumen content or air),
+Pharynx,79,t2 3 T,skip,not mapped (lumen content or air),
+Pharynx,79,dielectric,skip,not mapped (lumen content or air),
+Pineal Body,80,t1 1.5 T,skip,no data,pineal
+Pineal Body,80,t2 1.5 T,skip,no data,pineal
+Pineal Body,80,t1 3 T,skip,no data,pineal
+Pineal Body,80,t2 3 T,skip,no data,pineal
+Pineal Body,80,dielectric,skip,proxy: copy of Thyroid Gland,pineal
+Placenta,81,t1 1.5 T,skip,proxy: copy of Blood,placenta
+Placenta,81,t2 1.5 T,skip,proxy: copy of Blood,placenta
+Placenta,81,t1 3 T,skip,proxy: copy of Blood,placenta
+Placenta,81,t2 3 T,skip,proxy: copy of Blood,placenta
+Placenta,81,dielectric,skip,proxy: copy of Blood,placenta
+Pons,82,t1 1.5 T,take,,brain.brainstem
+Pons,82,t2 1.5 T,skip,no data,brain.brainstem
+Pons,82,t1 3 T,take,,brain.brainstem
+Pons,82,t2 3 T,take,,brain.brainstem
+Pons,82,dielectric,skip,proxy: copy of Brain,brain.brainstem
+Prostate,83,t1 1.5 T,take,,prostate
+Prostate,83,t2 1.5 T,take,,prostate
+Prostate,83,t1 3 T,take,,prostate
+Prostate,83,t2 3 T,take,,prostate
+Prostate,83,dielectric,skip,proxy: copy of Testis,prostate
+Salivary Gland,84,t1 1.5 T,skip,proxy: copy of Prostate,salivary_gland
+Salivary Gland,84,t2 1.5 T,skip,proxy: copy of Prostate,salivary_gland
+Salivary Gland,84,t1 3 T,skip,proxy: copy of Prostate,salivary_gland
+Salivary Gland,84,t2 3 T,skip,proxy: copy of Prostate,salivary_gland
+Salivary Gland,84,dielectric,take,,salivary_gland
+SAT (Subcutaneous Fat),85,t1 1.5 T,take,,fat.subcutaneous
+SAT (Subcutaneous Fat),85,t2 1.5 T,take,,fat.subcutaneous
+SAT (Subcutaneous Fat),85,t1 3 T,take,,fat.subcutaneous
+SAT (Subcutaneous Fat),85,t2 3 T,take,,fat.subcutaneous
+SAT (Subcutaneous Fat),85,dielectric,skip,proxy: copy of Fat,fat.subcutaneous
+Scalp,86,t1 1.5 T,skip,no data,scalp
+Scalp,86,t2 1.5 T,skip,no data,scalp
+Scalp,86,t1 3 T,skip,no data,scalp
+Scalp,86,t2 3 T,skip,no data,scalp
+Scalp,86,dielectric,skip,proxy: copy of Skin,scalp
+Seminal vesicle,87,t1 1.5 T,skip,proxy: copy of Prostate,seminal_vesicle
+Seminal vesicle,87,t2 1.5 T,skip,proxy: copy of Prostate,seminal_vesicle
+Seminal vesicle,87,t1 3 T,skip,proxy: copy of Prostate,seminal_vesicle
+Seminal vesicle,87,t2 3 T,skip,proxy: copy of Prostate,seminal_vesicle
+Seminal vesicle,87,dielectric,skip,proxy: copy of Testis,seminal_vesicle
+Skin,88,t1 1.5 T,skip,no data,skin
+Skin,88,t2 1.5 T,skip,no data,skin
+Skin,88,t1 3 T,skip,no data,skin
+Skin,88,t2 3 T,skip,no data,skin
+Skin,88,dielectric,take,,skin
+Skull,89,t1 1.5 T,skip,no data,bone.skull
+Skull,89,t2 1.5 T,skip,no data,bone.skull
+Skull,89,t1 3 T,skip,no data,bone.skull
+Skull,89,t2 3 T,skip,no data,bone.skull
+Skull,89,dielectric,skip,proxy: copy of Bone (Cortical),bone.skull
+Skull (Cancellous),90,t1 1.5 T,skip,no data,bone.cancellous
+Skull (Cancellous),90,t2 1.5 T,skip,no data,bone.cancellous
+Skull (Cancellous),90,t1 3 T,skip,no data,bone.cancellous
+Skull (Cancellous),90,t2 3 T,skip,no data,bone.cancellous
+Skull (Cancellous),90,dielectric,skip,proxy: copy of Bone (Cancellous),bone.cancellous
+Skull (Cortical),91,t1 1.5 T,skip,no data,bone.cortical
+Skull (Cortical),91,t2 1.5 T,skip,no data,bone.cortical
+Skull (Cortical),91,t1 3 T,skip,no data,bone.cortical
+Skull (Cortical),91,t2 3 T,skip,no data,bone.cortical
+Skull (Cortical),91,dielectric,skip,proxy: copy of Bone (Cortical),bone.cortical
+Small Intestine,92,t1 1.5 T,skip,no data,small_intestine
+Small Intestine,92,t2 1.5 T,skip,no data,small_intestine
+Small Intestine,92,t1 3 T,skip,no data,small_intestine
+Small Intestine,92,t2 3 T,skip,no data,small_intestine
+Small Intestine,92,dielectric,take,,small_intestine
+Small Intestine Lumen,93,t1 1.5 T,skip,not mapped (lumen content or air),
+Small Intestine Lumen,93,t2 1.5 T,skip,not mapped (lumen content or air),
+Small Intestine Lumen,93,t1 3 T,skip,not mapped (lumen content or air),
+Small Intestine Lumen,93,t2 3 T,skip,not mapped (lumen content or air),
+Small Intestine Lumen,93,dielectric,skip,not mapped (lumen content or air),
+Spinal Cord,94,t1 1.5 T,take,,spinal_cord
+Spinal Cord,94,t2 1.5 T,take,,spinal_cord
+Spinal Cord,94,t1 3 T,take,,spinal_cord
+Spinal Cord,94,t2 3 T,skip,duplicate of Nerve with no owner,spinal_cord
+Spinal Cord,94,dielectric,skip,proxy: copy of Nerve,spinal_cord
+Spleen,95,t1 1.5 T,take,,spleen
+Spleen,95,t2 1.5 T,take,,spleen
+Spleen,95,t1 3 T,take,,spleen
+Spleen,95,t2 3 T,take,,spleen
+Spleen,95,dielectric,take,,spleen
+Stomach,96,t1 1.5 T,skip,no data,stomach
+Stomach,96,t2 1.5 T,skip,no data,stomach
+Stomach,96,t1 3 T,skip,no data,stomach
+Stomach,96,t2 3 T,skip,no data,stomach
+Stomach,96,dielectric,take,,stomach
+Stomach Lumen,97,t1 1.5 T,skip,not mapped (lumen content or air),
+Stomach Lumen,97,t2 1.5 T,skip,not mapped (lumen content or air),
+Stomach Lumen,97,t1 3 T,skip,not mapped (lumen content or air),
+Stomach Lumen,97,t2 3 T,skip,not mapped (lumen content or air),
+Stomach Lumen,97,dielectric,skip,not mapped (lumen content or air),
+Tendon\Ligament,98,t1 1.5 T,skip,no data,tendon
+Tendon\Ligament,98,t2 1.5 T,skip,no data,tendon
+Tendon\Ligament,98,t1 3 T,skip,no data,tendon
+Tendon\Ligament,98,t2 3 T,skip,no data,tendon
+Tendon\Ligament,98,dielectric,take,,tendon
+Testis,99,t1 1.5 T,skip,no data,testis
+Testis,99,t2 1.5 T,skip,no data,testis
+Testis,99,t1 3 T,skip,no data,testis
+Testis,99,t2 3 T,skip,no data,testis
+Testis,99,dielectric,take,,testis
+Thalamus,100,t1 1.5 T,take,,brain.gm.deep.thalamus
+Thalamus,100,t2 1.5 T,take,,brain.gm.deep.thalamus
+Thalamus,100,t1 3 T,take,,brain.gm.deep.thalamus
+Thalamus,100,t2 3 T,take,,brain.gm.deep.thalamus
+Thalamus,100,dielectric,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.thalamus
+Thymus,101,t1 1.5 T,skip,no data,thymus
+Thymus,101,t2 1.5 T,skip,no data,thymus
+Thymus,101,t1 3 T,skip,no data,thymus
+Thymus,101,t2 3 T,skip,no data,thymus
+Thymus,101,dielectric,take,,thymus
+Thyroid Gland,102,t1 1.5 T,skip,no data,thyroid
+Thyroid Gland,102,t2 1.5 T,skip,no data,thyroid
+Thyroid Gland,102,t1 3 T,skip,no data,thyroid
+Thyroid Gland,102,t2 3 T,skip,no data,thyroid
+Thyroid Gland,102,dielectric,take,,thyroid
+Tongue,103,t1 1.5 T,skip,no data,tongue
+Tongue,103,t2 1.5 T,skip,no data,tongue
+Tongue,103,t1 3 T,skip,no data,tongue
+Tongue,103,t2 3 T,skip,no data,tongue
+Tongue,103,dielectric,take,,tongue
+Tooth,104,t1 1.5 T,skip,no data,tooth
+Tooth,104,t2 1.5 T,skip,no data,tooth
+Tooth,104,t1 3 T,skip,no data,tooth
+Tooth,104,t2 3 T,skip,no data,tooth
+Tooth,104,dielectric,skip,proxy: copy of Bone (Cortical),tooth
+Tooth (Dentine),105,t1 1.5 T,skip,no data,tooth.dentin
+Tooth (Dentine),105,t2 1.5 T,skip,no data,tooth.dentin
+Tooth (Dentine),105,t1 3 T,skip,no data,tooth.dentin
+Tooth (Dentine),105,t2 3 T,skip,no data,tooth.dentin
+Tooth (Dentine),105,dielectric,skip,proxy: copy of Bone (Cortical),tooth.dentin
+Tooth (Enamel),106,t1 1.5 T,skip,no data,tooth.enamel
+Tooth (Enamel),106,t2 1.5 T,skip,no data,tooth.enamel
+Tooth (Enamel),106,t1 3 T,skip,no data,tooth.enamel
+Tooth (Enamel),106,t2 3 T,skip,no data,tooth.enamel
+Tooth (Enamel),106,dielectric,skip,proxy: copy of Bone (Cortical),tooth.enamel
+Trachea,107,t1 1.5 T,skip,proxy: copy of Cartilage,trachea
+Trachea,107,t2 1.5 T,skip,proxy: copy of Cartilage,trachea
+Trachea,107,t1 3 T,skip,proxy: copy of Cartilage,trachea
+Trachea,107,t2 3 T,skip,proxy: copy of Cartilage,trachea
+Trachea,107,dielectric,take,,trachea
+Trachea Lumen,108,t1 1.5 T,skip,not mapped (lumen content or air),
+Trachea Lumen,108,t2 1.5 T,skip,not mapped (lumen content or air),
+Trachea Lumen,108,t1 3 T,skip,not mapped (lumen content or air),
+Trachea Lumen,108,t2 3 T,skip,not mapped (lumen content or air),
+Trachea Lumen,108,dielectric,skip,not mapped (lumen content or air),
+Ureter\Urethra,109,t1 1.5 T,skip,no data,urethra
+Ureter\Urethra,109,t2 1.5 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Penis with no owner",urethra
+Ureter\Urethra,109,t1 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Penis with no owner",urethra
+Ureter\Urethra,109,t2 3 T,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens, Penis with no owner",urethra
+Ureter\Urethra,109,dielectric,skip,proxy: copy of Blood Vessel Wall,urethra
+Urinary Bladder Wall,110,t1 1.5 T,skip,no data,bladder.wall
+Urinary Bladder Wall,110,t2 1.5 T,skip,no data,bladder.wall
+Urinary Bladder Wall,110,t1 3 T,skip,no data,bladder.wall
+Urinary Bladder Wall,110,t2 3 T,skip,no data,bladder.wall
+Urinary Bladder Wall,110,dielectric,take,,bladder.wall
+Urine,111,t1 1.5 T,skip,no data,bladder.urine
+Urine,111,t2 1.5 T,skip,no data,bladder.urine
+Urine,111,t1 3 T,skip,no data,bladder.urine
+Urine,111,t2 3 T,skip,no data,bladder.urine
+Urine,111,dielectric,take,,bladder.urine
+Uterus,112,t1 1.5 T,take,,uterus
+Uterus,112,t2 1.5 T,take,,uterus
+Uterus,112,t1 3 T,take,,uterus
+Uterus,112,t2 3 T,take,,uterus
+Uterus,112,dielectric,take,,uterus
+Vagina,113,t1 1.5 T,take,,vagina
+Vagina,113,t2 1.5 T,take,,vagina
+Vagina,113,t1 3 T,take,,vagina
+Vagina,113,t2 3 T,take,,vagina
+Vagina,113,dielectric,skip,proxy: copy of Large Intestine,vagina
+Vertebrae,114,t1 1.5 T,skip,no data,bone
+Vertebrae,114,t2 1.5 T,skip,no data,bone
+Vertebrae,114,t1 3 T,skip,no data,bone
+Vertebrae,114,t2 3 T,skip,no data,bone
+Vertebrae,114,dielectric,skip,proxy: copy of Bone (Cortical),bone
+Water,115,t1 1.5 T,skip,no data,water
+Water,115,t2 1.5 T,skip,no data,water
+Water,115,t1 3 T,skip,no data,water
+Water,115,t2 3 T,skip,no data,water
+Water,115,dielectric,take,,water
+Adrenal Gland,4,water_content_mass,take,,adrenal_gland
+Air,5,water_content_mass,skip,not mapped (lumen content or air),
+Bile,6,water_content_mass,take,,gallbladder.bile
+Blood,7,water_content_mass,take,,blood
+Blood Plasma,8,water_content_mass,take,,blood.plasma
+Blood Serum,9,water_content_mass,take,,blood.serum
+Blood Vessel Wall,10,water_content_mass,skip,"duplicate of Bronchi, Ductus Deferens, Penis with no owner",vessel_wall
+Bone (Cancellous),11,water_content_mass,take,,bone.cancellous
+Bone (Cortical),12,water_content_mass,take,,bone.cortical
+Bone Marrow (Red),13,water_content_mass,take,,bone_marrow.red
+Bone Marrow (Yellow),14,water_content_mass,take,,bone_marrow.yellow
+Brain,15,water_content_mass,take,,brain
+Brain (Grey Matter),16,water_content_mass,take,,brain.gm
+Brain (White Matter),17,water_content_mass,take,,brain.wm
+Breast Fat,18,water_content_mass,skip,proxy: copy of Fat,breast.fat
+Breast Gland,19,water_content_mass,take,,breast.fibroglandular
+Bronchi,20,water_content_mass,skip,"duplicate of Blood Vessel Wall, Ductus Deferens, Penis with no owner",bronchi
+Bronchi lumen,21,water_content_mass,skip,not mapped (lumen content or air),
+Cartilage,22,water_content_mass,take,,cartilage
+Cerebellum,23,water_content_mass,take,,brain.cerebellum
+Cerebrospinal Fluid,24,water_content_mass,take,,csf
+Cervix,25,water_content_mass,skip,duplicate of Uterus with no owner,uterus.cervix
+Commissura Anterior,26,water_content_mass,take,,brain.wm
+Commissura Posterior,27,water_content_mass,skip,proxy: copy of Brain (White Matter),brain.wm
+Connective Tissue,28,water_content_mass,skip,proxy: copy of Brain (White Matter),connective
+Diaphragm,29,water_content_mass,skip,proxy: copy of Muscle,muscle.skeletal
+Ductus Deferens,30,water_content_mass,skip,"duplicate of Blood Vessel Wall, Bronchi, Penis with no owner",ductus_deferens
+Dura,31,water_content_mass,take,,dura
+Epididymis,32,water_content_mass,skip,duplicate of Testis with no owner,epididymis
+Esophagus,33,water_content_mass,take,,esophagus
+Esophagus Lumen,34,water_content_mass,skip,not mapped (lumen content or air),
+Extracellular Fluids,35,water_content_mass,skip,duplicate of Lymph with no owner,extracellular_fluid
+Eye (Aqueous Humor),36,water_content_mass,take,,eye.aqueous
+Eye (Choroid),37,water_content_mass,skip,proxy: copy of Blood,eye.choroid
+Eye (Ciliary Body),38,water_content_mass,skip,proxy: copy of Muscle,eye.ciliary_body
+Eye (Cornea),39,water_content_mass,take,,eye.cornea
+Eye (Iris),40,water_content_mass,skip,proxy: copy of Muscle,eye.iris
+Eye (Lens),41,water_content_mass,take,,eye.lens
+Eye (Retina),42,water_content_mass,take,,eye.retina
+Eye (Sclera),43,water_content_mass,take,,eye.sclera
+Eye (Vitreous Humor),44,water_content_mass,take,,eye.vitreous
+Eye Lens (Cortex),45,water_content_mass,take,,eye.lens
+Eye Lens (Nucleus),46,water_content_mass,take,,eye.lens
+Fat,47,water_content_mass,take,,fat
+Fat (Average Infiltrated),48,water_content_mass,skip,proxy: copy of Fat,fat
+Fat (Not Infiltrated),49,water_content_mass,skip,proxy: copy of Fat,fat
+Gallbladder,50,water_content_mass,take,,gallbladder
+Heart Lumen,51,water_content_mass,skip,proxy: copy of Blood,blood
+Heart Muscle,52,water_content_mass,take,,heart.myocardium
+Hippocampus,53,water_content_mass,take,,brain.gm.hippocampus
+Hypophysis,54,water_content_mass,skip,duplicate of Pineal Body with no owner,pituitary
+Hypothalamus,55,water_content_mass,skip,proxy: copy of Brain (Grey Matter),brain.gm.deep.hypothalamus
+Intervertebral Disc,56,water_content_mass,take,,intervertebral_disc
+Kidney,57,water_content_mass,take,,kidney
+Kidney (Cortex),58,water_content_mass,take,,kidney.cortex
+Kidney (Medulla),59,water_content_mass,take,,kidney.medulla
+Large Intestine,60,water_content_mass,skip,duplicate of Vagina with no owner,colon
+Large Intestine Lumen,61,water_content_mass,skip,not mapped (lumen content or air),
+Larynx,62,water_content_mass,take,,larynx
+Liver,63,water_content_mass,take,,liver
+Lung,64,water_content_mass,skip,duplicate of Lung (Inflated) with no owner,lung
+Lung (Deflated),65,water_content_mass,take,,lung
+Lung (Inflated),66,water_content_mass,skip,duplicate of Lung with no owner,lung
+Lymph,67,water_content_mass,skip,duplicate of Extracellular Fluids with no owner,lymph
+Lymphnode,68,water_content_mass,take,,lymph_node
+Mandible,69,water_content_mass,skip,proxy: copy of Bone (Cortical),bone.cortical
+Medulla Oblongata,70,water_content_mass,take,,brain.brainstem
+Meniscus,71,water_content_mass,skip,proxy: copy of Cartilage,meniscus
+Midbrain,72,water_content_mass,take,,brain.brainstem
+Mucous Membrane,73,water_content_mass,take,,mucosa
+Muscle,74,water_content_mass,take,,muscle.skeletal
+Nerve,75,water_content_mass,take,,nerve
+Ovary,76,water_content_mass,take,,ovary
+Pancreas,77,water_content_mass,take,,pancreas
+Penis,78,water_content_mass,skip,"duplicate of Blood Vessel Wall, Bronchi, Ductus Deferens with no owner",penis
+Pharynx,79,water_content_mass,skip,not mapped (lumen content or air),
+Pineal Body,80,water_content_mass,skip,duplicate of Hypophysis with no owner,pineal
+Placenta,81,water_content_mass,skip,proxy: copy of Blood,placenta
+Pons,82,water_content_mass,take,,brain.brainstem
+Prostate,83,water_content_mass,take,,prostate
+Salivary Gland,84,water_content_mass,take,,salivary_gland
+SAT (Subcutaneous Fat),85,water_content_mass,skip,proxy: copy of Fat,fat.subcutaneous
+Scalp,86,water_content_mass,skip,proxy: copy of Skin,scalp
+Seminal vesicle,87,water_content_mass,skip,no data,seminal_vesicle
+Skin,88,water_content_mass,take,,skin
+Skull,89,water_content_mass,take,,bone.skull
+Skull (Cancellous),90,water_content_mass,skip,proxy: copy of Bone (Cancellous),bone.cancellous
+Skull (Cortical),91,water_content_mass,skip,proxy: copy of Bone (Cortical),bone.cortical
+Small Intestine,92,water_content_mass,take,,small_intestine
+Small Intestine Lumen,93,water_content_mass,skip,not mapped (lumen content or air),
+Spinal Cord,94,water_content_mass,take,,spinal_cord
+Spleen,95,water_content_mass,take,,spleen
+Stomach,96,water_content_mass,take,,stomach
+Stomach Lumen,97,water_content_mass,skip,not mapped (lumen content or air),
+Tendon\Ligament,98,water_content_mass,take,,tendon
+Testis,99,water_content_mass,skip,duplicate of Epididymis with no owner,testis
+Thalamus,100,water_content_mass,take,,brain.gm.deep.thalamus
+Thymus,101,water_content_mass,take,,thymus
+Thyroid Gland,102,water_content_mass,take,,thyroid
+Tongue,103,water_content_mass,take,,tongue
+Tooth,104,water_content_mass,take,,tooth
+Tooth (Dentine),105,water_content_mass,take,,tooth.dentin
+Tooth (Enamel),106,water_content_mass,take,,tooth.enamel
+Trachea,107,water_content_mass,take,,trachea
+Trachea Lumen,108,water_content_mass,skip,not mapped (lumen content or air),
+Ureter\Urethra,109,water_content_mass,take,,urethra
+Urinary Bladder Wall,110,water_content_mass,take,,bladder.wall
+Urine,111,water_content_mass,take,,bladder.urine
+Uterus,112,water_content_mass,skip,duplicate of Cervix with no owner,uterus
+Vagina,113,water_content_mass,skip,duplicate of Large Intestine with no owner,vagina
+Vertebrae,114,water_content_mass,skip,proxy: copy of Bone (Cortical),bone
