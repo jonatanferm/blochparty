@@ -577,6 +577,26 @@ says where it came from so it can be re-checked.
   `acq.read_dir[k]` element by element. Scalars (`acq.sample_time_us`, `acq.idx.kspace_encode_step_1`)
   assign normally. The header model (`ismrmrd.xsd`) requires `experimentalConditions`.
 
+- **Off-resonant pulses far from the slice cannot be sampled coarsely with their phase ramp**
+  (multi-slice TSE, 2026-10-10): a pulse for a slice 7 cm away carries a ~28 kHz ramp, which a
+  100 us raster aliases into this slice. Play the envelope without its ramp and shift its frequency
+  with `Sequence.b0_offset = -G z_j` during its RF segments (bound-pool offset via `rf_freq = 0`):
+  every spin is then off resonance by G (z - z_j) exactly as under the real pulse, and the
+  envelope needs only its own bandwidth. Against the exact phase-ramped pulses: 0.8 % of the
+  signal at 1/6 of the segments (`tests/test_multislice.py`).
+- **fastMRI brain k-space is (slices, coils, readout x2, phase)** (realism score, 2026-10-10):
+  the inverse FFT, then the central rows of the oversampled readout and the central columns of the
+  phase direction (to the reconstruction matrix, 384 x 384 over 220 mm), reproduces the files'
+  `reconstruction_rss` with correlation 1.0000000. The readout runs anterior-posterior (image
+  rows), anterior is up. The 3 T AXT2 stacks (16 x 5 mm) run from the lateral ventricles (slice 0)
+  to above the vertex (slice 15) in all 21 volumes.
+- **Unbalanced person-wise folds bias a classifier against the held-out people**: a real-vs-real
+  null test gave AUC 0.20 for a histogram logistic regression (CI excluding 0.5) when folds held
+  out people without balancing classes; dealing each class's people round-robin into folds moved
+  it toward 0.5 but not all the way (0.27). Calibrate small AUC differences with a permutation test.
+- **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
+  nothing ("no tests ran"); use `${=files}` or list the files.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
