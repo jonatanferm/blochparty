@@ -15,6 +15,12 @@ the image left, as fastMRI shows it).
 Noise-free k-space (coils, 128, 128; k = 0 at index 64) is saved per slice; noise is added later,
 calibrated to the real images' noise floor, so the noise model can change without simulating again.
 
+Variants (for ablations, same seeds = same heads): ``--multislice`` plays the other 15 slices'
+pulses in the real interleaved order (odd slices, then even; ``tse_2d(slice_order=...)``), so the
+imaged slice gets their incidental magnetization transfer and cross-talk; ``--mt`` gives the spins
+their bound pool (``to_phantom(mt=True)``); ``--table tissuedb`` draws the tissues from
+``tissuedb.tissue_table(3.0)`` instead of ``anatomy.DEFAULT_TISSUES``.
+
     uv run python validation/realism/simulate_heads.py --seeds 0-19 --out ~/data/realism_sim
 """
 from __future__ import annotations
@@ -67,9 +73,14 @@ def to_real_orientation(img: np.ndarray) -> np.ndarray:
     return img.T[::-1, :]
 
 
-def sequence(n: int, tr: float, te: float) -> bp.Sequence:
+def interleaved(count=SLICES) -> list[int]:
+    """Siemens' default interleaved order: slices 1, 3, 5, ... then 2, 4, ... (0-based 0, 2, ..., 1, 3, ...)."""
+    return list(range(0, count, 2)) + list(range(1, count, 2))
+
+
+def sequence(n: int, tr: float, te: float, slice_order=None) -> bp.Sequence:
     return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
-                     spoiling="gradient", ramps=True, system=System(rf_raster=1e-5))
+                     spoiling="gradient", ramps=True, system=System(rf_raster=1e-5), slice_order=slice_order)
 
 
 def simulate(ph, seq, coils):
@@ -90,8 +101,21 @@ def main():
     ap.add_argument("--root", type=Path, default=ROOT)
     ap.add_argument("--manifest", type=Path, default=Path.home() / "data" / "fastmri_brain" / "manifest.json")
     ap.add_argument("--out", type=Path, default=Path.home() / "data" / "realism_sim")
+    ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
+    ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
+    ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
+    ap.add_argument("--spins", default="2,2,2", help="spins per tissue and voxel along z,y,x")
     args = ap.parse_args()
-    span = lambda s: range(int(s.split("-")[0]), int(s.split("-")[-1]) + 1)
+
+    def span(s):  # "a-b" or "a-b:step"
+        rng, _, step = s.partition(":")
+        return range(int(rng.split("-")[0]), int(rng.split("-")[-1]) + 1, int(step or 1))
+
+    table = bp.DEFAULT_TISSUES
+    if args.table == "tissuedb":
+        from blochparty import tissuedb
+
+        table = {3.0: tissuedb.tissue_table(3.0)}
     protocols = real_protocols(args.manifest)
     args.out.mkdir(parents=True, exist_ok=True)
     for seed in span(args.seeds):
@@ -100,16 +124,18 @@ def main():
             continue
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
-        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3)
+        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table)
         fields = head.field_maps()
         zs = stack(head.anatomy)
-        seq = sequence(args.n, proto["TR"], proto["TE"])
         kspace, timing = {}, []
         for i in span(args.slices):
             t = time.perf_counter()
+            order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
+            seq = sequence(args.n, proto["TR"], proto["TE"], order)
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - 4, 0), k + 5), slice(None), slice(None))
-            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=(2, 2, 2))
+            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=tuple(int(c) for c in args.spins.split(",")),
+                                 mt=args.mt)
             ph.pos = ph.pos - torch.tensor([0.0, 0.0, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             coils = bp.birdcage_sensitivities(ph.pos, proto["coils"])
@@ -118,6 +144,7 @@ def main():
             timing.append(time.perf_counter() - t)
             print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.0f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
+                "multislice": args.multislice, "mt": args.mt, "table": args.table, "spins": args.spins,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
         print(json.dumps(meta), flush=True)
