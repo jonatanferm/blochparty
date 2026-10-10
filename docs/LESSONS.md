@@ -766,6 +766,20 @@ says where it came from so it can be re-checked.
   MT, where the slices' RF is the larger share; signal 3e-6 from the per-sample path, images 3e-5.
   The kernel's spreading reuses the coil MMA; a threadgroup whose sorted spins span more than
   `NUFFT_WMAX` grid cells (fat, steep B0) falls back to per-sample for that readout.
+- **After NUFFT readouts, the multi-slice MT cost is RF steps in the MT kernel** (2026-10-10, one
+  realism slice, fast, laptop): single 1.50 s (RF 0.34 s of it), single + MT 2.41 s (RF 0.90 s),
+  16 slices + MT 6.3 s (RF ~4.5 s: the neighbours' exact pulses triple the stepped RF segments; the
+  far bound-only pulses cost 0.1 s). The MT kernel variant is slower everywhere (per-sample readouts
+  3.6 -> 6.2 s: registers), and within its RF step the lineshape and exchange step are half, the
+  rotation a fifth. Caching the lineshape per pulse and a series exchange step gave 14 % together:
+  not kept. Only fewer RF steps per pulse (PERFORMANCE 2.3) changes the picture.
+- **A pulse is not one rotation with relaxation around it** (PERFORMANCE 2.3 prototype, float64):
+  the 2 ms 90 and 180 deg pulses of the realism TSE as blocks of K samples (half the block's
+  relaxation, exchange and mean saturation, the exact product of its rotations, the other half)
+  against per-sample steps: one block 5e-3 (WM, GM) to 1.3e-2 (muscle, T2 30 ms) of the 4D affine
+  map, K = 10 worse than one block, K = 2 still 2e-4 to 1.6e-3; CSF 1e-4. Relaxation during the
+  rotation has to be expanded in the interaction picture (Dyson/Magnus terms per table node), not
+  split off.
 - **A GPU shared with another process gives 2x timing swings** (here a desktop app kept the GPU at
   up to 93 %): the same 8-coil adjoint ran in 1.19 s and 2.60 s back to back. Alternate the old and
   new code in one process (load the old module from a saved copy under another name) and compare
