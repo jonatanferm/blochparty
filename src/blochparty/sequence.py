@@ -89,6 +89,43 @@ class Sequence:
             spoil=tail(self.spoil),
         )
 
+    def merge_free(self) -> Sequence:
+        """Each stretch of consecutive segments without RF or ADC (a spoil may end one) as one
+        segment with the stretch's duration, gradient moment and ``b0_offset`` integral; RF and
+        ADC segments are kept bit for bit. For static spins the phase and relaxation at the end of
+        such a stretch depend on nothing else, so the result is the same; not for concomitant
+        fields (quadratic in g), diffusion or motion, which see the gradient's time course. The
+        builders cut ramps and crushers on the gradient raster for Pulseq and the design checks;
+        an engine does not need that (realism TSE 128: 36 335 -> 19 726 segments, docs/PERFORMANCE.md
+        2.4). Span-based meta (``blocks``, ``block_segments``, ``segment_block``) is dropped:
+        a merged sequence is for simulation, not export."""
+        is_rf, adc, spoil = (np.asarray(f, dtype=bool) for f in (self.is_rf, self.adc, self.spoil))
+        free = ~is_rf & ~adc
+        n = len(free)
+        start = np.ones(n, dtype=bool)
+        start[1:] = ~free[1:] | ~free[:-1] | spoil[:-1]
+        gid = np.cumsum(start) - 1
+        first = np.flatnonzero(start)
+        last = np.append(first[1:] - 1, n - 1)
+        merged = free[first] & (last > first)  # groups that change
+        if not merged.any():
+            return self
+        dev = self.dt.device
+        g = torch.as_tensor(gid, device=dev)
+        take = torch.as_tensor(first, device=dev)
+        rows = torch.as_tensor(np.flatnonzero(merged), device=dev)
+        total = lambda x: torch.zeros((len(first), *x.shape[1:]), dtype=x.dtype, device=dev).index_add(0, g, x)
+        dt_sum = total(self.dt)
+        dt = self.dt[take].index_put((rows,), dt_sum[rows])
+        grad = self.grad[take].index_put((rows,), total(self.grad * self.dt[:, None])[rows] / dt_sum[rows, None])
+        b0 = None
+        if self.b0_offset is not None:
+            b0 = self.b0_offset[take].index_put((rows,), total(self.b0_offset * self.dt)[rows] / dt_sum[rows])
+        rf_freq = None if self.rf_freq is None else self.rf_freq[take].index_put((rows,), torch.zeros_like(rows, dtype=self.rf_freq.dtype))
+        meta = {k: v for k, v in self.meta.items() if k not in ("blocks", "block_segments", "segment_block")}
+        return Sequence(dt, self.rf[take], grad, self.adc_phase[take], is_rf[first].tolist(), adc[first].tolist(),
+                        spoil[last].tolist(), meta | {"merged_free": True}, b0, rf_freq)
+
     def to(self, dtype=None, device=None) -> Sequence:
         conv = lambda t: t.to(dtype=dtype, device=device)
         return replace(

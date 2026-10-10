@@ -166,7 +166,7 @@ def main():
             ph.pos = ph.pos - torch.tensor([0.0, 0.0, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             coils = bp.birdcage_sensitivities(ph.pos, proto["coils"])
-            signal, engine = simulate(ph, seq, coils)
+            signal, engine = simulate(ph, seq.merge_free(), coils)  # exact for these static spins (PERFORMANCE 2.4)
             kspace[f"slice{i:02d}"] = bp.cartesian_kspace(signal, seq).numpy().astype(np.complex64)
             timing.append(time.perf_counter() - t)
             print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.0f} s ({engine})", flush=True)
