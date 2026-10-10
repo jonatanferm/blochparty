@@ -577,13 +577,22 @@ says where it came from so it can be re-checked.
   `acq.read_dir[k]` element by element. Scalars (`acq.sample_time_us`, `acq.idx.kspace_encode_step_1`)
   assign normally. The header model (`ismrmrd.xsd`) requires `experimentalConditions`.
 
-- **Off-resonant pulses far from the slice cannot be sampled coarsely with their phase ramp**
-  (multi-slice TSE, 2026-10-10): a pulse for a slice 7 cm away carries a ~28 kHz ramp, which a
-  100 us raster aliases into this slice. Play the envelope without its ramp and shift its frequency
-  with `Sequence.b0_offset = -G z_j` during its RF segments (bound-pool offset via `rf_freq = 0`):
-  every spin is then off resonance by G (z - z_j) exactly as under the real pulse, and the
-  envelope needs only its own bandwidth. Against the exact phase-ramped pulses: 0.8 % of the
-  signal at 1/6 of the segments (`tests/test_multislice.py`).
+- **Other slices' pulses in a multi-slice simulation** (2026-10-10, `tse_2d(slice_order=...)`):
+  a far slice's phase ramp (~28 kHz at 7 cm) aliases on a coarse raster. A first fix played the
+  envelopes without the ramp and shifted them by `b0_offset = -G z_j`: 0.8 % off in one test but
+  2-3 % off at the slab edges, where spins sit inside a neighbour's band and the shifted frame
+  does not reproduce its coherent pathways. What works: the neighbours as their real pulses, and
+  every farther pulse as one segment of the same RF energy that only the bound pool sees (1 MHz off
+  for the water, an integer number of turns; `rf_freq` at G (z_j - z)): 0.71 % against every
+  pulse exact, 3x a single slice on the GPU instead of 6x. 180 deg pulses still nutate water a few
+  kHz outside their band, so "band-limited" holds for the far slices, not the neighbours.
+- **A sparse column of test spins keeps coherences a voxel would lose**: spins 0.25 mm apart along
+  z let residual transverse magnetization survive the spoilers, and a model that changes only its
+  phase looked 5 % wrong; 0.05 mm spacing gave 1.8 %, and the realistic geometry 0.7 %. Validate
+  approximations of other slices' or other times' pulses with voxel-dense spins.
+- **Count segments by kind before optimising a sequence**: delays padded in pieces and gradient
+  ramps of pulses that only matter through their energy made up half of a multi-slice TSE
+  (42k -> 23k segments after merging delays and dropping those ramps).
 - **fastMRI brain k-space is (slices, coils, readout x2, phase)** (realism score, 2026-10-10):
   the inverse FFT, then the central rows of the oversampled readout and the central columns of the
   phase direction (to the reconstruction matrix, 384 x 384 over 220 mm), reproduces the files'
