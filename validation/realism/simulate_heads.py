@@ -38,6 +38,7 @@ their bound pool (``to_phantom(mt=True)``); ``--table tissuedb`` draws the tissu
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import time
 from pathlib import Path
@@ -155,8 +156,9 @@ def main():
         fields = head.field_maps()
         zs = stack(head.anatomy)
         kspace, timing = {}, []
-        for i in span(args.slices):
-            t = time.perf_counter()
+
+        def prepare(i):
+            """Slice i's phantom, coils and merged sequence (CPU), built while the GPU runs slice i - 1."""
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]))
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
@@ -165,11 +167,20 @@ def main():
                                  mt=args.mt)
             ph.pos = ph.pos - torch.tensor([0.0, 0.0, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
-            coils = bp.birdcage_sensitivities(ph.pos, proto["coils"])
-            signal, engine = simulate(ph, seq.merge_free(), coils)  # exact for these static spins (PERFORMANCE 2.4)
-            kspace[f"slice{i:02d}"] = bp.cartesian_kspace(signal, seq).numpy().astype(np.complex64)
-            timing.append(time.perf_counter() - t)
-            print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.0f} s ({engine})", flush=True)
+            return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"])
+
+        slices = list(span(args.slices))
+        with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap
+            pending = pool.submit(prepare, slices[0])
+            for n, i in enumerate(slices):
+                t = time.perf_counter()
+                seq, ph, coils = pending.result()
+                if n + 1 < len(slices):
+                    pending = pool.submit(prepare, slices[n + 1])
+                signal, engine = simulate(ph, seq.merge_free(), coils)  # exact for static spins (PERFORMANCE 2.4)
+                kspace[f"slice{i:02d}"] = bp.cartesian_kspace(signal, seq).numpy().astype(np.complex64)
+                timing.append(time.perf_counter() - t)
+                print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.1f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
