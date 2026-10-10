@@ -56,6 +56,8 @@ Dotted ids (`brain.gm.deep.putamen`), with `parent` the next level up. `brainweb
 tissue that stands for each BrainWeb class: background = air, csf, gm = brain.gm, wm = brain.wm,
 fat = fat.subcutaneous, muscle = muscle.skeletal, skin, skull = bone.cortical, vessels = blood,
 connective, dura, marrow = bone_marrow (pooled over red and yellow marrow when it has no rows of its own).
+Compartments that add up rather than average (cortical bone's bound water, pore water and collagen
+protons) have their own ids (`bone.cortical.bound_water`, ...), so they are never pooled together.
 
 ## Pooling (`pooled`)
 
@@ -70,7 +72,10 @@ connective, dura, marrow = bone_marrow (pooled over red and yellow marrow when i
 
 `tissue_table(field_T)` pools every TissueProperties field for each class's tissue, then its
 descendants (assumed), then falls back to the current `DEFAULT_TISSUES[field_T]` entry; T2* above T2
-is clipped to T2. Rows describing different subjects of one cohort in two papers (Peters 2006 / 2007)
+is clipped to T2; a bound pool without an exchange rate and bound T2 is omitted, and a signalling class
+without MT or diffusion data gets bound_fraction 0 and diffusivity 0 (all marked assumed), so
+`to_phantom(mt=True, diffusion=True)` runs. `tools/tissuedb_report.py` prints the row counts and the
+candidate next to the current default. Rows describing different subjects of one cohort in two papers (Peters 2006 / 2007)
 count as two sources: the pooling cannot see shared subjects.
 
 ## Adding a row
