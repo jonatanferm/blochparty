@@ -619,6 +619,29 @@ says where it came from so it can be re-checked.
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
+- **BrainWeb's heads are MNI-sized** (2026-10-10): the 20 models live in stereotaxic space, so every
+  head is template-sized and template-shaped: subject 04 is 174 x 207 mm (breadth x length; ANSUR II
+  men 154 +- 5.5 x 200 +- 7.0 mm), its brain 1580 cm^3, and simulated heads at the ventricles were
+  264 cm^2 against 189 cm^2 in fastMRI, rounder (AP/LR 1.14 vs 1.31) and all upright. Scale each
+  head to an anthropometric draw (``sample_head(size="anthropometric")``) and turn it
+  (``yaw_sd``); centre the field of view on it as an operator would.
+- **Sub-voxel spins make a grain through a 2D slice's profile** (2026-10-10): with the tissue
+  composition exact (``sampling="proportional"``; categorical draws add a salt-and-pepper of their
+  own), noiseless images still had a pixel-scale grain. More spins in-plane (1x3x3, 1x4x4) did not
+  help; more along z did (3x3x3), because random z positions through the steep 5 mm slice profile
+  make every pixel's slice integral noisy. z at subcell centres (``jitter="inplane"``, a quadrature)
+  fixes it; a full lattice instead makes horizontal banding. 4x2x2 in-plane-jittered is as smooth
+  as 3x3x3 at a third of the time.
+- **Image statistics can mislead where the eye does not** (2026-10-10): a high-pass "grain" metric
+  said the real scans had more fine structure (0.26 vs 0.17), while the simulated ones looked
+  grainier. Both were right: real images have crisp CSF lines, simulated ones had sampling grain
+  and few sulcal lines. Look first, then build the number that measures what you saw.
+- **Where the real slice stack sits** (2026-10-10): fastMRI ships 16 of the protocol's 34 slices
+  without positions; the real slice 0 shows frontal horns, septum, caudate heads and thalami
+  (foramen of Monro), ~10 mm below the lateral ventricles' largest cross-section. The head-area
+  profile alone cannot separate offset from spacing (a valley of equal fits); anatomy picks the
+  offset, and then contiguous 5 mm slices fit.
+
 ## Other simulators
 
 - **MRzero**: RF is instantaneous; numerics are float32 (limits agreement to ~1e-5–4e-4 on
