@@ -83,6 +83,8 @@ ORDERING_EXCEPTIONS = {
     # Peters 2006 WM T2* (71.7 ms, voxels outside a GM mask, CSF contamination per the authors) vs
     # Ma 2013 MRF WM T2 (65 ms; MRF T2 runs low)
     ("brain.wm", 1.5),
+    # Shen 2016 nucleus pulposus T2* (101 ms) vs IT'IS whole-disc T2 (76 ms): different compartments
+    ("intervertebral_disc", 1.5),
 }
 
 
@@ -122,6 +124,10 @@ def test_t1_rises_with_field_within_a_source():
 # (tissue, property, field): why the sources may differ by more than a factor of two
 AGREEMENT_EXCEPTIONS = {
     ("eye.lens", "t1", 3.): "Ma 2019 lens nucleus 0.58 s (abstract, sequence not stated) vs Lie 2021 VFA 1.26 s",
+    ("kidney.cortex", "t2", 3.): "Chen 2016 MRF 47 ms vs T2-prepared / GRASE 121-132 ms (Wolf 2018 review)",
+    ("kidney.medulla", "t2", 3.): "as the cortex: MRF vs T2-prepared / GRASE",
+    ("lung", "t2star", 1.5): "UTE echo times differ: 0.98 ms (Stock 1999) to 2.11 ms (Yu 2011)",
+    ("muscle.skeletal", "t2", 3.): "Serrao 2020 abdominal MRF 74 ms (flagged high) vs multi-echo SE 29-31 ms",
 }
 
 
