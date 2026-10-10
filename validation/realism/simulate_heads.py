@@ -129,6 +129,8 @@ def main():
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
+    ap.add_argument("--scalp", choices=("brainweb", "layered"), default="brainweb",
+                    help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
@@ -153,7 +155,7 @@ def main():
             continue
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
-        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table)
+        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp)
         fields = head.field_maps()
         zs = stack(head.anatomy)
         kspace, timing = {}, []
@@ -183,7 +185,7 @@ def main():
                 timing.append(time.perf_counter() - t)
                 print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.1f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
-                "multislice": args.multislice, "mt": args.mt, "table": args.table, "quality": args.quality,
+                "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
                 "seconds": round(time.perf_counter() - t0)}

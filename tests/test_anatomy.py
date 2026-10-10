@@ -391,3 +391,24 @@ def test_systematic_sampling_counts_and_unbiased_pd():
     cat = [float(to_phantom(a, spins_per_voxel=(2, 2, 2), sampling="categorical", seed=s, chi_to_b0=False,
                             t2star="off").pd.sum()) for s in range(200)]
     assert np.std(totals) < 0.5 * np.std(cat)  # the point of it: far less draw noise
+
+
+def test_layer_scalp_moves_the_subcutaneous_layer_into_fat():
+    """A column of skin below air on a 0.5 mm grid: the membership between 1.61 mm and 5.75 mm below
+    the surface (midway between the last air and first skin voxel centres) moves to fat, partial at
+    the layer edges, exactly 4.14 mm of it; skin + fat is conserved, nothing else changes."""
+    pytest.importorskip("scipy")
+    n, h = 40, 0.5e-3
+    air = torch.zeros(1, 1, n, dtype=torch.float64)
+    air[..., :10] = 1
+    skin = 0.9 * (1 - air)  # a fuzzy class: 10 % of each voxel is something else
+    an = Anatomy({"background": air, "skin": skin, "fat": torch.zeros_like(air), "wm": 0.1 * (1 - air)},
+                 (h, h, h), (0., 0., 0.))
+    out = bp.layer_scalp(an)
+    fat = out.fractions["fat"][0, 0]
+    depth = (torch.arange(n, dtype=torch.float64) - 9.5) * h  # voxel centres below the surface
+    assert float(fat.sum()) * h == pytest.approx(0.9 * 4.14e-3, rel=1e-12)
+    assert torch.equal(out.fractions["skin"] + out.fractions["fat"], skin)
+    assert torch.equal(out.fractions["wm"], an.fractions["wm"]) and torch.equal(out.fractions["background"], air)
+    assert (fat[depth < 1.61e-3 - h / 2] == 0).all() and (fat[depth > 5.75e-3 + h / 2] == 0).all()
+    assert torch.allclose(fat[(depth > 1.61e-3 + h / 2) & (depth < 5.75e-3 - h / 2)], torch.tensor(0.9, dtype=torch.float64))

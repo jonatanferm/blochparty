@@ -1104,12 +1104,41 @@ def draw_tissues(tissues: dict, generator: torch.Generator) -> tuple[dict, dict]
     return out, draws
 
 
+# Scalp layers at the vertex, 30 healthy adults, 22 MHz ultrasound: epidermis + dermis 1.61 +- 0.23 mm,
+# subcutaneous tissue 4.14 +- 1.10 mm, whole scalp 5.76 +- 1.14 mm (Li et al. 2024, Skin Res Technol
+# 30:e13863, doi:10.1111/srt.13863, Table 5).
+SCALP_LAYERS = (1.61e-3, 4.14e-3)
+
+
+def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous: float = SCALP_LAYERS[1]) -> Anatomy:
+    """BrainWeb lumps the scalp's skin and its subcutaneous (fatty) layer into one class, "Muscle/Skin"
+    (``skin`` here), which T2-weighted scans show as a dark skin line over a bright fat layer. Split it
+    by depth below the head's surface: the outer ``dermis`` [m] stays skin, the next ``subcutaneous``
+    [m] becomes adipose tissue (``fat``), deeper skin stays skin. Depth: the Euclidean distance of a
+    voxel centre below the boundary of the head (1 - background > 0.5), each voxel weighted by its
+    overlap with the layer (one voxel size across). Defaults: ``SCALP_LAYERS``."""
+    from scipy import ndimage
+
+    fr = anatomy.fractions
+    if not {"skin", "fat", "background"} <= set(fr):
+        raise ValueError("layer_scalp needs the background, skin and fat classes (BrainWeb)")
+    inside = ((1 - fr["background"]) > .5).numpy()
+    h = float(np.mean(anatomy.voxel))
+    # distance to the nearest outside voxel centre, less half a voxel: the boundary lies between them
+    depth = ndimage.distance_transform_edt(inside, sampling=anatomy.voxel) - h / 2
+    lo, hi = dermis, dermis + subcutaneous
+    w = np.clip((np.minimum(depth + h / 2, hi) - np.maximum(depth - h / 2, lo)) / h, 0, 1) * inside
+    move = fr["skin"] * torch.from_numpy(w).to(fr["skin"].dtype)
+    return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
+
+
 BRAINWEB_SUBJECTS = (4, 5, 6, 18, 20, 38, *range(41, 55))
 DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation/anatomy/README.md, M4
 
 
 def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
-                magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32) -> DigitalPhantom:
+                magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
+                scalp: str = "brainweb") -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1117,7 +1146,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     Susceptibility -> B0, shim and the R2* policy are ``to_phantom``'s defaults. The result is
     deterministic in the seed, and ``meta`` records every draw (subject, control points,
     properties, seeds). ``root`` is the BrainWeb data directory (default: the environment
-    variable BLOCHPARTY_BRAINWEB; validation/anatomy/fetch_brainweb.py fetches it)."""
+    variable BLOCHPARTY_BRAINWEB; validation/anatomy/fetch_brainweb.py fetches it). ``scalp``:
+    "brainweb" keeps BrainWeb's skin class, "layered" splits it into skin and subcutaneous fat
+    (``layer_scalp``) before the deformation."""
+    if scalp not in ("brainweb", "layered"):
+        raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
     root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
     if root is None:
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
@@ -1127,6 +1160,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
+    if scalp == "layered":
+        anatomy = layer_scalp(anatomy)
     displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
                                                magnitude=magnitude, spacing=spacing)
     scale = 1.
@@ -1136,7 +1171,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     options = {"seed": streams[4]}
     if texture:
         options["variability"] = dict(texture) | {"seed": streams[3]}
-    meta = {"sampler": "anatomy.sample_head", "seed": int(seed), "subject": subject, "field_T": field_T,
+    meta = {"sampler": "anatomy.sample_head", "seed": int(seed), "subject": subject, "field_T": field_T, "scalp": scalp,
             "voxel": list(anatomy.voxel), "streams": streams,
             "deformation": {"magnitude": magnitude, "spacing": spacing, "scale": scale,
                             "jacobian": [float(jac.min()), float(jac.max())], "control": control.tolist()},
