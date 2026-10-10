@@ -79,7 +79,7 @@ TISSUES = {
     "Placenta": ("placenta", ""), "Pons": ("brain.brainstem", "pons"), "Prostate": ("prostate", ""),
     "Salivary Gland": ("salivary_gland", ""), "SAT (Subcutaneous Fat)": ("fat.subcutaneous", ""),
     "Scalp": ("scalp", ""), "Seminal vesicle": ("seminal_vesicle", ""), "Skin": ("skin", ""),
-    "Skull": ("bone.cortical", "skull"), "Skull (Cancellous)": ("bone.cancellous", "skull"),
+    "Skull": ("bone.skull", ""), "Skull (Cancellous)": ("bone.cancellous", "skull"),
     "Skull (Cortical)": ("bone.cortical", "skull (cortical)"), "Small Intestine": ("small_intestine", "wall"),
     "Spinal Cord": ("spinal_cord", ""), "Spleen": ("spleen", ""), "Stomach": ("stomach", "wall"),
     "Tendon\\Ligament": ("tendon", "tendon/ligament"), "Testis": ("testis", ""),

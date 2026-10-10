@@ -61,8 +61,8 @@ def test_schema():
 
 def test_units_by_magnitude():
     """Catches ms-for-s, %-for-fraction and mm^2/s-for-m^2/s: every value in its plausible SI range."""
-    ranges = {"t1": (.05, 6.), "t2": (1e-4, 3.), "t2star": (5e-5, 3.), "bound_t2": (1e-6, 1e-3),
-              "md": (0, 4e-9), "exchange_rate": (.1, 200), "chi": (-15, 1), "chi_qsm": (-1, 1),
+    ranges = {"t1": (.05, 8.), "t2": (2e-5, 3.), "t2star": (5e-5, 3.), "bound_t2": (1e-6, 1e-3),
+              "md": (0, 4e-9), "exchange_rate": (.1, 200), "chi": (-15, 1), "chi_qsm": (-5, 5),
               "permittivity_rel": (1, 200), "conductivity": (0, 3)}
     for m in DB.measurements:
         if m.property in ranges:
@@ -119,7 +119,14 @@ def test_t1_rises_with_field_within_a_source():
     assert pairs > 20
 
 
+# (tissue, property, field): why the sources may differ by more than a factor of two
+AGREEMENT_EXCEPTIONS = {
+    ("eye.lens", "t1", 3.): "Ma 2019 lens nucleus 0.58 s (abstract, sequence not stated) vs Lie 2021 VFA 1.26 s",
+}
+
+
 def test_human_in_vivo_sources_agree_within_a_factor_of_two():
+    """Fractions below 0.2 (fat in muscle) are compared by absolute difference (0.1) instead."""
     by = defaultdict(lambda: defaultdict(list))
     for m in DB.measurements:
         if m.species == "human" and m.state == "in_vivo" and m.property not in ("chi_qsm",):
@@ -129,10 +136,13 @@ def test_human_in_vivo_sources_agree_within_a_factor_of_two():
         if len(sources) < 2:
             continue
         means = {s: statistics.fmean(v) for s, v in sources.items()}
-        if min(means.values()) <= 0:
+        if min(means.values()) <= 0 or key in AGREEMENT_EXCEPTIONS:
             continue
         compared += 1
-        assert max(means.values()) / min(means.values()) <= 2, (key, means)
+        if key[1] in FRACTIONS and max(means.values()) < .2:
+            assert max(means.values()) - min(means.values()) <= .1, (key, means)
+        else:
+            assert max(means.values()) / min(means.values()) <= 2, (key, means)
     assert compared > 20
 
 

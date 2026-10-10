@@ -228,7 +228,8 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
     names one tissue per class). Each property is pooled from that tissue's rows, else from its
     descendants' (assumed=True), else the current ``DEFAULT_TISSUES[field_T]`` entry is used. A class
     is left out when a required property (pd, t1, t2, chi) has neither. T2* above T2 is clipped to T2
-    (assumed=True)."""
+    (assumed=True). A signalling class without MT or diffusion data gets bound_fraction 0 and
+    diffusivity 0, marked as assumptions, so ``to_phantom(mt=True, diffusion=True)`` runs."""
     db = db or load()
     base_table = DEFAULT_TISSUES.get(field_T, {})
     out = {}
@@ -249,6 +250,11 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
             values[name] = d
         if any(values[k] is None for k in ("pd", "t1", "t2", "chi")):
             continue
+        # to_phantom(mt=True / diffusion=True) needs these for every signalling class: say so explicitly
+        if values["pd"].mean > 0:
+            for key, what in (("bound_fraction", "no MT data, no semi-solid pool"), ("diffusivity", "no diffusion data, D = 0")):
+                if values[key] is None:
+                    values[key] = Distribution(0., None, f"Assumption: tissuedb has {what} for {t.id}", True)
         star, t2 = values["t2star"], values["t2"]
         if star is not None and star.mean > t2.mean:
             values["t2star"] = Distribution(t2.mean, None, "clipped to T2: " + star.citation, True)

@@ -11,6 +11,10 @@ blood.venous,venous blood,blood,,oxygen saturation ~0.6-0.75
 bone,bone,,,bone (unspecified)
 bone.cancellous,cancellous (trabecular) bone,bone,,
 bone.cortical,cortical bone,bone,skull,BrainWeb skull
+bone.cortical.bound_water,cortical bone: collagen-bound water,bone.cortical,,"water compartment, not a tissue: bound water (UTE T2* ~0.3-0.5 ms); pd rows add with pore water"
+bone.cortical.collagen,cortical bone: collagen protons,bone.cortical,,"semi-solid compartment, not a tissue: collagen backbone protons (T2 ~60 us)"
+bone.cortical.pore_water,cortical bone: pore water,bone.cortical,,"water compartment, not a tissue: Haversian/lacuno-canalicular pore water (T2 ~ms-tens of ms)"
+bone.skull,skull (cranial bone),bone.cortical,,calvarium/cranial bone (inner+outer tables and diploe unless region says otherwise)
 bone_marrow,bone marrow,,marrow,"marrow (unspecified red/yellow); BrainWeb marrow (skull diploe), pooled over children when it has no rows of its own"
 bone_marrow.red,red (haematopoietic) bone marrow,bone_marrow,,
 bone_marrow.yellow,yellow (fatty) bone marrow,bone_marrow,,
@@ -47,16 +51,20 @@ dura,dura mater,,dura,
 epididymis,epididymis,,,
 esophagus,oesophagus,,,
 extracellular_fluid,extracellular fluid,,,
-eye.aqueous,aqueous humour,,,
-eye.choroid,choroid,,,
-eye.ciliary_body,ciliary body,,,
-eye.cornea,cornea,,,
-eye.iris,iris,,,
-eye.lens,lens,,,
-eye.retina,retina,,,
-eye.sclera,sclera,,,
-eye.vitreous,vitreous humour,,,
+eye,eye (globe),,,whole eye
+eye.aqueous,aqueous humour,eye,,
+eye.chorioretina,chorioretina,eye,,retina + choroid (not separable at clinical resolution)
+eye.choroid,choroid,eye,,
+eye.ciliary_body,ciliary body,eye,,
+eye.cornea,cornea,eye,,
+eye.extraocular_muscle,extraocular muscle,muscle.skeletal,,rectus and oblique muscles of the orbit
+eye.iris,iris,eye,,
+eye.lens,lens,eye,,
+eye.retina,retina,eye,,
+eye.sclera,sclera,eye,,
+eye.vitreous,vitreous humour,eye,,
 fat,adipose tissue,,,adipose tissue (generic)
+fat.brown,brown adipose tissue,fat,,"brown (or supraclavicular presumed-brown) adipose tissue: multilocular adipocytes, higher water fraction than white fat"
 fat.orbital,orbital fat,fat,,
 fat.subcutaneous,subcutaneous adipose tissue,fat,fat,BrainWeb fat (scalp and facial fat)
 fat.visceral,visceral adipose tissue,fat,,
@@ -78,6 +86,7 @@ mucosa,mucous membrane,,,
 muscle.skeletal,skeletal muscle,,muscle,muscle (regions in the region column)
 nerve,nerve,,,peripheral and cranial nerve
 nerve.optic,optic nerve,nerve,,
+oral_cavity,oral cavity (soft tissue),,,oral cavity soft tissue incl. tongue and floor of mouth (radiotherapy OAR definition)
 ovary,ovary,,,
 pancreas,pancreas,,,
 penis,penis,,,
@@ -88,6 +97,9 @@ prostate,prostate,,,
 prostate.peripheral_zone,prostate peripheral zone,prostate,,
 prostate.transition_zone,prostate transition zone,prostate,,
 salivary_gland,salivary gland,,,parotid and submandibular glands
+salivary_gland.parotid,parotid gland,salivary_gland,,
+salivary_gland.sublingual,sublingual gland,salivary_gland,,
+salivary_gland.submandibular,submandibular gland,salivary_gland,,
 scalp,scalp,,,scalp (skin and subcutis)
 seminal_vesicle,seminal vesicle,,,
 skin,skin,,skin,epidermis and dermis

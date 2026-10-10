@@ -426,11 +426,11 @@ Skin,88,t2 1.5 T,skip,no data,skin
 Skin,88,t1 3 T,skip,no data,skin
 Skin,88,t2 3 T,skip,no data,skin
 Skin,88,dielectric,take,,skin
-Skull,89,t1 1.5 T,skip,no data,bone.cortical
-Skull,89,t2 1.5 T,skip,no data,bone.cortical
-Skull,89,t1 3 T,skip,no data,bone.cortical
-Skull,89,t2 3 T,skip,no data,bone.cortical
-Skull,89,dielectric,skip,proxy: copy of Bone (Cortical),bone.cortical
+Skull,89,t1 1.5 T,skip,no data,bone.skull
+Skull,89,t2 1.5 T,skip,no data,bone.skull
+Skull,89,t1 3 T,skip,no data,bone.skull
+Skull,89,t2 3 T,skip,no data,bone.skull
+Skull,89,dielectric,skip,proxy: copy of Bone (Cortical),bone.skull
 Skull (Cancellous),90,t1 1.5 T,skip,no data,bone.cancellous
 Skull (Cancellous),90,t2 1.5 T,skip,no data,bone.cancellous
 Skull (Cancellous),90,t1 3 T,skip,no data,bone.cancellous
@@ -646,7 +646,7 @@ SAT (Subcutaneous Fat),85,water_content_mass,skip,proxy: copy of Fat,fat.subcuta
 Scalp,86,water_content_mass,skip,proxy: copy of Skin,scalp
 Seminal vesicle,87,water_content_mass,skip,no data,seminal_vesicle
 Skin,88,water_content_mass,take,,skin
-Skull,89,water_content_mass,take,,bone.cortical
+Skull,89,water_content_mass,take,,bone.skull
 Skull (Cancellous),90,water_content_mass,skip,proxy: copy of Bone (Cancellous),bone.cancellous
 Skull (Cortical),91,water_content_mass,skip,proxy: copy of Bone (Cortical),bone.cortical
 Small Intestine,92,water_content_mass,take,,small_intestine
