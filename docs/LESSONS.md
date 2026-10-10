@@ -466,6 +466,16 @@ says where it came from so it can be re-checked.
   (Peters, ISMRM 2006, Table 1 in the PDF: GM 59.7 > WM 54.6 ms at 3 T). A tissue T2* also needs
   its source's voxel size and echo times: the macroscopic part it contains depends on them, and a
   longer echo train (3-66 vs 5-40 ms) clips R2' at gradients half as large.
+- **When only the abstract is readable, test its numbers against physics before using them**
+  (2026-10-10): Wansapura et al. 1999 (JMRI 9:531) gives T2 "for gray matter and white matter"
+  as 80 and 110 ms, opposite to every other 3 T study (GM > WM, Stanisz 2005 99 / 69 ms), and
+  also calls its 14-echo FLASH T2* values "T2" and an occipital GM value that is the lower one
+  "significantly higher". `validation/anatomy_brainweb.py` used the abstract order since M2
+  (2026-10-07); its human-3 T T2-weighted GM/WM ratio was 0.69 (cortex darker than white matter,
+  which no T2-weighted image shows) and is 1.56 with GM 110 / WM 80 ms. A predicted contrast
+  ratio that inverts the textbook appearance is the quick check. The Wiley full text sits
+  behind a bot check and ResearchGate returns 403, so the assignment rests on physics; the
+  tissue database (`tissuedb` branch) flags the same rows.
 
 - **The antiparallel-spoke delay estimator is biased by unequal axis delays** (2026-10-08,
   benchmark 6): the partner at theta + pi is shifted along the spoke by the same d(theta) but
