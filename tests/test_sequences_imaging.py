@@ -209,3 +209,26 @@ def test_epi_kspace_matches_signal_equation(setup):
     # cartesian_kspace places every sample: the k = 0 sample is the largest
     k = cartesian_kspace(bp.simulate(phantom, seq).signal, seq)[0]
     assert int(k.abs().argmax()) == (N // 2) * N + N // 2
+
+
+def test_tse_readout_oversampling_keeps_k_and_stops_folding():
+    """readout_oversampling=2: twice the samples at half the dwell, the same gradient and k positions
+    (sample 2i at sample i's kx and time); cropped to the field of view after the inverse FFT, an
+    object inside it gives the os=1 image, and one beyond fov/2 along x no longer folds in."""
+    import numpy as np
+
+    kw = dict(etl=8, tr=0.5, slice_thickness=5e-3, spoiling="gradient")
+    a, b = bp.tse_2d(32, **kw), bp.tse_2d(32, **kw, readout_oversampling=2)
+    assert b.meta["matrix"] == (32, 64) and b.n_adc == 2 * a.n_adc and abs(float(a.duration - b.duration)) < 1e-12
+    def image(ph, s):
+        k = bp.cartesian_kspace(bp.simulate(ph, s).signal, s)[0].numpy()
+        img = np.fft.fftshift(np.fft.ifft2(np.fft.ifftshift(k)))
+        n = k.shape[0]
+        return img[:, (k.shape[1] - n) // 2:(k.shape[1] - n) // 2 + n]  # twice the samples over twice the fov: same scale
+    one = lambda x, y: bp.Phantom(torch.tensor([[x, y, 0.0]], dtype=torch.float64), torch.ones(1, dtype=torch.float64),
+                                  torch.ones(1, dtype=torch.float64), torch.full((1,), 0.1, dtype=torch.float64),
+                                  torch.zeros(1, dtype=torch.float64))
+    inside = one(0.0206, 0.0137)
+    assert np.abs(image(inside, b) - image(inside, a)).max() < 0.02 * np.abs(image(inside, a)).max()
+    outside = one(0.13, 0.0)  # beyond fov / 2 = 0.11 m along the readout
+    assert np.abs(image(outside, a)).max() > 0.3 and np.abs(image(outside, b)).max() < 0.05

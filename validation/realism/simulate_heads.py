@@ -121,13 +121,28 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 }
 
 
-def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None) -> bp.Sequence:
+def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1) -> bp.Sequence:
     """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
-    the bound pool only (0.71 % against every pulse exact, ``tse_2d``)."""
+    the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
+    oversampling (the real scans: 2)."""
     multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
+    if readout_os != 1:
+        multi["readout_oversampling"] = readout_os
     return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
                      spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
                      **multi)
+
+
+def kspace_on_fov(signal, seq) -> np.ndarray:
+    """(C, n, n) k-space on the field of view: an oversampled readout is cropped to the central n
+    pixels after the inverse FFT, as the real reconstruction crops the scanner's 2x readout."""
+    k = bp.cartesian_kspace(signal, seq).numpy()
+    n, m = k.shape[-2], k.shape[-1]
+    if m != n:  # centred, orthonormal transforms as realism.centred_ifft / centred_fft
+        img = np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(k, axes=-1), axis=-1, norm="ortho"), axes=-1)
+        img = img[..., (m - n) // 2:(m - n) // 2 + n]
+        k = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(img, axes=-1), axis=-1, norm="ortho"), axes=-1)
+    return k
 
 
 def simulate(ph, seq, coils):
@@ -160,9 +175,10 @@ def main():
     ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
     ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
+    ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
-                         "--stack protocol --yaw-sd 3.8 --quality real --age 25,75")
+                         "--stack protocol --yaw-sd 3.8 --quality real --age 25,75 --readout-os 2")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
@@ -171,6 +187,7 @@ def main():
         args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric", "protocol", 3.8
         args.quality = "real"
         args.age = args.age or "25,75"  # fastMRI publishes no demographics: a broad clinical adult range
+        args.readout_os = 2
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -203,7 +220,7 @@ def main():
         def prepare(i):
             """Slice i's phantom, coils and merged sequence (CPU), built while the GPU runs slice i - 1."""
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
-            seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]))
+            seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os)
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
@@ -221,13 +238,13 @@ def main():
                 if n + 1 < len(slices):
                     pending = pool.submit(prepare, slices[n + 1])
                 signal, engine = simulate(ph, seq.merge_free(), coils)  # exact for static spins (PERFORMANCE 2.4)
-                kspace[f"slice{i:02d}"] = bp.cartesian_kspace(signal, seq).numpy().astype(np.complex64)
+                kspace[f"slice{i:02d}"] = kspace_on_fov(signal, seq).astype(np.complex64)
                 timing.append(time.perf_counter() - t)
                 print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.1f} s ({engine})", flush=True)
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "stack": args.stack, "quality": args.quality,
+                "age": head.meta.get("age"), "stack": args.stack, "readout_os": args.readout_os, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
                 "seconds": round(time.perf_counter() - t0)}

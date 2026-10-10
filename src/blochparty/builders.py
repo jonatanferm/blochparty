@@ -338,6 +338,7 @@ def tse_2d(
     slice_order=None,
     other_rf_raster: float | None = None,
     bound_only_beyond: float | None = None,
+    readout_oversampling: int = 1,
 ) -> Sequence:
     """2D turbo spin echo (CPMG): per shot a ``excite_flip_deg`` pulse along x, then ``etl``
     refocusing pulses along y every ``esp`` (None: the shortest possible), echoes at
@@ -373,6 +374,11 @@ def tse_2d(
     the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a
     scanner sequence (``write_pulseq`` refuses ``bound_only``).
 
+    ``readout_oversampling`` (default 1): ``os`` times the readout samples at ``dwell / os`` on the
+    same gradient and flat top: the same k-space extent over ``os`` times the field of view along x
+    (as scanners do, so tissue beyond ``fov`` does not fold in); ``meta["matrix"]`` becomes
+    (n, os n), and the image is cropped to ``fov`` after the inverse FFT.
+
     Returns ``meta["matrix"] = (n, n)`` and ``meta["kspace_index"]`` (grid index of every
     ADC sample; use ``cartesian_kspace`` / ``cartesian_recon``), ``te`` (effective),
     ``echo_times`` and ``line_echo`` (echo index of every ky line).
@@ -403,7 +409,10 @@ def tse_2d(
     exc = _excitation(excite_flip_deg, *args)
     refs = [_excitation(f, *args) for f in flips]
     ref = refs[0]  # all refocusing blocks share the timing; only the flip differs
-    ro = _readout(n, dwell, fov, ramps, sysm, dtype, centred=True)
+    os_ = int(readout_oversampling)
+    if os_ < 1:
+        raise ValueError("readout_oversampling must be a positive integer")
+    ro = _readout(n * os_, dwell / os_, fov * os_, ramps, sysm, dtype, centred=True)
     crush = crusher_cycles / (slice_thickness if slice_thickness is not None else fov / n)
     t_p = _min_duration(max(ro.area_k0, abs(crush + float(exc.rephase[2]))), sysm)
     t_c = _min_duration(max(n // 2 * dk, crush), sysm)
@@ -486,11 +495,11 @@ def tse_2d(
             b.block(*r.grads, rf=_with_phase(r.rf, math.pi / 2))
             b.block(_lobe((0.0, ky, crush), t_c, ramps, sysm, dtype))
             _pad(b, esp / 2 - h1)
-            b.block(ro.grad, adc=ADC(n, dwell, ro.adc_delay) if acquire else None, duration=ro.duration)
+            b.block(ro.grad, adc=ADC(n * os_, dwell / os_, ro.adc_delay) if acquire else None, duration=ro.duration)
             _pad(b, esp / 2 - h2)
             b.block(_lobe((0.0, -ky, crush), t_c, ramps, sysm, dtype))
             if acquire:
-                kspace_index += range(line * n, line * n + n)
+                kspace_index += range(line * n * os_, (line + 1) * n * os_)
         if spoiling == "gradient":
             b.block(_lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype))
         for dz in (slice_order or [0.0])[(slice_order or [0.0]).index(0.0) + 1:]:
@@ -505,10 +514,11 @@ def tse_2d(
     for s in range(n_shots):
         for e in range(etl):
             line_echo[lines[s][e]] = e
-    seq = b.build(matrix=(n, n), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell, tr=tr, esp=esp,
-                  etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
+    seq = b.build(matrix=(n, n * os_), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell / os_, tr=tr,
+                  esp=esp, etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
                   line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
-                  system=sysm, **({} if slice_order is None else {"slice_order": slice_order}))
+                  system=sysm, **({} if slice_order is None else {"slice_order": slice_order}),
+                  **({} if os_ == 1 else {"readout_oversampling": os_}))
     if ghosts:  # the far slices' pulses: the bound pool alone, at G (z_j - z)
         from .exchange import rf_frequency
 
