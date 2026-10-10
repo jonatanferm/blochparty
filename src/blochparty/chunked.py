@@ -140,6 +140,8 @@ def simulate_chunked(
         kspace = simulate_chunked(phantom, seq, spin_chunk=512).signal
         kspace.abs().sum().backward()  # fills flip.grad and t1.grad
     """
+    if getattr(seq, "bound_only", None) is not None and any(seq.bound_only):
+        raise NotImplementedError("simulate_chunked: bound-pool-only RF segments (Sequence.bound_only); use simulate")
     if getattr(phantom, "motion", None) is not None:
         raise NotImplementedError("motion (Phantom.motion) is in blochparty.simulate and the Metal kernel")
     if getattr(phantom, "diffusion", None) is not None:

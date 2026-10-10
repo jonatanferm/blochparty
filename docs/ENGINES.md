@@ -43,6 +43,7 @@ last column; combinations of features are checked only engine against engine.
 | GIRF / eddy currents (`apply_girf`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | recurrence, delay shift, analytic B0 eddy phase (`test_girf.py`); a sequence transform, so any engine runs it |
 | uniform field per segment (`Sequence.b0_offset`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | analytic drift phases (`test_drift.py`) |
 | RF carrier (`Sequence.rf_freq`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | resonance sign (`test_exchange.py`); only the rate-model bound pool reads it |
+| bound-pool-only RF segments (`Sequence.bound_only`) | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | = the bound pool's saturation with the free pool's RF off; multi-slice TSE vs every pulse exact (`test_multislice.py`); rate model only |
 | many coils (40) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | signal linear in the sensitivities |
 | initial magnetization (`m_init`) | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | as the basic case |
 | bound pool + scanner field model | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | combination |

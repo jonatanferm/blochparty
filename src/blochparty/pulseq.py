@@ -537,6 +537,9 @@ def write_pulseq(seq: Sequence, path, *, system=None, spoil: str = "raise", name
 
     if spoil not in ("raise", "drop"):
         raise ValueError(f"spoil must be 'raise' or 'drop', not {spoil!r}")
+    if seq.bound_only is not None and any(seq.bound_only):
+        raise ValueError("bound-pool-only RF segments (Sequence.bound_only) model other slices' pulses, not a scanner "
+                         "sequence; write the sequence without them")
     if any(seq.spoil) and spoil == "raise":
         raise ValueError("ideal spoilers (Sequence.spoil) cannot be written to Pulseq; use crusher gradients, or "
                          "spoil='drop' to write the sequence without them")

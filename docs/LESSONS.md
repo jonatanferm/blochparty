@@ -582,10 +582,17 @@ says where it came from so it can be re-checked.
   envelopes without the ramp and shifted them by `b0_offset = -G z_j`: 0.8 % off in one test but
   2-3 % off at the slab edges, where spins sit inside a neighbour's band and the shifted frame
   does not reproduce its coherent pathways. What works: the neighbours as their real pulses, and
-  every farther pulse as one segment of the same RF energy that only the bound pool sees (1 MHz off
-  for the water, an integer number of turns; `rf_freq` at G (z_j - z)): 0.71 % against every
-  pulse exact, 3x a single slice on the GPU instead of 6x. 180 deg pulses still nutate water a few
-  kHz outside their band, so "band-limited" holds for the far slices, not the neighbours.
+  every farther pulse as one segment of the same RF energy that only the bound pool sees
+  (`Sequence.bound_only`, `rf_freq` at G (z_j - z)): 0.71 % against every pulse exact, 3x a single
+  slice on the GPU instead of 6x. 180 deg pulses still nutate water a few kHz outside their band,
+  so "band-limited" holds for the far slices, not the neighbours.
+- **Hiding a pulse from the water by a frame offset breaks float32** (2026-10-10): the first
+  bound-only pulses put the water 1 MHz off resonance for the pulse (an integer number of turns,
+  exact in float64). In float32 each 100 us pulse leaves ~1e-3 rad of phase (100 turns at 2^-24),
+  harmless for WM (T2 69 ms forgets it) but CSF (T2 2 s) accumulated it over 16 slices' pulses:
+  Metal vs core 0.45 % in signal and 2 % in Mz, 3 % in Mz on Shepp-Logan at TR 0.8 s. A flag the
+  kernel reads (water precesses, the bound pool saturates) gives 6e-6 (CSF) and 7e-7 (WM). Express
+  "this does not act on X" as structure, not as a large number that cancels.
 - **A sparse column of test spins keeps coherences a voxel would lose**: spins 0.25 mm apart along
   z let residual transverse magnetization survive the spoilers, and a model that changes only its
   phase looked 5 % wrong; 0.05 mm spacing gave 1.8 %, and the realistic geometry 0.7 %. Validate

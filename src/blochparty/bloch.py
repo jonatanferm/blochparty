@@ -128,12 +128,14 @@ def _concomitant(lin, g, spins: _Spins):
     return exact_excess(lin, c[:, :3] @ g, c[:, 3:6] @ g, c[:, 6])
 
 
-def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None):
+def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None, bound_only=False):
     bz = spins.pos @ g + spins.db0  # off-resonance in the rotating frame [Hz]
     if off is not None:
         bz = bz + off
     if spins.mode:
         bz = bz + _concomitant(bz, g, spins)
+    if spins.modes is not None and bound_only:
+        raise NotImplementedError("bound-pool-only RF segments (Sequence.bound_only) with the generalized Bloch pool")
     if spins.modes is not None:  # generalized Bloch: the RF rotates the bound pool through its modes
         # the split is accurate for steps << T2b (~1e-3 in Z at 1.7 T2b, 0.06 at 8 T2b): sub-step
         n_sub = max(1, math.ceil(float(dt.detach()) / (0.5 * float(spins.bound.t2.detach().min()))))
@@ -146,8 +148,8 @@ def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None):
     else:
         mx, my, mz = _relax(mx, my, mz, 0.5 * dt, spins)
     w = -TWO_PI * dt
-    wx, wy = w * rf[0], w * rf[1]
-    if spins.b1 is not None:  # B1+: every spin sees the RF field scaled by its b1
+    wx, wy = (0.0, 0.0) if bound_only else (w * rf[0], w * rf[1])  # Sequence.bound_only: the water ignores it
+    if spins.b1 is not None and not bound_only:  # B1+: every spin sees the RF field scaled by its b1
         wx, wy = wx * spins.b1, wy * spins.b1
     mx, my, mz = _rotate(mx, my, mz, wx, wy, w * bz)
     if spins.bound is not None:
@@ -370,7 +372,8 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             if conc_seg is not None:
                 sp = sp._replace(conc=conc_seg[:, 0])
             mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
-                                         None if f_rf is None else f_rf[a])
+                                         None if f_rf is None else f_rf[a],
+                                         bound_only=bool(seq.bound_only[a]) if seq.bound_only is not None else False)
             if seq.adc[a]:
                 samples.append(_sample(mx, my, seq.adc_phase[a], step_spins)[None])
         else:
@@ -441,14 +444,18 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
             sp = sp._replace(pos=enc[:, 0]) if conc_seg is None else sp._replace(pos=enc[:, 0], conc=conc_seg[:, 0])
         new_key = (float(dt.detach()), float(rf[0].detach()), float(rf[1].detach()), *map(float, g.detach()),
                    0.0 if off is None else float(off.detach()),
-                   float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0)
+                   float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0,
+                   bool(seq.bound_only[s]) if seq.bound_only is not None else False)
         if moving or new_key != key or torch.is_grad_enabled():
             bz = sp.pos @ g + sp.db0
             if off is not None:
                 bz = bz + off
             if sp.mode:
                 bz = bz + _concomitant(bz, g, sp)
-            rf_s = rf if seq.is_rf[s] else rf.new_zeros(2)
+            bo = seq.bound_only is not None and seq.bound_only[s]
+            if bo and gen:
+                raise NotImplementedError("bound-pool-only RF segments (Sequence.bound_only) with the generalized Bloch pool")
+            rf_s = rf if seq.is_rf[s] and not bo else rf.new_zeros(2)  # bound-only: the water and free pools ignore it
             w_sat = None
             if bound is not None and seq.is_rf[s] and not gen:
                 w_sat = saturation_rate(bound, rf, sp.b1, f_rf[s] - bz - bound.dw)

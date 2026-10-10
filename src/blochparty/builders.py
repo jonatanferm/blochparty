@@ -311,9 +311,6 @@ def se_2d(n: int = 64, fov: float = 0.22, te: float = 20e-3, tr: float = 0.5, **
     return seq
 
 
-_GHOST_OFFSET = 1e6  # [Hz] where tse_2d's bound-pool-only pulses are played: no free water follows
-
-
 def tse_2d(
     n: int = 64,
     fov: float = 0.22,
@@ -365,16 +362,16 @@ def tse_2d(
     Their 180 deg pulses still nutate this slice's water a few kHz outside their band:
     cross-talk, and incidental magnetization transfer through the bound pool.
     ``bound_only_beyond`` [m] (default None): slices at least this far away act on the bound pool
-    only: each pulse becomes one segment of the same RF energy (sum |B1|^2 dt), played 1 MHz off
-    resonance (``Sequence.b0_offset``) where the free water does not follow it, with ``rf_freq``
-    placing it at G (z_j - z) from every spin's bound pool (saturation per pulse is linear in the
-    energy there: W T ~ 4e-4 for a 180 deg 2 ms pulse at 6 kHz). One segment per pulse instead
-    of one per raster step, and no 30 kHz ramp to resolve. Against every pulse exact (white
+    only: each pulse becomes one segment of the same RF energy (sum |B1|^2 dt), flagged
+    ``Sequence.bound_only`` (the water precesses through it as through a free segment), with
+    ``rf_freq`` placing it at G (z_j - z) from every spin's bound pool, whose saturation over the
+    pulse depends on that energy alone (exp(-int W dt)). One segment per pulse instead of one per
+    raster step, and no 30 kHz ramp to resolve. Against every pulse exact (white
     matter with MT, 16 slices 4.7 mm apart, TR 6.5 s, ETL 16, spins every 0.05 mm over +-3.5 mm):
     all RF on 100 us, the neighbours exact, the rest bound-only: 0.71 % of the signal (0.73 % with
     slices within 2.5 spacings on 50 us; ``tests/test_multislice.py``), at 1/13-1/27 of the time;
-    the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a scanner sequence (``write_pulseq``
-    refuses ``b0_offset``).
+    the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a
+    scanner sequence (``write_pulseq`` refuses ``bound_only``).
 
     Returns ``meta["matrix"] = (n, n)`` and ``meta["kspace_index"]`` (grid index of every
     ADC sample; use ``cartesian_kspace`` / ``cartesian_recon``), ``te`` (effective),
@@ -512,18 +509,19 @@ def tse_2d(
                   etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
                   line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
                   system=sysm, **({} if slice_order is None else {"slice_order": slice_order}))
-    if ghosts:  # free water 1 MHz away; the bound pool at G (z_j - z)
+    if ghosts:  # the far slices' pulses: the bound pool alone, at G (z_j - z)
         from .exchange import rf_frequency
 
         f_rf = rf_frequency(seq).clone()
-        offset = torch.zeros_like(seq.dt)
+        bound_only = [False] * len(seq)
         is_rf = torch.tensor(seq.is_rf)
         for a, e, dz in ghosts:
             rf_seg = torch.arange(a, e)[is_rf[a:e]]
-            offset[rf_seg] = _GHOST_OFFSET
             f_rf[a:e] = 0.0
-            f_rf[rf_seg] = seq.grad[rf_seg, 2].detach() * (slice_offset + dz) + _GHOST_OFFSET
-        seq = replace(seq, b0_offset=offset, rf_freq=f_rf)
+            f_rf[rf_seg] = seq.grad[rf_seg, 2].detach() * (slice_offset + dz)
+            for k in rf_seg.tolist():
+                bound_only[k] = True
+        seq = replace(seq, rf_freq=f_rf, bound_only=bound_only)
     return seq
 
 

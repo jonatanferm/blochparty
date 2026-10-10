@@ -282,6 +282,14 @@ def case_rf_freq(leaf):
     return ph, replace(seq, rf_freq=leaf(carrier)), kw
 
 
+def case_bound_only(leaf):
+    # every third RF segment saturates the bound pool alone (the far slices' pulses of tse_2d)
+    ph, seq, kw = _with_bound(leaf, 0, "rate")
+    flags = [bool(rf) and i % 3 == 0 for i, rf in enumerate(seq.is_rf)]
+    assert any(flags)
+    return ph, replace(seq, bound_only=flags), kw
+
+
 def case_many_coils(leaf):
     ph, seq, kw = base(leaf)
     coils = torch.randn(len(ph), 40, dtype=torch.complex128, generator=_g(0))
@@ -392,6 +400,7 @@ CASES = {
     "GIRF / eddy currents (apply_girf)": case_girf,
     "uniform field per segment (Sequence.b0_offset)": case_b0_offset,
     "RF carrier (Sequence.rf_freq)": case_rf_freq,
+    "bound-pool-only RF segments (Sequence.bound_only)": case_bound_only,
     "many coils (40)": case_many_coils,
     "initial magnetization (m_init)": case_m_init,
     "bound pool + scanner field model": case_bound_field_model,

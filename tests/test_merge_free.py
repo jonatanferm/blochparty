@@ -25,7 +25,7 @@ def phantom(n=400, mt=True):
 CASES = {
     "TSE, crushers, gradient spoiling": lambda: bp.tse_2d(16, etl=4, tr=0.5, slice_thickness=5e-3, spoiling="gradient",
                                                           n_dummy=1),
-    "TSE, 5 slices (bound-only far pulses, b0_offset)": lambda: bp.tse_2d(
+    "TSE, 5 slices (bound-only far pulses)": lambda: bp.tse_2d(
         16, etl=4, tr=0.5, slice_thickness=5e-3, spoiling="gradient", n_dummy=1,
         slice_order=[-0.01, 0.0, 0.01, -0.005, 0.005], bound_only_beyond=0.0075),
     "GRE, RF spoiling, ramps": lambda: bp.gre_2d(16, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2),
@@ -55,8 +55,7 @@ def test_same_signal_fewer_segments(name):
         x = metal.simulate_metal(p32, seq.to(torch.float32)).signal.to(a.signal.dtype)
         y = metal.simulate_metal(p32, merged.to(torch.float32)).signal.to(a.signal.dtype)
         assert rel(y, x) < 2e-5  # merged vs unmerged on the GPU: measured 2e-6
-        # float32 against the core: 1 MHz bound-only pulses cost ~7e-4 rad of phase (measured 1.8e-4)
-        assert rel(y, a.signal) < (1e-3 if "slices" in name else 1e-4)
+        assert rel(y, a.signal) < 1e-4
 
 
 def test_gradients_reach_the_original_segments():

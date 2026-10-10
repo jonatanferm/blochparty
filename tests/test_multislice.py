@@ -6,8 +6,8 @@ import pytest
 import torch
 
 import blochparty as bp
-from blochparty.builders import _GHOST_OFFSET
 from blochparty.exchange import BoundPool
+from blochparty.pulseq import write_pulseq
 from blochparty.sequence import System
 
 f64 = torch.float64
@@ -32,22 +32,26 @@ def rel(a, b):
     return float((a - b).abs().max() / b.abs().max())
 
 
-def test_single_slice_untouched_timing_kept_and_offsets_on_far_pulses_only():
+def test_single_slice_untouched_timing_kept_and_bound_only_on_far_pulses():
     one = bp.tse_2d(**KW)
-    assert one.b0_offset is None and one.rf_freq is None and "slice_order" not in one.meta
+    assert one.bound_only is None and one.rf_freq is None and "slice_order" not in one.meta
     multi = bp.tse_2d(**KW, slice_order=ORDER, bound_only_beyond=0.0125)
     assert abs(float(multi.duration - one.duration)) < 1e-12 and multi.n_adc == one.n_adc
-    assert multi.meta["kspace_index"].tolist() == one.meta["kspace_index"].tolist()
-    ghost = multi.b0_offset != 0
-    assert bool(torch.tensor(multi.is_rf)[ghost].all()) and bool((multi.b0_offset[ghost] == _GHOST_OFFSET).all())
+    assert multi.meta["kspace_index"].tolist() == one.meta["kspace_index"].tolist() and multi.b0_offset is None
+    far = torch.tensor(multi.bound_only)
+    assert bool(torch.tensor(multi.is_rf)[far].all())
     # one segment per far pulse: 2 far slices x 5 pulses x 6 TRs (2 dummies, 4 shots)
-    assert int(ghost.sum()) == 2 * 5 * 6
-    z_j = (multi.rf_freq[ghost] - _GHOST_OFFSET) / multi.grad[ghost, 2]  # where each far pulse sits
+    assert int(far.sum()) == 2 * 5 * 6
+    z_j = multi.rf_freq[far] / multi.grad[far, 2]  # where each far pulse sits
     assert torch.allclose(z_j.abs(), torch.full_like(z_j, 0.015))
     with pytest.raises(ValueError, match="exactly one 0.0"):
         bp.tse_2d(**KW, slice_order=[-0.005, 0.005])
     with pytest.raises(ValueError, match="cannot resolve"):  # a 6 kHz ramp on a 100 us raster aliases
         bp.tse_2d(**KW, slice_order=ORDER, system=System(rf_raster=1e-4))
+    with pytest.raises(ValueError, match="bound-pool-only"):
+        write_pulseq(multi, "/dev/null")
+    with pytest.raises(NotImplementedError, match="bound_only"):
+        bp.simulate_chunked(wm_column(5), multi)
 
 
 @pytest.mark.slow
@@ -74,8 +78,9 @@ def test_gpu_equals_core():
     metal = pytest.importorskip("blochparty.metal")
     if not metal.available():
         pytest.skip("no Apple GPU")
-    ph = wm_column(11)
-    seq = bp.tse_2d(**KW, slice_order=ORDER, bound_only_beyond=0.0075, system=System(rf_raster=1e-5))
-    ref = bp.simulate(ph, seq).signal
-    out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32)).signal.to(ref.dtype)
-    assert rel(out, ref) < 1e-3  # float32 with 1 MHz frame offsets: measured ~7e-4
+    for ph in (wm_column(11), wm_column(11, mt=False)):  # without a bound pool the far pulses are free segments
+        seq = bp.tse_2d(**KW, slice_order=ORDER, bound_only_beyond=0.0075, system=System(rf_raster=1e-5))
+        ref = bp.simulate(ph, seq)
+        out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32))
+        assert rel(out.signal.to(ref.signal.dtype), ref.signal) < 1e-4  # no frame offset: float32's level
+        assert rel(out.m.double(), ref.m) < 1e-4

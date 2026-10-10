@@ -49,6 +49,10 @@ class Sequence:
     # resonant with spins at offset f), used for the bound-pool saturation (``exchange.py``);
     # None: derived from the phase of consecutive RF segments (``exchange.rf_frequency``)
     rf_freq: Tensor | None = None
+    # RF segments only the bound pool feels (None: none): the water precesses and relaxes as in a free
+    # segment, the bound pool is saturated by the segment's RF at ``rf_freq`` (a multi-slice sequence's
+    # far slices, ``builders.tse_2d(bound_only_beyond=...)``); not a scanner sequence
+    bound_only: list[bool] | None = None
 
     def __len__(self) -> int:
         return self.dt.shape[0]
@@ -87,6 +91,8 @@ class Sequence:
             is_rf=[r for r in self.is_rf for _ in range(k if r else 1)],
             adc=tail(self.adc),
             spoil=tail(self.spoil),
+            bound_only=None if self.bound_only is None else
+            [b for b, r in zip(self.bound_only, self.is_rf) for _ in range(k if r else 1)],
         )
 
     def merge_free(self) -> Sequence:
@@ -124,7 +130,8 @@ class Sequence:
         rf_freq = None if self.rf_freq is None else self.rf_freq[take].index_put((rows,), torch.zeros_like(rows, dtype=self.rf_freq.dtype))
         meta = {k: v for k, v in self.meta.items() if k not in ("blocks", "block_segments", "segment_block")}
         return Sequence(dt, self.rf[take], grad, self.adc_phase[take], is_rf[first].tolist(), adc[first].tolist(),
-                        spoil[last].tolist(), meta | {"merged_free": True}, b0, rf_freq)
+                        spoil[last].tolist(), meta | {"merged_free": True}, b0, rf_freq,
+                        None if self.bound_only is None else np.asarray(self.bound_only, dtype=bool)[first].tolist())
 
     def to(self, dtype=None, device=None) -> Sequence:
         conv = lambda t: t.to(dtype=dtype, device=device)

@@ -253,7 +253,8 @@ inline void step_mt(constant float* q, int f, float bz, float f_rf, thread float
         const float e2 = expm1_(-0.5f * dt * p.r2);
         two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2);
         zapply_c(z, mz, mb, lz, lb);
-        rf_rotate(q, bz, mx, my, mz, lx, ly, lz, p);
+        if (f & 16) rotate_inc(0.0f, 0.0f, -TWO_PI * dt * bz, mx, my, mz, lx, ly, lz);  // bound-only RF: water precesses
+        else rf_rotate(q, bz, mx, my, mz, lx, ly, lz, p);
         two_sum(mx, lx, mx * e2), two_sum(my, ly, my * e2);
         zapply_c(z, mz, mb, lz, lb);
     } else {
@@ -1747,7 +1748,8 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
     """simulate_metal with gradients: the inputs as tensors of an autograd Function (_MetalSimulate)."""
     for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
                           ("free pools", bool(getattr(phantom, "pools", None))),
-                          ("the generalized Bloch bound pool", phantom.bound is not None and phantom.bound.model == "generalized")):
+                          ("the generalized Bloch bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
+                          ("bound-pool-only RF segments", seq.bound_only is not None and any(seq.bound_only))):
         if present:
             raise NotImplementedError(f"gradients through simulate_metal with {what} are not implemented; "
                                       "use blochparty.simulate, or run under torch.no_grad()")
@@ -1916,7 +1918,14 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
                         seq.grad[:, 1].double(), seq.grad[:, 2].double(), psi, b0.double()], 1).to(dev, f32).contiguous()
     adc = torch.tensor(seq.adc, dtype=torch.int32)
     flags = (torch.tensor(seq.is_rf, dtype=torch.int32) | (adc << 1) |
-             (torch.tensor(seq.spoil, dtype=torch.int32) << 2)).to(dev)
+             (torch.tensor(seq.spoil, dtype=torch.int32) << 2))
+    bound_only = getattr(seq, "bound_only", None)
+    if bound_only is not None and any(bound_only):  # RF only the bound pool feels (Sequence.bound_only)
+        if pools or (phantom.bound is not None and phantom.bound.model == "generalized"):
+            raise NotImplementedError("bound-pool-only RF segments with free pools or the generalized bound pool")
+        bo = torch.tensor(bound_only, dtype=torch.int32)
+        flags = flags | (bo << 4) if phantom.bound is not None else flags & ~bo  # no bound pool: free segments
+    flags = flags.to(dev)
     rows = (torch.cumsum(adc, 0) - 1).clamp_min(0).to(torch.int32).to(dev)
     n_adc = int(adc.sum())
     # the state as float32 hi + lo (L), split exactly from float64: the kernels carry lo (two_sum) across dispatches
