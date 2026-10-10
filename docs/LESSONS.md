@@ -780,6 +780,13 @@ says where it came from so it can be re-checked.
   map, K = 10 worse than one block, K = 2 still 2e-4 to 1.6e-3; CSF 1e-4. Relaxation during the
   rotation has to be expanded in the interaction picture (Dyson/Magnus terms per table node), not
   split off.
+- **Reuse what repeats per spin before tabulating what varies across spins** (2026-10-10): tables of
+  pulse propagators over (Δf, B1) need a perturbative treatment of relaxation and exchange during
+  the pulse; but a static spin sees each pulse of a TSE 150-450 times with the same map, and a
+  phase-shifted copy (CPMG, RF spoiling) is that map conjugated by Rz exactly. Stepping 6 distinct
+  pulses x 5 columns once per spin instead of 459 pulses: RF work /15, 2.3x on the multi-slice MT
+  slice, 1e-7 from stepping. Group pulses by tolerance and a least-squares phase (sum z conj(z0)),
+  not by rounding values to a hash: float noise straddles rounding boundaries.
 - **A GPU shared with another process gives 2x timing swings** (here a desktop app kept the GPU at
   up to 93 %): the same 8-coil adjoint ran in 1.19 s and 2.60 s back to back. Alternate the old and
   new code in one process (load the old module from a saved copy under another name) and compare

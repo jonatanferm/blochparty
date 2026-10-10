@@ -21,12 +21,19 @@ Implemented and measured on the realism TSE (one slice, 128², 16 coils, laptop 
 | 2.6 fewer spins | `to_phantom(sampling="systematic")` | systematic = categorical, lattice = random at equal count: no gain |
 | 2.7 overlap phantom build and GPU | `simulate_heads.py` | fast mode 2.3 s per slice (legacy ~128 s) |
 | 2.1 NUFFT readouts | `simulate_metal(readouts="nufft")` | 2.5x single slice, 1.6x with 16 slices' pulses and MT; 3e-6 from per-sample |
+| 2.3, exact variant: reused pulse maps | `simulate_metal(pulses="reuse")` | on top of 2.1: 1.65x single slice, 2.3x with 16 slices and MT; 1e-7 from stepping |
 
 Along the way the far slices' pulses became `Sequence.bound_only` segments (a frame offset broke
-float32: LESSONS). After 2.1 the multi-slice MT slice is RF-bound (~4.5 of 6.3 s), so 2.3 is next;
-its cheap form (a pulse as a few blocks: exact rotation, relaxation and exchange around it) is
-0.5-1.3 % off per pulse for WM and muscle (LESSONS), so it needs the interaction-picture expansion
-per table node. Not started: 2.2 periodicity, 2.5 reversible adjoint (neither speeds the realism TSE).
+float32: LESSONS). After 2.1 the multi-slice MT slice was RF-bound (~4.5 of 6.3 s). Tabulating
+pulses over (Δf, B1) needs the interaction-picture expansion per table node: its cheap form (a
+pulse as a few blocks, exact rotation with relaxation and exchange around it) is 0.5-1.3 % off per
+pulse for WM and muscle (LESSONS). Instead, per spin: a static spin's map of a pulse is the same at
+every occurrence, and a phase-shifted copy is that map turned about z, so each distinct pulse is
+stepped once per spin (12 or 20 floats) and applied at every occurrence. Exact, and general (TSE
+trains, CPMG, RF spoiling, bSSFP alternation); not for pulses that change every time (MRF flip
+trains: tables remain the route there). Realism TSE end to end, full quality, laptop: 16 slices +
+MT 20.8 s → 5.6 s per slice (3.7x from 2.1 and the reuse together).
+Not started: 2.2 periodicity, 2.5 reversible adjoint (neither speeds the realism TSE).
 
 ## 1. Where the time goes today
 
