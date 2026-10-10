@@ -94,9 +94,13 @@ def contrast():
             relative_difference={k:a[k]/b[k]-1 for k in a},roi_voxels=[int(m.sum()) for m in masks])
     # Independent human relaxation measurements, without pretending these are
     # observed clinical image ratios or matched 1.5 T measurements.
+    # The abstract's "T2 ... gray matter and white matter were 80 and 110 msec" is in the
+    # order opposite to every other 3 T brain study (GM T2 > WM T2; Stanisz 2005: 99 / 69 ms),
+    # so the T2 values are assigned by physics; the full text could not be checked.
     human = dict(DEFAULT_TISSUES[3.])
-    source = "Wansapura et al. 1999, abstract, in-vivo 3 T mean; PMID:10232510"
-    for name,t1,t2 in (("wm",.832,.110),("gm",1.331,.080)):
+    source = ("Wansapura et al. 1999, abstract, in-vivo 3 T mean, T2 GM/WM order swapped "
+              "from the abstract by physics (full text not read); PMID:10232510")
+    for name,t1,t2 in (("wm",.832,.080),("gm",1.331,.110)):
         human[name] = replace(human[name],t1=Distribution(t1,None,source),t2=Distribution(t2,None,source))
     for protocol,signal in (("T1",tissue_signals({3.:human},3.,.018,[.010])[:,0]),
                             ("T2",tissue_signals({3.:human},3.,3.3,[.035,.120])[:,1]),

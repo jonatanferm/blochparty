@@ -69,8 +69,16 @@ No tolerance was tuned to hide those differences.
 There is no matched clinical image-ratio validation in M2. As a sensitivity check,
 the script propagates the human 3 T WM/GM mean T1/T2 values from
 [Wansapura et al. 1999](https://pubmed.ncbi.nlm.nih.gov/10232510/) through the same
-protocols, retaining the stated PD/T2* priors. Predicted GM/WM ratios are 0.709695
-(T1), 0.688959 (T2), 0.920534 (PD). These are **predictions from measured relaxation
+protocols, retaining the stated PD/T2* priors. Predicted GM/WM ratios are 0.745675
+(T1), 1.561440 (T2), 1.168634 (PD). The abstract gives T2 "for gray matter and white
+matter" as 80 and 110 ms, the reverse of every other 3 T brain measurement (GM T2 > WM T2;
+Stanisz 2005: 99 / 69 ms) and of any clinical T2-weighted image; the script assigns GM
+110 ms, WM 80 ms by that physics argument (the Wiley full text could not be read).
+Before 2026-10-10 the abstract order was used and gave 0.688959 (T2, cortex darker than
+white matter) and 0.920534 (PD); the earlier T1 value 0.709695 predates the 2026-10-08
+3 T T2* update. T2 and PD agree with the closed-form spin-echo ratio to 6 digits, T1 with
+the Ernst/T2* closed form (0.745521) to 0.02 % (finite T2′ sampling).
+These are **predictions from measured relaxation
 values**, not observed in-vivo ratios; field strength and population differ from
 the older BrainWeb model. They cannot establish 1.5 T clinical accuracy. Matching
 real acquisitions and calibrating the tissue priors remain separate validation work.
