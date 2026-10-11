@@ -181,3 +181,25 @@ def test_shell_resize_keeps_the_skull_thickness():
     assert line(out, "wm") == pytest.approx(line(plain, "wm"), abs=5e-4)  # scaled like plain resizing
     assert line(out, "skull") == pytest.approx(line(an, "skull"), abs=5e-4)  # kept
     assert line(plain, "skull") == pytest.approx(.8 * line(an, "skull"), abs=6e-4)  # scaled
+
+
+@pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
+def test_ventricles_grow_with_age():
+    """ventricle_age: subject 04's lateral ventricles (MNI region, 13 mL at 1 mm) scale by Yamada
+    2023's age ratio (1 at 30, 1.93 at 70); the head's CSF grows and its brain shrinks by about the
+    same volume; 25 years changes nothing."""
+    from blochparty.anatomy import load_brainweb, ventricle_factor, ventricle_mask
+
+    an = load_brainweb(4, DATA, voxel=(2e-3,) * 3)
+    assert 4e-6 < float((an.fractions["csf"] * torch.from_numpy(ventricle_mask(an))).sum()) * 8e-9 < 20e-6
+    assert ventricle_factor(30.) == 1. and ventricle_factor(50.) == pytest.approx(19.4 / 17.3)
+    assert ventricle_factor(70.) == ventricle_factor(85.) == pytest.approx(33.4 / 17.3)
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.)
+    young, old = sample_head(1, ventricle_age=25., **kw), sample_head(1, ventricle_age=70., **kw)
+    plain = sample_head(1, **kw)
+    assert young.meta["ventricles"]["factor"] == 1. and torch.equal(young.anatomy.fractions["csf"], plain.anatomy.fractions["csf"])
+    csf = lambda h: float(h.anatomy.fractions["csf"].sum()) * 8e-9
+    brain = lambda h: float((h.anatomy.fractions["gm"] + h.anatomy.fractions["wm"]).sum()) * 8e-9
+    gain = csf(old) - csf(plain)
+    assert 0.6 * 0.93 * old.meta["ventricles"]["source_volume"] < gain < 1.4 * 0.93 * old.meta["ventricles"]["source_volume"]
+    assert brain(plain) - brain(old) == pytest.approx(gain, rel=.5)

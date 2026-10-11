@@ -497,3 +497,20 @@ def test_label_deep_grey_moves_grey_matter_inside_the_nuclei_only():
         assert all(float(fr[k][at(x, y, z)]) == 0 for k in DEEP_GREY)
     with pytest.raises(ValueError):
         bp.label_deep_grey(out)
+
+
+def test_ventricle_displacement_grows_each_ventricle_and_keeps_the_septum():
+    """Two CSF balls (radius 6 mm) either side of x = 0, 2 mm of white matter between them, on a 0.5 mm
+    grid: a 2 mm wall offset grows each ball's CSF to about (8/6)^3 of its volume (the pull-back
+    copies the interior outward; trilinear edges), leaves the septum white matter and loses tissue
+    where the walls moved."""
+    from blochparty.anatomy import ventricle_displacement
+    h, n = .5e-3, 81
+    g = torch.arange(n, dtype=torch.float64) * h - 20e-3
+    z, y, x = torch.meshgrid(g, g, g, indexing="ij")
+    csf = ((torch.sqrt(z ** 2 + y ** 2 + (x - 7e-3) ** 2) < 6e-3) | (torch.sqrt(z ** 2 + y ** 2 + (x + 7e-3) ** 2) < 6e-3)).double()
+    an = Anatomy({"csf": csf, "wm": 1 - csf}, (h,) * 3, (-20e-3,) * 3)
+    out = bp.deform(an, ventricle_displacement(an, csf.numpy() > .5, 2e-3))
+    assert float(out.fractions["csf"].sum()) == pytest.approx(float(csf.sum()) * (8 / 6) ** 3, rel=.12)
+    assert float(out.fractions["wm"][40, 40, 40]) == pytest.approx(1., abs=1e-6)  # the septum at x = 0
+    assert float(out.fractions["wm"].sum()) < float(an.fractions["wm"].sum())

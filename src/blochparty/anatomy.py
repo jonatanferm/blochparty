@@ -1193,6 +1193,102 @@ def label_deep_grey(anatomy: Anatomy) -> Anatomy:
     return replace(anatomy, fractions=out)
 
 
+# Lateral-ventricle volume [mL] by age: Yamada et al. 2023 (Eur Radiol 33:7099, doi:10.1007/s00330-023-09632-x,
+# Table 3; 133 healthy Japanese adults, AI segmentation of 3D T1): < 40 y 17.3 +- 7.2 (n 47), 40-59 y
+# 19.4 +- 7.5 (n 49), >= 60 y 33.4 +- 13.4 (n 37); placed at 30, 50 and 70 y, linear between, flat beyond.
+VENTRICLE_AGE = ((30., 17.3, 7.2), (50., 19.4, 7.5), (70., 33.4, 13.4))
+
+
+def ventricle_factor(age: float) -> float:
+    """How much larger the lateral ventricles are at ``age`` [years] than at ``BRAINWEB_AGE``: the
+    ratio of ``VENTRICLE_AGE``'s means (1 at 30, 1.12 at 50, 1.93 at 70 and beyond). BrainWeb's
+    young adults carry the between-subject spread."""
+    a, m, _ = (np.array(c) for c in zip(*VENTRICLE_AGE))
+    return float(np.interp(age, a, m) / np.interp(BRAINWEB_AGE, a, m))
+
+
+# Lateral ventricles in BrainWeb's MNI space: CSF inside |x| 1.5-32, y -48..38, z -2..36 mm, less the
+# quadrigeminal/ambient cisterns (y < -22, |x| < 9) and the insular cisterns (z < 8, |x| > 24), in
+# components that reach 12 mm inside the brain's hull (checked by eye on subjects 4, 38, 44, 54;
+# 13-29 mL each at MNI size, ~9-19 mL resized: Yamada 2023 young adults 17.3 +- 7.2 mL).
+def ventricle_mask(anatomy: Anatomy) -> np.ndarray:
+    """The lateral ventricles (bool, z/y/x) of a BrainWeb model in MNI space (before ``deform``)."""
+    from scipy import ndimage
+
+    fr = anatomy.fractions
+    x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1]))
+    ax, Y, Z = np.abs(x)[None, None, :], y[None, :, None], z[:, None, None]
+    region = (ax >= 1.5) & (ax <= 32) & (Y >= -48) & (Y <= 38) & (Z >= -2) & (Z <= 36)
+    region &= ~((Y < -22) & (ax < 9)) & ~((Z < 8) & (ax > 24))
+    csf = (fr["csf"].numpy() > .5) & region
+    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *DEEP_GREY)).numpy() > .5
+    hull = ndimage.binary_fill_holes(ndimage.binary_closing(brain, iterations=round(4e-3 / anatomy.voxel[1])))
+    deep = ndimage.distance_transform_edt(hull, sampling=anatomy.voxel) > 12e-3
+    lab, _ = ndimage.label(csf)
+    keep = np.unique(lab[csf & deep])
+    keep = keep[keep > 0]
+    sizes = ndimage.sum(np.ones_like(lab), lab, keep) * np.prod(anatomy.voxel)
+    return np.isin(lab, keep[sizes > 0.2e-6])
+
+
+def ventricle_displacement(anatomy: Anatomy, mask: np.ndarray, offset: float, decay: float = 10e-3) -> Tensor:
+    """(3, z, y, x) [m] pull-back displacement (new(x) = old(x + displacement(x))) that moves the walls
+    of each lateral ventricle (``mask`` split at x = 0) out by ``offset`` [m]: points within
+    ``offset`` of a ventricle take its nearest interior voxel (CSF), points beyond take what lay
+    nearer it by offset exp(-(d - offset) / ``decay``); the inside is unchanged. The tissue around
+    is compressed, not pushed away (the pull-back keeps no mass): enlargement as periventricular
+    loss. The two sides' maps add, so the septum between them stays."""
+    from scipy import ndimage
+
+    h = np.array(anatomy.voxel).reshape(3, 1, 1, 1)
+    grid = np.indices(anatomy.shape) * h
+    x = anatomy.origin[0] + np.arange(anatomy.shape[2]) * anatomy.voxel[2]
+    out = np.zeros((3, *anatomy.shape))
+    for side in (x < 0, x >= 0):
+        m = mask & side[None, None, :]
+        if not m.any():
+            continue
+        core = ndimage.binary_erosion(m)
+        core = core if core.any() else m
+        d = ndimage.distance_transform_edt(~m, sampling=anatomy.voxel)
+        _, idx = ndimage.distance_transform_edt(~core, sampling=anatomy.voxel, return_indices=True)
+        w = np.where(d <= 0, 0., np.where(d <= offset, 1., offset / np.maximum(d, 1e-9) * np.exp(-(d - offset) / decay)))
+        w[d > offset + 5 * decay] = 0.
+        out += (idx * h - grid) * w
+    return torch.from_numpy(np.stack([ndimage.gaussian_filter(c, 1.) for c in out]))
+
+
+def ventricle_offset(anatomy: Anatomy, factor: float, mask: np.ndarray | None = None) -> tuple[float, float]:
+    """The ``ventricle_displacement`` wall offset [m] that scales the lateral ventricles' CSF by
+    ``factor`` (bisection, to 2 %), and their volume before [m^3]."""
+    mask = ventricle_mask(anatomy) if mask is None else mask
+    csf = anatomy.fractions["csf"] * torch.from_numpy(mask).to(anatomy.fractions["csf"].dtype)
+    v0 = float(csf.sum())
+    if factor <= 1:
+        return 0., v0 * float(np.prod(anatomy.voxel))
+    ref = anatomy.fractions["csf"]
+    region = torch.from_numpy(ndimage_dilate(mask, 20e-3, anatomy.voxel)).to(ref.dtype)
+    vol = lambda a: float((deform(Anatomy({"c": ref * region}, anatomy.voxel, anatomy.origin),
+                                  ventricle_displacement(anatomy, mask, a).to(ref.dtype)).fractions["c"]).sum())
+    base = vol(0.)
+    target = base + (factor - 1) * v0
+    lo, hi = 0., 1e-3
+    while vol(hi) < target and hi < 16e-3:
+        lo, hi = hi, 2 * hi
+    for _ in range(12):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if vol(mid) < target else (lo, mid)
+        if hi - lo < .02 * hi:
+            break
+    return (lo + hi) / 2, v0 * float(np.prod(anatomy.voxel))
+
+
+def ndimage_dilate(mask: np.ndarray, radius: float, voxel) -> np.ndarray:
+    from scipy import ndimage
+
+    return ndimage.distance_transform_edt(~mask, sampling=voxel) <= radius
+
+
 # Sulcal width grows 0.71 mm per decade (0.45-0.94 by sulcus) in 90 healthy adults aged 20-82
 # (Kochunov et al. 2005, Hum Brain Mapp 26:210, doi:10.1002/hbm.20198, Table III); BrainWeb's models
 # are young adults, taken as 30.
@@ -1374,7 +1470,8 @@ DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation
 def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
                 magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
-                age: float | tuple[float, float] | None = None, deep_grey: bool = False) -> DigitalPhantom:
+                age: float | tuple[float, float] | None = None, deep_grey: bool = False,
+                ventricle_age: float | tuple[float, float] | None = None) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1395,7 +1492,9 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     ``BRAINWEB_AGE`` (``open_sulci``); None leaves them as the model has them. ``deep_grey``: the
     caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
-    the other classes' draws do not change."""
+    the other classes' draws do not change. ``ventricle_age`` [years] (a number, or (low, high) to
+    draw uniformly): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
+    ``ventricle_displacement``, in MNI space before the deformation."""
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
     if size not in ("brainweb", "anthropometric", "anthropometric_shell"):
@@ -1413,6 +1512,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
     if deep_grey:
         anatomy = label_deep_grey(anatomy)  # in MNI space, before the deformation
+    vent_draw = None
+    if ventricle_age is not None:
+        vrng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(9)[8])
+        years = float(ventricle_age) if np.isscalar(ventricle_age) else float(vrng.uniform(*ventricle_age))
+        vent_draw = {"years": years, "factor": ventricle_factor(years)}
     displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
                                                magnitude=magnitude, spacing=spacing)
     size_draw, pose = None, None
@@ -1447,6 +1551,10 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 for _ in range(6):
                     u = v - _sample_field(shell, c + u, anatomy.voxel).to(dt)
             return c + u - grid
+    if vent_draw is not None and vent_draw["factor"] > 1:  # MNI space, before the deformation and resizing
+        mask = ventricle_mask(anatomy)
+        vent_draw["offset"], vent_draw["source_volume"] = ventricle_offset(anatomy, vent_draw["factor"], mask)
+        anatomy = deform(anatomy, ventricle_displacement(anatomy, mask, vent_draw["offset"]).to(displacement.dtype))
     scale = 1.
     while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
         scale /= 2
@@ -1470,6 +1578,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         meta["pose"] = pose
     if deep_grey:
         meta["deep_grey"] = list(DEEP_GREY)
+    if vent_draw is not None:
+        meta["ventricles"] = vent_draw
     anatomy = deform(anatomy, total(displacement * scale))
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)
