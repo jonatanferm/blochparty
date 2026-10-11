@@ -1724,4 +1724,15 @@ The parts of M5 that need no outside access, done while the user was away.
   ventricle bodies (1-1.5 slices too low). The 15 mm had been fitted while IXI255's landmark sat 20+ mm
   high; with the prior the area profile prefers 12 mm (rms 0.017, 10 mm 0.029, 15 mm 0.023), but the
   anatomy the eye sees decides: back to 10 mm. IXI tally: 50/60.
+- **Blinded, six heads at 10 mm with the landmark prior**: 10/12; the giveaways were slices 6-7 with dense fine
+  lines and a hazy midline (three tiles) and one low slice 1 (IXI609). IXI tally: 60/72.
+- **Partial volume and grey T2, on the same six heads and seeds** (brain-interior q50 / q70 / q85 over q15;
+  real slices 1-3: 1.31 / 1.74 / 2.58, slices 5-7: 1.31 / 1.79 / 2.67): EM posteriors 1.50 / 2.02 / 2.95 and
+  1.64 / 2.30 / 3.80; partial-volume unmixing (local references) 1.42 / 1.93 / 2.51 and 1.61 / 2.22 / 3.18;
+  plus GM / WM T2 83 / 72 ms 1.37 / 1.84 / 2.49 and 1.55 / 2.12 / 3.25. Both adopted (a7eb14d): unmixing is
+  prepare_ixi's default; tissuedb leaves flagged rows out of the pool (only Wansapura 1999's abstract, whose
+  GM/WM labels were swapped by assumption), so GM T2 at 3 T is Lu 2005's 83 ms and WM 72 ms (this also
+  changes the BrainWeb realism runs' table). The top slices stay ~18 % too bright at the median: IXI's
+  cortex grows with height faster than the clinical scans' (open: population age, head shape, stack).
+- 24 heads re-prepared with unmixing (v5) for r20, which starts on the mini after 23:00.
 
