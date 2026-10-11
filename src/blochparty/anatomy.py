@@ -1573,12 +1573,14 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         mean, sd = sulcal_width(years)
         width = max(mean + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()), 0.)
         native = load_brainweb(subject, root, dtype=dtype)
-        before = float(native.fractions["csf"].sum())
-        native = open_sulci(native, width)
-        age_draw = {"years": years, "sulcal_width": width,
-                    "sulcal_csf": (float(native.fractions["csf"].sum()) - before) * float(np.prod(native.voxel))}
-        anatomy = native if _triple(voxel, "voxel", True) == native.voxel else native.resample(voxel)
+        native = Anatomy({k: native.fractions[k] for k in ("gm", "wm", "csf")}, native.voxel, native.origin)
+        move = native.fractions["gm"] - open_sulci(native, width).fractions["gm"]  # grey matter -> CSF
+        age_draw = {"years": years, "sulcal_width": width, "sulcal_csf": float(move.sum()) * float(np.prod(native.voxel))}
+        anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
+        move = torch.minimum(_resample(move.double(), native.voxel, anatomy.voxel).to(dtype), anatomy.fractions["gm"]).clamp(min=0)
         del native
+        anatomy = replace(anatomy, fractions=anatomy.fractions | {"gm": anatomy.fractions["gm"] - move,
+                                                                  "csf": anatomy.fractions["csf"] + move})
     else:
         anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
     if deep_grey:

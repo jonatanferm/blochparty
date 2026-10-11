@@ -705,7 +705,7 @@ says where it came from so it can be re-checked.
   than 90 deg apart" a 3 mm deep, 6 mm wide groove in the white surface opened too (and BrainWeb got
   173 instead of 137 mL at 1.3 mm). Widths: Jin et al. 2018 (PATH, n ~800) 1.27 mm at 47 y, 1.49 at
   67; Kochunov 2005 with the same definition has a six times steeper slope (0.71 mm per decade); the
-  added CSF brings BrainWeb's 254 mL to 310 mL at 25 y and 360 mL at 75 y (Yamada 2023: 287 / 389).
+  added CSF brings BrainWeb 04's 254 mL to 322 mL at 25 y and 381 mL at 75 y (Yamada 2023: 287 / 389).
 - **Sub-voxel spins leave a Monte-Carlo grain a CNN reads** (2026-10-11): random in-plane positions
   (and random subcells per tissue) are a point sampling of the anatomy; through the 1.72 mm PSF they
   add pixel-scale texture that falls as 1 / sqrt(spins): flat-brain Immerkaer sigma 0.026 at 5.4 M
