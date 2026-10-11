@@ -1306,6 +1306,31 @@ def sulcal_width(age: float) -> tuple[float, float]:
     return w0 + t * (w1 - w0), max(s0 + t * (s1 - s0), 0.)
 
 
+def sulcal_widening(age: float) -> float:
+    """Sulcal widening [m] beyond ``BRAINWEB_AGE`` at ``age`` [years]: the slope of ``SULCAL_WIDTH_AGE``
+    (0.011 mm per year), none below."""
+    (a0, w0, _), (a1, w1, _) = SULCAL_WIDTH_AGE
+    return max(float(age) - BRAINWEB_AGE, 0.) * (w1 - w0) / (a1 - a0)
+
+
+def gather_cortical_csf(anatomy: Anatomy) -> Anatomy:
+    """Grey matter and CSF sharing a voxel outside the deep grey regions (``DEEP_GREY`` scaled by 1.3)
+    go to the larger share. BrainWeb's fuzzy models spread sulcal CSF thinly through the cortex (3.9 %
+    of subject 04's grey-dominant voxels, 38 mL at 0.5 mm), which lifts T2-weighted grey matter by
+    ~9 %; real cortex keeps its CSF in sulci and the subarachnoid space. Other classes are untouched;
+    needs MNI coordinates (a BrainWeb model before ``deform``)."""
+    fr = anatomy.fractions
+    gm, csf = fr["gm"], fr["csf"]
+    deep = np.zeros(tuple(gm.shape), bool)
+    for r2 in _deep_grey_r2(anatomy.origin, tuple(gm.shape), anatomy.voxel):
+        deep |= r2 < 1.3 ** 2
+    mix = (gm > 0) & (csf > 0) & ~torch.from_numpy(deep)
+    to_csf = mix & (csf >= gm)
+    both, zero = gm + csf, torch.zeros_like(gm)
+    return replace(anatomy, fractions=fr | {"gm": torch.where(mix, torch.where(to_csf, zero, both), gm),
+                                            "csf": torch.where(mix, torch.where(to_csf, both, zero), csf)})
+
+
 def _deep_grey_r2(origin, shape, voxel):
     """Each ``DEEP_GREY`` ellipsoid's normalised squared radius on a grid (origin x, y, z; shape and voxel z, y, x; MNI)."""
     x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(origin, shape[::-1], voxel[::-1]))
@@ -1315,8 +1340,10 @@ def _deep_grey_r2(origin, shape, voxel):
                    + (((np.abs(x) - cx) / ax) ** 2)[None, None, :])
 
 
-def open_sulci(anatomy: Anatomy, width: float, separation: float = 3e-3, opposed: float = 0.5) -> Anatomy:
-    """Open closed sulci to ``width`` [m] of CSF. BrainWeb's fuzzy models (1.5 T scans at 1 mm) give
+def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float = 3e-3, opposed: float = 0.5, *,
+               volume: float | None = None, widen: float = 0.) -> Anatomy:
+    """Open closed sulci to ``width`` [m] of CSF, or to the width that adds ``volume`` [m^3] of CSF
+    (solved by bisection), plus ``widen`` [m]. BrainWeb's fuzzy models (1.5 T scans at 1 mm) give
     narrow sulci to grey matter: two cortical banks touch with no CSF between them, and T2-weighted
     slices show speckle where real ones show sulcal lines. A closed sulcus is grey matter reached from
     two white-matter banks: the lambda-medial axis of the region outside white matter (Chazal and
@@ -1326,14 +1353,15 @@ def open_sulci(anatomy: Anatomy, width: float, separation: float = 3e-3, opposed
     that make no axis (ridges of the distance to white matter do: an earlier version opened those and
     made specks). The cerebellum's fissures get the same width (no measurement there). Kept: grey
     matter > 0.2, outside the deep grey regions (``DEEP_GREY`` scaled by 1.3), in sheets touching the
-    CSF around the brain. A sheet voxel's distance to the midplane is half the difference of its
-    distances to the two banks, its neighbours' adds their distance to the sheet; CSF fills width / 2
-    either side, voxel-weighted, never below what is there, taken from grey matter. Needs MNI
-    coordinates (a BrainWeb model before ``deform``) and a fine grid: ``sample_head`` opens at the
-    native 0.5 mm and then resamples."""
+    CSF around the brain. Each voxel near a sheet takes its distance to the midplane as half the
+    difference of its distances to the two banks; CSF fills width / 2 either side, voxel-weighted,
+    never below what is there, taken from grey matter. Needs MNI coordinates (a BrainWeb model before
+    ``deform``) and a fine grid: ``sample_head`` opens at the native 0.5 mm and then resamples."""
     from scipy import ndimage
 
-    if width <= 0:
+    if (width is None) == (volume is None):
+        raise ValueError("give width or volume")
+    if (width if width is not None else volume) <= 0 and widen <= 0:
         return anatomy
     fr = anatomy.fractions
     gm_all, wm_all, csf_all = (fr[k].numpy() for k in ("gm", "wm", "csf"))
@@ -1386,8 +1414,9 @@ def open_sulci(anatomy: Anatomy, width: float, separation: float = 3e-3, opposed
     # each voxel near a sheet: half the difference of its distances to the two banks, its own (its
     # nearest white point) and the other (whichever of the nearest sheet voxel's two banks is farther)
     h = float(np.mean(vox))
+    reach = (width if width is not None else 4e-3) + widen
     dist, I = ndimage.distance_transform_edt(~sheet, sampling=vox, return_indices=True)
-    near = dist <= width / 2 + h
+    near = dist <= reach / 2 + h
     del dist
     p = np.stack(np.nonzero(near))
     s_ = I[:, near]
@@ -1399,9 +1428,20 @@ def open_sulci(anatomy: Anatomy, width: float, separation: float = 3e-3, opposed
     pos = p * vox[:, None]
     r = np.abs(np.linalg.norm(pos - other, axis=0) - np.linalg.norm(pos - own, axis=0)) / 2
     del F, part, best
-    target = np.zeros(gm.shape)
-    target[near] = np.clip((width / 2 - r) / h + .5, 0, 1)
-    move = np.clip(np.minimum(target - csf, gm), 0, None) * ~deep
+    gm_n, csf_n, keep = gm[near], csf[near], ~deep[near]
+    cell = float(np.prod(vox))
+
+    def fill(w):
+        return np.clip(np.minimum(np.clip((w / 2 - r) / h + .5, 0, 1) - csf_n, gm_n), 0, None) * keep
+
+    if width is None:  # the width whose fill adds `volume`
+        lo, hi = 0., 4e-3
+        for _ in range(40):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if fill(mid).sum() * cell < volume else (lo, mid)
+        width = (lo + hi) / 2
+    move = np.zeros(gm.shape)
+    move[near] = fill(width + widen)
     full = torch.zeros_like(fr["gm"])
     full[box] = torch.from_numpy(move).to(full.dtype)
     return replace(anatomy, fractions=fr | {"gm": fr["gm"] - full, "csf": fr["csf"] + full})
@@ -1523,7 +1563,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
-                pitch: tuple[float, float] | None = None) -> DigitalPhantom:
+                pitch: tuple[float, float] | None = None, sulci: str = "conserved") -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1541,8 +1581,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     [deg]: the head turned about the scanner's z axis through its centre by N(0, yaw_sd^2) (0: as
     the model lies; BrainWeb is aligned to MNI space, scanned heads are not). ``age`` [years] (a
     number, or (low, high) to draw uniformly): the closed sulci opened (``open_sulci``, on the native
-    0.5 mm grid before resampling) to a width drawn from ``sulcal_width`` (mean and between-subject SD
-    for that age, its own stream); None leaves them as the model has them. ``deep_grey``: the
+    0.5 mm grid before resampling); None leaves them as the model has them. ``sulci``: "conserved"
+    gathers the cortex's diffuse CSF (``gather_cortical_csf``) into the sheets at the width that keeps
+    the CSF volume, widened by ``sulcal_widening`` for the age; "measured" opens them to a width drawn
+    from ``sulcal_width`` (Jin 2018's major sulci; their own stream), which on fastMRI 3 T T2w adds
+    more bright CSF than the real images show. ``deep_grey``: the
     caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
     the other classes' draws do not change. ``ventricle_age`` [years] (a number, (low, high) to
@@ -1559,6 +1602,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T")
+    if sulci not in ("conserved", "measured"):
+        raise ValueError(f"sulci must be 'conserved' or 'measured', not {sulci!r}")
     if isinstance(ventricle_age, str) and (ventricle_age != "age" or age is None):
         raise ValueError('ventricle_age must be years, (low, high), or "age" with age given')
     if deep_grey and (missing := [k for k in DEEP_GREY if k not in table[field_T]]):
@@ -1570,14 +1615,25 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
         years = float(age) if np.isscalar(age) else float(np.random.default_rng(
             np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
-        mean, sd = sulcal_width(years)
-        width = max(mean + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()), 0.)
         native = load_brainweb(subject, root, dtype=dtype)
         native = Anatomy({k: native.fractions[k] for k in ("gm", "wm", "csf")}, native.voxel, native.origin)
-        move = native.fractions["gm"] - open_sulci(native, width).fractions["gm"]  # grey matter -> CSF
-        age_draw = {"years": years, "sulcal_width": width, "sulcal_csf": float(move.sum()) * float(np.prod(native.voxel))}
+        cell = float(np.prod(native.voxel))
+        if sulci == "measured":
+            mean, sd = sulcal_width(years)
+            width = max(mean + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()), 0.)
+            opened = open_sulci(native, width)
+            age_draw = {"years": years, "sulci": sulci, "sulcal_width": width}
+        else:  # conserved: the cortex's diffuse CSF gathered into the sheets, plus the widening with age
+            gathered = gather_cortical_csf(native)
+            volume = float(native.fractions["csf"].sum() - gathered.fractions["csf"].sum()) * cell
+            opened = open_sulci(gathered, volume=max(volume, 0.), widen=sulcal_widening(years))
+            age_draw = {"years": years, "sulci": sulci, "gathered_csf": volume, "widen": sulcal_widening(years)}
+        move = native.fractions["gm"] - opened.fractions["gm"]  # grey matter -> CSF (signed)
+        del opened
+        age_draw["sulcal_csf"] = float(move.sum()) * cell
         anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
-        move = torch.minimum(_resample(move.double(), native.voxel, anatomy.voxel).to(dtype), anatomy.fractions["gm"]).clamp(min=0)
+        move = _resample(move.double(), native.voxel, anatomy.voxel).to(dtype)
+        move = torch.maximum(torch.minimum(move, anatomy.fractions["gm"]), -anatomy.fractions["csf"])
         del native
         anatomy = replace(anatomy, fractions=anatomy.fractions | {"gm": anatomy.fractions["gm"] - move,
                                                                   "csf": anatomy.fractions["csf"] + move})

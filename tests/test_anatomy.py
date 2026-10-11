@@ -481,11 +481,36 @@ def test_open_sulci_puts_csf_on_the_midline_between_two_banks():
     assert bp.open_sulci(an, 0.) is an
 
 
+def test_open_sulci_to_a_volume_and_gather_cortical_csf():
+    """open_sulci(volume=V) adds V of CSF (the width solved by bisection), widen adds W x area on top;
+    gather_cortical_csf gives each grey/CSF voxel to its larger share, white matter untouched."""
+    pytest.importorskip("scipy")
+    an, u = _two_banks(0.)
+    h = 0.5e-3
+    V = 150e-9  # m^3
+    out = bp.open_sulci(an, volume=V)
+    assert float((out.fractions["csf"] - an.fractions["csf"]).sum()) * h ** 3 == pytest.approx(V, rel=0.02)
+    wide = bp.open_sulci(an, volume=V, widen=1e-3)
+    area = 12e-3 * an.shape[1] * h  # the band's height x depth in y
+    assert float((wide.fractions["csf"] - out.fractions["csf"]).sum()) * h ** 3 == pytest.approx(1e-3 * area, rel=0.1)
+    with pytest.raises(ValueError):
+        bp.open_sulci(an, 1e-3, volume=V)
+    gm = torch.tensor([[[.7, .3, .5, 0., .6]]], dtype=torch.float64)
+    csf = torch.tensor([[[.2, .6, .5, .4, 0.]]], dtype=torch.float64)
+    wm = torch.tensor([[[.1, .1, 0., .6, .4]]], dtype=torch.float64)
+    mixed = Anatomy({"gm": gm, "csf": csf, "wm": wm}, (h,) * 3, (0.1, 0.1, 0.1))
+    g = bp.gather_cortical_csf(mixed)
+    assert g.fractions["gm"].flatten().tolist() == pytest.approx([.9, 0., 0., 0., .6])
+    assert g.fractions["csf"].flatten().tolist() == pytest.approx([0., .9, 1., .4, 0.])
+    assert torch.equal(g.fractions["wm"], wm)
+
+
 def test_sulcal_width_follows_jin_2018():
     """sulcal_width: Jin et al. 2018's means and SDs at their groups' mean ages, linear between."""
     assert bp.sulcal_width(47.2) == pytest.approx((1.27e-3, 0.17e-3))
     assert bp.sulcal_width(67.04) == pytest.approx((1.49e-3, 0.20e-3))
     assert bp.sulcal_width(25.)[0] < bp.sulcal_width(80.)[0]
+    assert bp.sulcal_widening(25.) == 0 and bp.sulcal_widening(70.) == pytest.approx(40 * 0.22e-3 / 19.84)
 
 
 def test_myelin_water_is_a_second_free_water_species():

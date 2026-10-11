@@ -706,6 +706,17 @@ says where it came from so it can be re-checked.
   173 instead of 137 mL at 1.3 mm). Widths: Jin et al. 2018 (PATH, n ~800) 1.27 mm at 47 y, 1.49 at
   67; Kochunov 2005 with the same definition has a six times steeper slope (0.71 mm per decade); the
   added CSF brings BrainWeb 04's 254 mL to 322 mL at 25 y and 381 mL at 75 y (Yamada 2023: 287 / 389).
+- **Measured sulcal widths over-brighten fastMRI T2w; conserve BrainWeb's CSF instead** (2026-10-11):
+  on six matched heads (slices 1-7), brain-interior intensity quantiles over the 15th (~white
+  matter) at slices 1-4: real q70 / q85 1.71 / 2.51, unopened 1.73 / 2.55, Jin widths x 0.6 1.91 /
+  2.83, x 1.0 2.07 / 3.22 (slices 5-7: real 1.79 / 2.67; unopened 1.70 / 2.27). The real images hold
+  about BrainWeb's amount of bright CSF, only in lines instead of a rim and diffuse speckle: 3.9 % CSF
+  spread through grey-dominant voxels (38 mL, subject 04) lifts T2w grey matter ~9 %. Gathering each
+  grey/CSF mixture to its larger share and opening the sheets to the width that keeps the CSF volume
+  (plus Jin's widening, 0.011 mm per year beyond 30) gives 1.67 / 2.42 and 1.78 / 2.36. Jin's widths
+  are for five major sulci measured on 1 mm T1 (BrainVISA), not every sheet a medial axis finds.
+  Opening also brings BrainWeb's grey/white volume (1.44, subject 04; 20-subject mean 1.63) to
+  1.23 and its pial-to-white distance from 2.92 to 2.35 mm (adult cortex ~2.5).
 - **Sub-voxel spins leave a Monte-Carlo grain a CNN reads** (2026-10-11): random in-plane positions
   (and random subcells per tissue) are a point sampling of the anatomy; through the 1.72 mm PSF they
   add pixel-scale texture that falls as 1 / sqrt(spins): flat-brain Immerkaer sigma 0.026 at 5.4 M

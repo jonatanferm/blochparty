@@ -104,7 +104,8 @@ def test_realistic_head_options():
     """size="anthropometric": the head measures the drawn ANSUR II breadth and length (the random
     deformation adds a few mm), a normal adult brain; "anthropometric_shell" the same size with a
     smaller brain and more skull; yaw_sd turns it without changing volumes;
-    age opens the closed sulci to that age's width (more CSF, less GM); the defaults add none of these."""
+    age opens the closed sulci ("measured": Jin's widths, more CSF; "conserved": the same CSF at 25 y,
+    more with age); the defaults add none of these."""
     from blochparty.anatomy import head_dimensions
 
     base = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3)
@@ -126,11 +127,18 @@ def test_realistic_head_options():
     assert turned.meta["size"] == sized.meta["size"] and abs(turned.meta["pose"]["yaw_deg"]) > 0
     for k in ("gm", "wm", "csf"):
         assert float(turned.anatomy.fractions[k].sum()) == pytest.approx(float(sized.anatomy.fractions[k].sum()), rel=0.02)
-    old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.)
+    old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70., sulci="measured")
     mean, sd = sulcal_width(70.)
     assert abs(old.meta["age"]["sulcal_width"] - mean) < 4 * sd and 50e-6 < old.meta["age"]["sulcal_csf"] < 250e-6
     assert float(old.anatomy.fractions["csf"].sum()) > float(sized.anatomy.fractions["csf"].sum())
     assert float(old.anatomy.fractions["gm"].sum()) < float(sized.anatomy.fractions["gm"].sum())
+    # conserved: the cortex's diffuse CSF gathered into the sheets, the CSF volume kept at 25 y, more at 70 y
+    csf = lambda h: float(h.anatomy.fractions["csf"].sum())
+    young = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=25.)
+    assert young.meta["age"]["sulci"] == "conserved" and young.meta["age"]["gathered_csf"] > 5e-6
+    assert csf(young) == pytest.approx(csf(sized), rel=2e-3) and young.meta["age"]["sulcal_csf"] == pytest.approx(0, abs=1e-7)
+    aged = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.)
+    assert csf(aged) > csf(young) * 1.05
 
 
 @pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
