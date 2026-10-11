@@ -1287,3 +1287,24 @@ The parts of M5 that need no outside access, done while the user was away.
 - Commits: 049efdf (script, RESULTS), b7cf67a (LESSONS).
 - After the tissuedb merge (#7) its LESSONS line saying the script uses Wansapura's abstract order
   was corrected to the new assignment.
+
+## 2026-10-11 — Refactoring plan for the repository layout (plan only)
+
+- Read the whole tree at `f983c00` and wrote `docs/REFACTOR_PLAN.md`: a phased proposal for a
+  clearer layout, structure only, no physics and no public-API change. Nothing implemented.
+- What it measures: `metal/__init__.py` 2095 lines, 1465 of them (70 %) Metal Shading Language in
+  four templated string literals; `anatomy.py` 1126 lines with five concerns; the core and the Metal
+  host each re-derive the same input preparation (defaults, bound-pool expansion, `m_init` split,
+  static `FieldMaps` sampling, lineshape / mode tables, the same `ValueError` strings); `rel()`
+  defined eight times across tests; five `sys.path.insert` hacks from tests and tools into
+  `validation/` and `examples/`; `Sequence.meta` with 28 string keys read in eleven files; the
+  README layout table missing `constants.py` and `tissuedb/`.
+- What it proposes, by payoff over risk: (1) shaders to `.metal` files and the Metal host split;
+  (2) `tests/conftest.py`, one `helpers.py` + `cases.py`, declared `pythonpath`; (3) one study per
+  `validation/` folder, generic Monte Carlo estimators and the twix reader into the package;
+  (4) an `engines/` subpackage with a shared `prepare` step and one capability table checked
+  against `docs/ENGINES.md`; (5) `anatomy/` split with `tissuedb/` inside; (6) `sequences/` with
+  the builder DSL out of `sequence.py`, Pulseq read/write split, the `meta` keys documented once;
+  (7) generated README layout table, journal by month, ruff; (8) `design/`, optional.
+- Rules: `git mv` and edits in separate commits, snapshot bit-identical per commit, the four living
+  documents updated per phase, historical documents left alone. Six open decisions listed at the end.
