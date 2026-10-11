@@ -274,7 +274,9 @@ def test_reference_methods_first():
     # brain at 3 T: synthetic MRI (n = 54, WM T2 108 ms > GM 80 ms) and GESFIDE are left out
     wm, gm = pooled("brain.wm", "t2", 3.), pooled("brain.gm", "t2", 3.)
     assert "ndengera2022" not in wm.citation.split(";")[0] and "reference methods only" in wm.citation
-    assert gm.mean / wm.mean > 1.2  # every spin-echo study: GM T2 well above WM T2
+    assert gm.mean / wm.mean > 1.05  # GM T2 above WM T2 in every spin-echo study (Lu 2005: 83 / 75 ms)
+    # Wansapura 1999's abstract (labels swapped by assumption) is flagged: in the table, not in the pool
+    assert "flagged rows left out: wansapura1999" in gm.citation and "wansapura1999" not in gm.citation.split(";")[0]
     assert pooled("muscle.skeletal", "t2", 3.).mean == pytest.approx(.030, abs=.003)  # spin echo; MRF reads 44-74 ms
 
 

@@ -6,7 +6,9 @@ session, though the head moves between them: the T2 is rigidly aligned to the T1
 gradient magnitudes), and an EM with one Gaussian per class in (log T1, log T2) and a cubic-polynomial log-bias field
 per channel assigns the classes. Priors: BrainWeb 04's head classes smoothed 2 mm; the intracranial total
 smoothed 2 mm and split among CSF / grey / white by their 8 mm proportions, so the subject's intensities,
-not BrainWeb's sulci, place the cortex. Outside the skull the head classes come from rules on the
+not BrainWeb's sulci, place the cortex; inside the brain CSF / grey / white partial volumes are then unmixed from
+the bias-corrected T1 and T2 against local pure intensities (``unmix_partial_volume``; the EM posterior is close
+to a step in intensity and doubled the CSF in boundary voxels). Outside the skull the head classes come from rules on the
 bias-corrected intensities relative to the subject's white matter (the EM swapped them in the thin layers):
 bone dark in both; fat by unmixing T2 between soft tissue (0.9 x white matter) and the subject's own pure
 fat, with a bright T1 (inside the bone shell: marrow); soft tissue the rest (skin within 8 mm of the
@@ -194,7 +196,52 @@ def em(y, prior, basis, iters=30):
     return post, mu, bias
 
 
-def prepare(ixi_id, root, atlas, fixed2):
+def unmix_partial_volume(post, y, bias, idx, shape):
+    """Inside the brain each voxel mixes its two likeliest of CSF / grey / white: its bias-corrected (T1, T2)
+    projected on the line between their local pure intensities (Gaussian-weighted means of confident voxels
+    within ~10 mm, CSF from the cores of CSF regions; the global median where they are few), a 5 % dead zone at
+    each end; the pair shares the voxel's brain share. The EM posterior is close to a step in intensity: IXI012's
+    grey/CSF boundary voxels hold 103 mL of CSF by posterior, 52 mL by unmixing the T2. (Solving all three
+    classes from two channels and the sum turned noise into white matter: grey/white 1.48 -> 0.90.)"""
+    lin = np.exp(y - bias)
+    k3 = [CLASSES.index(c) for c in BRAIN]
+    p3 = post[k3]
+    share = p3.sum(0)
+    pure = [p3[j] > .97 * share for j in range(3)]
+    core = np.zeros(tuple(shape), bool)
+    core[idx] = pure[0] & (share > .9)
+    pure[0] = ndimage.binary_erosion(core, iterations=1)[idx]
+    mu_loc = np.empty((3, 2, idx[0].size), np.float32)
+    for j in range(3):
+        w = np.zeros(tuple(shape), np.float32)
+        w[idx] = pure[j] & (share > .9)
+        ws = ndimage.gaussian_filter(w, 10.)[idx]
+        for c in range(2):
+            v = np.zeros(tuple(shape), np.float32)
+            v[idx] = lin[c] * w[idx]
+            glob = np.median(lin[c][w[idx] > 0])
+            mu_loc[j, c] = np.where(ws > .02, ndimage.gaussian_filter(v, 10.)[idx] / np.maximum(ws, 1e-6), glob)
+    inside = share > .5
+    order = np.argsort(-p3[:, inside], axis=0)
+    ja, jb = order[0], order[1]
+    sel = np.nonzero(inside)[0]
+    v = lin[:, inside].T
+    ma, mb = mu_loc[ja, :, sel], mu_loc[jb, :, sel]
+    axis = mb - ma
+    t = ((v - ma) * axis).sum(1) / (axis ** 2).sum(1)
+    tb = np.clip((t - .05) / .9, 0, 1)
+    fb = tb * share[inside]
+    f = np.zeros((3, inside.sum()))
+    n = np.arange(inside.sum())
+    f[jb, n] = fb
+    f[ja, n] = share[inside] - fb
+    out = post.copy()
+    for j, k in enumerate(k3):
+        out[k, inside] = f[j]
+    return out
+
+
+def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     t0 = time.time()
     t1p = next((root / "T1").glob(f"IXI{ixi_id:03d}-HH-*-T1.nii.gz"))
     t2p = next((root / "T2").glob(f"IXI{ixi_id:03d}-HH-*-T2.nii.gz"))
@@ -219,6 +266,8 @@ def prepare(ixi_id, root, atlas, fixed2):
     terms = [(i, j, k) for i in range(4) for j in range(4 - i) for k in range(4 - i - j)]
     basis = np.stack([zz[idx[0]] ** i * yy[idx[1]] ** j * xx[idx[2]] ** k for i, j, k in terms], 1)
     post, mu, bias = em(y, prior[:, idx[0], idx[1], idx[2]], basis)
+    if partial_volume:
+        post = unmix_partial_volume(post, y, bias, idx, shape)
     frac = np.zeros((len(CLASSES),) + tuple(shape), np.float32)
     frac[:, idx[0], idx[1], idx[2]] = post
     frac[0][~valid] = 1
@@ -286,6 +335,8 @@ if __name__ == "__main__":
     ap.add_argument("--root", type=Path, default=HERE / "data" / "ixi")
     ap.add_argument("--subjects", default=None, help="comma-separated IXI ids")
     ap.add_argument("--count", type=int, default=None, help="this many subjects spread over the ages")
+    ap.add_argument("--posteriors", action="store_true", help="keep the EM posteriors as fractions (no partial-volume unmixing)")
+    ap.add_argument("--out", type=Path, default=None, help="output folder (default root/prepared)")
     args = ap.parse_args()
     demo = demographics(args.root)
     ids = sorted(int(p.name[3:6]) for p in (args.root / "T1").glob("*-HH-*-T1.nii.gz"))
@@ -295,7 +346,7 @@ if __name__ == "__main__":
     elif args.count:
         order = sorted(ids, key=lambda i: demo[i]["age"])
         ids = sorted(order[int(j)] for j in np.linspace(0, len(order) - 1, args.count).round())
-    out = args.root / "prepared"
+    out = args.out or args.root / "prepared"
     out.mkdir(exist_ok=True)
     atlas = bp.load_brainweb(ATLAS, HERE / "data", voxel=(1e-3,) * 3)
     a2 = bp.load_brainweb(ATLAS, HERE / "data", voxel=(2e-3,) * 3)
@@ -306,7 +357,7 @@ if __name__ == "__main__":
         dest = out / f"IXI{i:03d}.npz"
         if dest.exists():
             continue
-        frac, M, score, vol, files, secs = prepare(i, args.root, atlas, (img, aff))
+        frac, M, score, vol, files, secs = prepare(i, args.root, atlas, (img, aff), not args.posteriors)
         meta = {"ixi_id": i, **demo[i], "atlas": f"brainweb{ATLAS:02d}", "classes": CLASSES, "affine_mm": M.tolist(),
                 "lncc": round(score, 3), "volumes_ml": vol, "files": files, "origin": list(atlas.origin),
                 "voxel": list(atlas.voxel), "shape": list(atlas.shape)}

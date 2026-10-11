@@ -248,9 +248,14 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     vivo, in vitro, physical, then animal (assumed=True). T1, T2, T2* and dielectric values never fall
     back to another field; MT parameters do (assumed=True); other properties do not depend on field.
     Within the tier, T1 and T2 use the reference-method rows if there are any (``reference_method``);
-    then ``combine``: the median over sources, each source once."""
+    then ``combine``: the median over sources, each source once. Rows whose note starts with "FLAG"
+    (an unresolved problem) do not pool; the citation names their sources."""
     db = db or load()
     rows = query(tissue, property, db=db, descendants=descendants, **filters)
+    # rows flagged with an unresolved problem (note "FLAG: ...", e.g. Wansapura 1999's abstract, whose GM/WM
+    # labels contradict physics and were swapped by assumption) stay in the table but do not pool
+    flagged = sorted({m.source for m in rows if (m.note or "").startswith("FLAG")})
+    rows = [m for m in rows if not (m.note or "").startswith("FLAG")]
     tiers = {}
     for m in rows:
         t = _tier(m, property, field_T)
@@ -275,7 +280,8 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     tier = _TIER_NAMES[best % len(_TIER_NAMES)] + ("" if best < len(_TIER_NAMES) else ", other field")
     where = ", ".join(f"{k} ({'; '.join(sorted({m.location for m in use if m.source == k}))})" for k in keys)
     citation = (f"tissuedb pooled {tissue} {property}" + (f" at {field_T:g} T" if field_T is not None else "")
-                + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}")
+                + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}"
+                + (f"; flagged rows left out: {', '.join(flagged)}" if flagged else ""))
     return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0)
 
 

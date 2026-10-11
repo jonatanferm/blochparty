@@ -730,6 +730,11 @@ says where it came from so it can be re-checked.
   length (height as their geometric mean) stay tall, and parameters fitted on them (the -10 deg pitch,
   the 10 mm stack offset) absorbed that. IXI heads at their own size narrow a slice faster than the
   real stacks under the same settings.
+- **A flagged row should not set a default** (2026-10-11): the 3 T grey-matter T2 (96.5 ms) was the median of
+  Lu 2005's CPMG (83 ms) and Wansapura 1999's abstract (110 ms, its GM/WM labels contradicting physics and
+  swapped by the curator, flagged). Unresolved flagged rows now stay in the table but do not pool: grey 83,
+  white 72 ms (Lu 2005; Krug 2022). On six IXI heads with partial-volume fractions the brain-interior
+  quantiles at slices 1-3 went from 1.42 / 1.93 / 2.51 to 1.37 / 1.84 / 2.49 (real 1.31 / 1.74 / 2.58).
 - **EM posteriors are not partial volumes** (2026-10-11): a mixture model's posterior is close to a step in
   intensity, so a boundary voxel a little brighter than grey matter reads as mostly CSF; in IXI012's grey/CSF
   boundary voxels the posteriors hold 103 mL of CSF, linear unmixing of the T2 52 mL. Unmixing three classes

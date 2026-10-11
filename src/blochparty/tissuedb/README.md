@@ -75,9 +75,12 @@ protons) have their own ids (`bone.cortical.bound_water`, ...), so they are neve
    J coupling makes a single spin echo or STEAM at long TE read 40-75 ms at 3 T, which closely
    spaced refocusing suppresses (Henkelman 1992; Keene 2020: 140-159 ms at 8 ms spacing), and a
    Bloch simulation has no J coupling but plays the refocusing train itself.
-3. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
+3. Rows whose note starts with "FLAG" (an unresolved problem, e.g. Wansapura 1999's abstract, whose GM/WM T2
+   labels contradict physics and were swapped by assumption) stay in the table but do not pool; the citation
+   names them. Since 2026-10-11 (GM T2 at 3 T 96.5 -> 83 ms, WM 75 -> 72 ms).
+4. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
    their SDs (an SE becomes SD x sqrt(n)).
-4. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within
+5. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within
    the RMS of the known within-source SDs, between 1.4826 x the median absolute deviation (three or
    more sources) or half the difference (two); None for a single source without an SD. Studies
    differ by method, cohort and region far more than by sampling error, so their sizes are not
