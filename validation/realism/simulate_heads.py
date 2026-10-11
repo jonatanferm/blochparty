@@ -274,6 +274,8 @@ def main():
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
     ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
     ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
+    ap.add_argument("--coil-radius", type=float, default=0.18,
+                    help="receive ring radius [m] (birdcage_sensitivities); head coils' elements sit at ~0.12-0.13 m")
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
                     help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
@@ -285,7 +287,8 @@ def main():
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 (no --age: open_sulci's 1 mm ridges "
+                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 --coil-radius 0.125 (no --age: "
+                         "open_sulci's 1 mm ridges "
                          "make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
@@ -301,6 +304,7 @@ def main():
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
         args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
+        args.coil_radius = 0.125  # the head coil's inner surface (24-26 cm across), not the 18 cm default
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -352,7 +356,7 @@ def main():
                 ph.b1 = b1_plus(head, ph.pos).to(ph.pos.dtype)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
-            return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"])
+            return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"], radius=args.coil_radius)
 
         slices = list(span(args.slices))
         with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap
@@ -369,7 +373,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus,
+                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
