@@ -279,6 +279,8 @@ def main():
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
     ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
     ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
+    ap.add_argument("--override", action="append", default=[],
+                    help="experiment: class.property=value on the tissue table (e.g. gm.t2=0.083), marked assumed")
     ap.add_argument("--coil-radius", type=float, default=0.18,
                     help="receive ring radius [m] (birdcage_sensitivities); head coils' elements sit at ~0.12-0.13 m")
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
@@ -322,6 +324,13 @@ def main():
         from blochparty import tissuedb
 
         table = {3.0: tissuedb.tissue_table(3.0)}
+    for item in args.override:
+        key, value = item.split("=")
+        cls, prop = key.split(".")
+        table = {f: dict(t) for f, t in table.items()}
+        old = getattr(table[3.0][cls], prop)
+        table[3.0][cls] = replace(table[3.0][cls], **{prop: Distribution(float(value), None if old is None else old.sd,
+                                                                          f"experiment override (--override {item})", True)})
     protocols = real_protocols(args.manifest)
     age = None if args.age is None else (tuple(float(a) for a in args.age.split(",")) if "," in args.age else float(args.age))
     pitch = None if args.pitch is None else tuple(float(a) for a in args.pitch.split(","))
@@ -378,6 +387,7 @@ def main():
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
                 "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
+                "override": args.override,
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
