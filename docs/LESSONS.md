@@ -730,6 +730,16 @@ says where it came from so it can be re-checked.
   length (height as their geometric mean) stay tall, and parameters fitted on them (the -10 deg pitch,
   the 10 mm stack offset) absorbed that. IXI heads at their own size narrow a slice faster than the
   real stacks under the same settings.
+- **EM posteriors are not partial volumes** (2026-10-11): a mixture model's posterior is close to a step in
+  intensity, so a boundary voxel a little brighter than grey matter reads as mostly CSF; in IXI012's grey/CSF
+  boundary voxels the posteriors hold 103 mL of CSF, linear unmixing of the T2 52 mL. Unmixing three classes
+  from two channels and the sum is exactly determined and turns noise into spurious white matter (GM/WM
+  1.48 -> 0.90); pairwise unmixing needs clean references (sulcal "pure" CSF is partial volume; ventricle
+  cores are not) and local ones (residual receive bias). Without an independent CSF volume to check
+  against, the posteriors stayed; the simulated images' high slices still carry too bright a tail.
+- **zsh does not split words** (2026-10-11): `cmd $args` with args="--a 1 --b 2" passes one argument in zsh
+  (the session's shell), so argparse rejected every run of a loop whose output went to /dev/null and three
+  variant folders came out empty; use `${=args}`, and keep the logs.
 - **Read the score's controls before its AUC** (2026-10-11): r16 (10 heads from 8 BrainWeb subjects,
   two heads lost mid-run on the swapping mini) scored real-vs-simulated CNN AUC 0.07 [0, 0.19] and
   histogram 0.06: inverted, not a success. Its simulated-vs-simulated control (4 subjects against 4)
