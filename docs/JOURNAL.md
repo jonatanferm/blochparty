@@ -1687,4 +1687,12 @@ The parts of M5 that need no outside access, done while the user was away.
   scalp. A rigid T2-to-T1 correction (gradient-magnitude correlation, 2 then 1 mm) fixes IXI206's scalp;
   all 26 heads are being re-prepared (v3) for r20. Deep white matter is ~96-98 % white in both IXI and
   BrainWeb, so the haze is not white-matter impurity.
+- **r19 (16 IXI v2 heads, one subject each, spins 2x4x4, slices 1-7)**: controls fine this time (real vs
+  real 0.44, simulated vs simulated 0.59), so the score stands: CNN AUC 0.979 [0.93, 1.0] at every slice
+  (0.976-0.988), histogram AUC 0.965 [0.93, 0.99]: the intensity distribution alone separates them.
+  Quartiles of the image (of p99) 0.245 / 0.382 / 0.617 against real 0.216 / 0.299 / 0.491 (W1 0.065;
+  BrainWeb runs 0.025): the IXI heads are brighter. IXI's grey-dominant voxels hold 5-7 % CSF (EM
+  posteriors, not partial volume; BrainWeb 4.9 %), ~+14 % on grey matter; grey-matter T2 (96.5 ms vs
+  Lu 2005's 83) another ~5 %; the high slices more (stack height, open). Variants on four v3 heads
+  (baseline, GM T2 83 ms, diffuse CSF < 0.15 in grey given back) are running.
 
