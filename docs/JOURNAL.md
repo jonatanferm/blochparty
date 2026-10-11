@@ -1556,4 +1556,8 @@ The parts of M5 that need no outside access, done while the user was away.
 - Blinded tally this session: r4-r5 12/12; r6-r7 10/12; r9 30/36; r11 12/12; r12 30/36; r13 24/24;
   r14 12/12. Caveat: I have looked at the 21 real scans dozens of times and recognise some; a fair
   human test needs real scans not seen before.
+- **Where the CNN sees it** (r13 against real, slices 0-12, the same cross-validated CNN on masked
+  images): full 0.973 [0.916, 0.999]; interior beyond 8 px of the head edge 0.991 [0.97, 1.0];
+  outer 8 px ring only 0.924 [0.813, 0.985]; centre beyond 25 px 0.831 [0.664, 0.964]. The cortex
+  carries most of it, the deep brain least: the same verdict as the eye.
 
