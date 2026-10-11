@@ -101,7 +101,8 @@ def test_sample_head_is_deterministic_and_recorded():
 @pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
 def test_realistic_head_options():
     """size="anthropometric": the head measures the drawn ANSUR II breadth and length (the random
-    deformation adds a few mm), a normal adult brain; yaw_sd turns it without changing volumes;
+    deformation adds a few mm), a normal adult brain; "anthropometric_shell" the same size with a
+    smaller brain and more skull; yaw_sd turns it without changing volumes;
     age widens the sulci (more CSF, less GM); the defaults add none of these."""
     from blochparty.anatomy import head_dimensions
 
@@ -112,6 +113,14 @@ def test_realistic_head_options():
     assert abs(b - sized.meta["size"]["breadth"]) < 8e-3 and abs(l - sized.meta["size"]["length"]) < 8e-3
     brain = float((sized.anatomy.fractions["gm"] + sized.anatomy.fractions["wm"]).sum()) * 8e-9  # m^3
     assert 0.9e-3 < brain < 1.4e-3
+    kept = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric_shell")
+    assert kept.meta["size"]["breadth"] == sized.meta["size"]["breadth"]  # the same draw
+    b, l = head_dimensions(kept.anatomy)
+    assert abs(b - kept.meta["size"]["breadth"]) < 8e-3 and abs(l - kept.meta["size"]["length"]) < 8e-3
+    kept_brain = float((kept.anatomy.fractions["gm"] + kept.anatomy.fractions["wm"]).sum()) * 8e-9
+    assert 0.9e-3 < kept_brain < brain  # the shell takes its share of the size
+    skull = lambda h: float((h.anatomy.fractions["skull"] + h.anatomy.fractions["marrow"]).sum())
+    assert skull(kept) > 1.03 * skull(sized)  # the vault thicker; the base, beyond reach, scales
     turned = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", yaw_sd=10.)
     assert turned.meta["size"] == sized.meta["size"] and abs(turned.meta["pose"]["yaw_deg"]) > 0
     for k in ("gm", "wm", "csf"):
@@ -144,3 +153,31 @@ def test_deep_grey_nuclei():
     grey = lambda h: sum(float(h.anatomy.fractions[k].sum()) for k in ("gm", *DEEP_GREY) if k in h.anatomy.fractions)
     assert grey(deep) == pytest.approx(grey(plain), rel=1e-5)
     assert deep.tissues["putamen"].t2.mean < deep.tissues["gm"].t2.mean
+
+
+def test_shell_resize_keeps_the_skull_thickness():
+    """A ball of brain (radius 50 mm) in a 7 mm skull, resized by 0.8 about its centre through the
+    shell map (sample_head's pull-back for "anthropometric_shell"): the brain's radius scales as
+    under plain resizing, the skull keeps its 7 mm (plain resizing: 5.6 mm), to half a voxel."""
+    from blochparty.anatomy import _sample_field, _shell_translation
+
+    h, n = 1e-3, 141
+    r = torch.linalg.norm(torch.stack(torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h - .07,) * 3,
+                                                     indexing="ij")), dim=0)
+    brain = (r < .05).double()
+    skull = ((r >= .05) & (r < .057)).double()
+    an = Anatomy({"background": 1 - brain - skull, "wm": brain, "skull": skull}, (h,) * 3, (0., 0., 0.))
+    c, s = (.07,) * 3, (.8,) * 3
+    shell = _shell_translation(an, s, c)
+    grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h,) * 3, indexing="ij"))
+    cc = torch.tensor(c, dtype=torch.float64).view(3, 1, 1, 1)
+    v = grid - cc
+    u = v / .8
+    for _ in range(6):
+        u = v - _sample_field(shell, cc + u, an.voxel).double()
+    out = deform(an, cc + u - grid)
+    plain = deform(an, cc + v / .8 - grid)
+    line = lambda a, k: float(a.fractions[k][70, 70, 70:].sum()) * h  # along +x from the centre
+    assert line(out, "wm") == pytest.approx(line(plain, "wm"), abs=5e-4)  # scaled like plain resizing
+    assert line(out, "skull") == pytest.approx(line(an, "skull"), abs=5e-4)  # kept
+    assert line(plain, "skull") == pytest.approx(.8 * line(an, "skull"), abs=6e-4)  # scaled

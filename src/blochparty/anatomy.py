@@ -1285,12 +1285,33 @@ def head_dimensions(anatomy: Anatomy, depth: float = 0.1) -> tuple[float, float]
     return (xs.max() - xs.min() + 1) * anatomy.voxel[2], (ys.max() - ys.min() + 1) * anatomy.voxel[1]
 
 
-def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator):
+_INTRACRANIAL = ("gm", "wm", "csf", "dura", "vessels", *DEEP_GREY)
+
+
+def intracranial_mask(anatomy: Anatomy) -> np.ndarray:
+    """The skull's contents: brain, CSF, dura and vessels (more than half a voxel), closed by 2 voxels
+    and filled."""
+    from scipy import ndimage
+
+    inside = sum(v for k, v in anatomy.fractions.items() if k in _INTRACRANIAL).numpy() > .5
+    return ndimage.binary_fill_holes(ndimage.binary_closing(inside, iterations=2))
+
+
+def _extents(mask: np.ndarray, voxel, top: int, depth: float) -> tuple[float, float]:
+    sl = mask[max(top - round(depth / voxel[0]), 0): top + 1]
+    ys, xs = np.nonzero(sl.any((0, 2)))[0], np.nonzero(sl.any((0, 1)))[0]
+    return (xs.max() - xs.min() + 1) * voxel[2], (ys.max() - ys.min() + 1) * voxel[1]
+
+
+def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator, shell: bool = False):
     """Draw a sex (1:1) and a head breadth and length from ``ANSUR_HEAD`` (bivariate normal) and return
     the scale factors (z, y, x) that give ``anatomy``'s head that size (z: their geometric mean),
     the centre of the head's bounding box [m, (z, y, x) from the grid origin] and the draw. BrainWeb's
     models live in MNI space, scaled to the template: subject 04's head is 174 x 207 mm (breadth x
-    length), its brain 1580 cm^3; an average man's 154 x 200 mm gives ~1250 cm^3."""
+    length), its brain 1580 cm^3; an average man's 154 x 200 mm gives ~1250 cm^3. ``shell``: the
+    factors scale the skull's contents only (``intracranial_mask``), the skull and scalp keeping the
+    model's thickness around them (``_shell_translation``): head = factor x contents + shell at the
+    caliper level; the same draw."""
     sex = "male" if generator.random() < .5 else "female"
     a = ANSUR_HEAD[sex]
     (mb, sb), (ml, sl), r = a["breadth"], a["length"], a["corr"]
@@ -1299,11 +1320,51 @@ def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator):
     b0, l0 = head_dimensions(anatomy)
     sx, sy = float(breadth / b0), float(length / l0)
     head = _head_mask(anatomy)
+    if shell:  # the contents' extents at the caliper level; the rest of the head's is shell
+        top = int(np.nonzero(head.any((1, 2)))[0].max())
+        bi, li = _extents(intracranial_mask(anatomy), anatomy.voxel, top, 0.1)
+        sx, sy = float((breadth - (b0 - bi)) / bi), float((length - (l0 - li)) / li)
     centre = tuple(float((np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean()) * h)
                    for k, h in enumerate(anatomy.voxel))
     draw = {"sex": sex, "breadth": float(breadth), "length": float(length), "source_breadth": float(b0),
             "source_length": float(l0)}
+    if shell:
+        draw |= {"source_contents_breadth": float(bi), "source_contents_length": float(li)}
     return (math.sqrt(sx * sy), sy, sx), centre, draw
+
+
+def _shell_translation(anatomy: Anatomy, factors, centre, smooth: float = 2e-3, reach=(15e-3, 30e-3)) -> Tensor:
+    """(3, z, y, x) [m]: where resizing by ``factors`` about ``centre`` moves each point when the skull's
+    contents scale and everything outside them moves with its nearest contents voxel (translated,
+    not scaled, so the skull and scalp keep their thickness): (S - I)(p - c), p the point itself
+    inside, the nearest ``intracranial_mask`` voxel outside, there Gaussian-smoothed by ``smooth`` [m]
+    over outside points only (normalised convolution: the inside stays exact). Beyond ``reach`` [m]
+    outside the contents (the face and neck, where the nearest point jumps) it blends linearly into
+    plain scaling, (S - I)(x - c)."""
+    from scipy import ndimage
+
+    inside = intracranial_mask(anatomy)
+    dist, idx = ndimage.distance_transform_edt(~inside, sampling=anatomy.voxel, return_indices=True)
+    w = np.clip((reach[1] - dist) / (reach[1] - reach[0]), 0, 1)
+    sigma = [smooth / h for h in anatomy.voxel]
+    norm = ndimage.gaussian_filter((~inside).astype(float), sigma, mode="nearest")
+    out = []
+    for k, (f, c, h, n) in enumerate(zip(factors, centre, anatomy.voxel, anatomy.shape)):
+        x = (np.arange(n) * h - c).reshape([-1 if j == k else 1 for j in range(3)])
+        t = w * (f - 1) * (idx[k] * h - c) + (1 - w) * (f - 1) * x
+        smoothed = ndimage.gaussian_filter(np.where(inside, 0., t), sigma, mode="nearest") / np.maximum(norm, 1e-6)
+        out.append(np.where(inside, (f - 1) * np.broadcast_to(x, inside.shape), smoothed))
+    return torch.from_numpy(np.stack(out))
+
+
+def _sample_field(field: Tensor, pos: Tensor, voxel) -> Tensor:
+    """Trilinear values of a (3, z, y, x) field at positions (3, z, y, x) [m from the grid origin],
+    clamped to the grid."""
+    shape = field.shape[1:]
+    grid = torch.stack([2 * pos[k] / h / max(n - 1, 1) - 1 for k, (h, n) in reversed(list(enumerate(zip(voxel, shape))))], -1)
+    out = torch.nn.functional.grid_sample(field[None].to(grid.dtype), grid[None], mode="bilinear", padding_mode="border",
+                                          align_corners=True)
+    return out[0]
 
 
 BRAINWEB_SUBJECTS = (4, 5, 6, 18, 20, 38, *range(41, 55))
@@ -1325,7 +1386,9 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     "brainweb" keeps BrainWeb's skin class, "layered" splits it into skin and subcutaneous fat
     (``layer_scalp``) after the deformation. ``size``: "brainweb" keeps the model's (MNI-template)
     size, "anthropometric" scales the head to a breadth and length drawn from ANSUR II
-    (``anthropometric_scaling``), composed with the deformation into one resampling. ``yaw_sd``
+    (``anthropometric_scaling``), composed with the deformation into one resampling;
+    "anthropometric_shell" reaches the same size by scaling the skull's contents and keeping the
+    skull's and scalp's thickness. ``yaw_sd``
     [deg]: the head turned about the scanner's z axis through its centre by N(0, yaw_sd^2) (0: as
     the model lies; BrainWeb is aligned to MNI space, scanned heads are not). ``age`` [years] (a
     number, or (low, high) to draw uniformly): sulci widened by ``SULCAL_WIDENING`` per year beyond
@@ -1335,8 +1398,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     the other classes' draws do not change."""
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
-    if size not in ("brainweb", "anthropometric"):
-        raise ValueError(f"size must be 'brainweb' or 'anthropometric', not {size!r}")
+    if size not in ("brainweb", "anthropometric", "anthropometric_shell"):
+        raise ValueError(f"size must be 'brainweb', 'anthropometric' or 'anthropometric_shell', not {size!r}")
     root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
     if root is None:
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
@@ -1354,11 +1417,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                                                magnitude=magnitude, spacing=spacing)
     size_draw, pose = None, None
     total = lambda d: d
-    if size == "anthropometric" or yaw_sd:
+    if size != "brainweb" or yaw_sd:
         # pull back x -> c + S^-1 R^-1 (x + d(x) - c): deformed, then turned by the yaw and resized about c
         rng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(6)[5])
-        if size == "anthropometric":
-            factors, centre, size_draw = anthropometric_scaling(anatomy, rng)
+        if size != "brainweb":
+            factors, centre, size_draw = anthropometric_scaling(anatomy, rng, shell=size == "anthropometric_shell")
             size_draw["factors"] = list(factors)
         else:
             factors = (1., 1., 1.)
@@ -1374,10 +1437,16 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         c = torch.tensor(centre, dtype=dt).view(3, 1, 1, 1)
         cos, sin = math.cos(yaw), math.sin(yaw)
 
+        shell = _shell_translation(anatomy, factors, centre).to(dt) if size == "anthropometric_shell" else None
+
         def total(d):
             v = grid + d - c
             v = torch.stack([v[0], cos * v[1] + sin * v[2], -sin * v[1] + cos * v[2]])  # R^-1 in the (y, x) plane
-            return c + v / s - grid
+            u = v / s
+            if shell is not None:  # invert u -> u + T(c + u) by fixed-point steps (|dT/du| <= 1 - s < 1)
+                for _ in range(6):
+                    u = v - _sample_field(shell, c + u, anatomy.voxel).to(dt)
+            return c + u - grid
     scale = 1.
     while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
         scale /= 2
