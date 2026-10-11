@@ -1735,4 +1735,7 @@ The parts of M5 that need no outside access, done while the user was away.
   changes the BrainWeb realism runs' table). The top slices stay ~18 % too bright at the median: IXI's
   cortex grows with height faster than the clinical scans' (open: population age, head shape, stack).
 - 24 heads re-prepared with unmixing (v5) for r20, which starts on the mini after 23:00.
+- **My blinded sheets are wearing out**: 12/12 on six v5 heads (unmixing, GM T2 83 ms), but these were the six
+  subjects I had just looked at in three variants; I now recognise some IXI brains by shape (IXI334's bright
+  posterior midline). The CNN (r20) and a fresh observer are the fair judges from here.
 
