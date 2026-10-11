@@ -1695,4 +1695,18 @@ The parts of M5 that need no outside access, done while the user was away.
   posteriors, not partial volume; BrainWeb 4.9 %), ~+14 % on grey matter; grey-matter T2 (96.5 ms vs
   Lu 2005's 83) another ~5 %; the high slices more (stack height, open). Variants on four v3 heads
   (baseline, GM T2 83 ms, diffuse CSF < 0.15 in grey given back) are running.
+- **Why IXI heads are bright: variants on four v3 heads** (brain-interior q50 / q70 / q85 over q15; real
+  slices 1, 3: 1.32 / 1.75 / 2.54, slices 5, 7: 1.32 / 1.79 / 2.66): baseline 1.37 / 1.80 / 2.52 and
+  1.50 / 2.10 / 3.33 (the low slices already match; the excess is at the top); grey T2 83 ms 1.28 / 1.61 /
+  2.35 and 1.38 / 1.98 / 3.30 (the truth between 83 and 96.5 ms); diffuse CSF < 0.15 in grey given back
+  1.34 / 1.71 / 2.40 and 1.43 / 1.98 / 3.25; slice 0 15 mm below the ventricle bodies (three heads)
+  1.39 / 1.73 / 2.45 and 1.49 / 1.96 / 3.02, the head's q75 at the top 0.56 -> 0.50 (real 0.50).
+  Adopted the 15 mm offset for IXI heads as a calibration (27ae8f1); grey T2 and partial volume open.
+- **Partial volume, tried and reverted**: in IXI012's grey/CSF boundary voxels the EM posterior holds 103 mL
+  of CSF, linear unmixing of the T2 52 mL (the posterior is close to a step in intensity). Unmixing all
+  three classes from two channels and the sum turned noise into white matter (GM/WM 1.48 -> 0.90);
+  pairwise unmixing with a dead zone left the total unchanged (CSF reference pulled down by sulcal
+  "pure" CSF); ventricle-core references took CSF to 173 mL (11 % of ICV), local references (10 mm) to
+  200 mL; on one head the image's high-slice tail improved (q85 3.33 -> 3.09) but the low slices moved
+  away from real. With no independent check of which CSF volume is right, v3 keeps the EM posteriors.
 
