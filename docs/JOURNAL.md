@@ -1742,4 +1742,13 @@ The parts of M5 that need no outside access, done while the user was away.
   and 12 simulated slices at the final settings (v5 heads, GM T2 83 ms), shuffled, scored in the page; built
   by the scratch quiz.py, its key unseen by me. 24 v5 heads prepared (all pass QC); ~30 more subjects being
   prepared into prepared_more/ for a larger pool. r20 starts on the mini after 23:00.
+- **r20 (16 IXI v5 heads, PV unmixing, GM/WM T2 83 / 72 ms, landmark prior, 10 mm offset; one head died on the
+  mini, 15 scored)**: CNN AUC 0.959 [0.90, 1.0] (r19 0.979), histogram 0.927 [0.85, 0.98] (0.965), W1 0.042
+  (0.065), image quartiles 0.230 / 0.339 / 0.573 vs real 0.216 / 0.299 / 0.491; controls 0.44 / 0.47. By slice
+  0.93 (1), 0.93 (2), 0.97 (3-6), 0.98 (7): the low slices are the most realistic. By region (of p99,
+  slices 1-3): the band 8-20 px in 0.33 vs real 0.26, the core 0.25 vs 0.21; at slices 5-7 mid and core
+  match and the outer ring is brighter (0.41 vs 0.37). Bone-aligned profiles: the rim 2-4 px inside the
+  skull is bright again (front 0.55-0.56 vs 0.39-0.46), now from IXI's own subarachnoid CSF, and the lateral
+  scalp is too bright (0.80 vs 0.54): `layer_scalp` lays 4 mm of fat over the temporalis, where real scalp
+  has little. Simulated heads are also ~7 % larger in area at slices 1-3 (8.2-8.3 vs 7.7 kpx).
 
