@@ -101,7 +101,8 @@ def drop_detached(head) -> None:
     20 mm in front of the forehead (a marker in its source scan), subject 42 hundreds of faint
     "skin" pieces (fractions 0.05-0.5) around the neck and head, and several have voxel specks; in
     the simulated slices they showed as dashes and lines outside the head. Everything more than 3
-    voxels from the head mask's largest component (tissue > 0.5) is dropped, whatever its fraction."""
+    voxels from the head mask's largest component (tissue > 0.5) is dropped, whatever its fraction,
+    and so are thin protrusions on it (more than 2 voxels outside its opening by ~3 mm)."""
     an = head.anatomy
     fr = an.fractions
     total = sum(v for k, v in fr.items() if k != "background").numpy()
@@ -110,7 +111,11 @@ def drop_detached(head) -> None:
         return
     sizes = np.bincount(lab.ravel())
     sizes[0] = 0
-    keep = ndimage.binary_dilation(lab == np.argmax(sizes), iterations=3)
+    head_mask = lab == np.argmax(sizes)
+    # and thin protrusions on its surface (subject 18 has a marker blob attached to the right side):
+    # what an opening by ~3 mm removes, beyond 2 voxels of the opened head
+    opened = ndimage.binary_opening(head_mask, structure=np.ones((3, 3, 3)), iterations=2)
+    keep = ndimage.binary_dilation(opened, iterations=2) & ndimage.binary_dilation(head_mask, iterations=3)
     drop = torch.from_numpy(~keep & (total > 0))
     if not bool(drop.any()):
         return
