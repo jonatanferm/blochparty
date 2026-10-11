@@ -1517,4 +1517,19 @@ The parts of M5 that need no outside access, done while the user was away.
   The rim, not the sulci, made the cortex read as fake; the calibration removes 16 % of the CSF
   (245 -> 205 mL), so it stays labelled a calibration (`--sas-mm`), with the age-enlarged
   ventricles giving some back.
+- **r8 / r9**: ventricles for ages 20-80, trabecular marrow, protocol refocusing (r8), plus 1.5 mm
+  convexity thinning (r9; 4c98996 puts both in the preset). r9 slices 0-8: rim 0.91 / 0.71 / 0.65
+  (real 0.75 / 0.52 / 0.57), cortical CSF components 8.5 / 1000 px, 19 px, 0.18 (real 8.1, 24,
+  0.21). Blinded r9: 8/12, 10/12, 12/12 = 30/36 (I had seen its six heads by the third sheet).
+- **Head shape by height**: simulated heads lost area faster above slice 0 than the real ones. Part
+  was my measurement (`lab.head_mask` opened twice and ate the real thin lateral scalp: real
+  left-right 143 -> 157 mm at slice 0 with one opening); the rest is tilt. Real routine slices sit
+  ~10 deg nose-up to BrainWeb's AC-PC frame: pitch -10 +- 5 deg (1802b56, b7a4ca1) matches the area
+  at slices 5 / 8 / 12 / 15 (0.89 / 0.77 / 0.50 / 0.21 vs 0.94 / 0.79 / 0.48 / 0.21).
+- **Receive ring at the coil's surface** (1a6d19a): 12.5 cm instead of 18 cm; the scalp top decile
+  is as bright as ventricular CSF in the real scans (0.93 of it) and was 0.68 of it in ours.
+- **BrainWeb 38's marker** (7332ee8): a detached blob in front of the forehead showed as a dash and
+  gave tiles away; detached tissue is dropped.
+- Dead ends: membership sharpening (power 2; no better), GM T2 85 ms (no visible change), a 9 mm
+  deformation (swirls). The "grain" metric flips sign between slice sets; not used.
 
