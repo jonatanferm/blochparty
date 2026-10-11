@@ -245,6 +245,8 @@ def main():
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
     ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
     ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
+    ap.add_argument("--ventricle-age", default=None,
+                    help="years, or lo,hi drawn uniformly per head: lateral ventricles enlarged for that age (Yamada 2023)")
     ap.add_argument("--sas-mm", type=float, default=0.0,
                     help="calibration: the outer mm of convexity CSF become inner table (thin_convexity_csf)")
     ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
@@ -278,6 +280,8 @@ def main():
         table = {3.0: tissuedb.tissue_table(3.0)}
     protocols = real_protocols(args.manifest)
     age = None if args.age is None else (tuple(float(a) for a in args.age.split(",")) if "," in args.age else float(args.age))
+    vage = None if args.ventricle_age is None else (tuple(float(a) for a in args.ventricle_age.split(","))
+                                                     if "," in args.ventricle_age else float(args.ventricle_age))
     args.out.mkdir(parents=True, exist_ok=True)
     for seed in span(args.seeds):
         dest = args.out / f"sim_{seed:03d}.npz"
@@ -286,7 +290,8 @@ def main():
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
-                              size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3)
+                              size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
+                              ventricle_age=vage)
         if args.flow_void:
             flow_void(head)
         if args.sas_mm:
@@ -326,6 +331,7 @@ def main():
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
                 "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm,
+                "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
