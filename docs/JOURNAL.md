@@ -1663,4 +1663,8 @@ The parts of M5 that need no outside access, done while the user was away.
   (r -0.78), CSF/ICV 0.194 -> 0.229 (r 0.69), ICV men 1465, women 1290 mL.
 - **r18 stopped** after 6 of 20 v1 heads (230 s per slice on the swapping mini); **r19**: 16 IXI v2 heads,
   one subject each, spins 2x4x4, slices 1-7, then the score with its controls.
+- **Blinded, six IXI v2 heads (local, quality real; subjects 12, 148, 202, 253, 334, 538, not looked at
+  before)**: 8/12, mostly guesses (two simulated tiles taken for real, two real for simulated). The
+  blinded tally on BrainWeb heads was 10-12/12 all day; one 12-tile sheet is weak evidence (8 of 12
+  is not significantly above chance), so r19's 16 heads get several sheets and the CNN with its controls.
 
