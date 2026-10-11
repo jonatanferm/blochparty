@@ -1719,4 +1719,9 @@ The parts of M5 that need no outside access, done while the user was away.
   opening, a central box) did not separate the vertex fissure from the ventricles. IXI tally: 38/48.
 - **The mini is off-limits until 23:00 tonight** (user); r20 (16 IXI v3 heads, the 24 that pass QC, the
   landmark prior, 15 mm offset) starts then by a local job that syncs first.
+- **The 15 mm offset was wrong** (fa46472): blinded on six heads with the landmark prior and 15 mm, 12/12; the
+  simulated slices 1-3 showed basal ganglia, insula and temporal lobes where the real ones show the
+  ventricle bodies (1-1.5 slices too low). The 15 mm had been fitted while IXI255's landmark sat 20+ mm
+  high; with the prior the area profile prefers 12 mm (rms 0.017, 10 mm 0.029, 15 mm 0.023), but the
+  anatomy the eye sees decides: back to 10 mm. IXI tally: 50/60.
 
