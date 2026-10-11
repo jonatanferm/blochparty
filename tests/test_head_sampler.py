@@ -203,3 +203,20 @@ def test_ventricles_grow_with_age():
     gain = csf(old) - csf(plain)
     assert 0.6 * 0.93 * old.meta["ventricles"]["source_volume"] < gain < 1.4 * 0.93 * old.meta["ventricles"]["source_volume"]
     assert brain(plain) - brain(old) == pytest.approx(gain, rel=.5)
+
+
+@pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
+def test_pitch_tips_the_face_down_and_keeps_volumes():
+    """pitch=(20, 0): nose down, so the face's most anterior point rises to the forehead and moves
+    back; the pose records the angle; tissue volumes are kept (a rotation); no pitch draws nothing."""
+    import numpy as np
+    from blochparty.anatomy import _head_mask
+
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0., size="anthropometric")
+    flat, down = sample_head(1, **kw), sample_head(1, pitch=(20., 0.), **kw)
+    assert "pitch_deg" not in flat.meta["pose"] and down.meta["pose"]["pitch_deg"] == pytest.approx(20.)
+    front = lambda h: (lambda z, y: (z[y >= y.max() - 1].mean(), y.max()))(*np.nonzero(_head_mask(h.anatomy))[:2])
+    (z0, y0), (z1, y1) = front(flat), front(down)
+    assert z1 > z0 and y1 < y0
+    for k in ("gm", "wm", "csf"):
+        assert float(down.anatomy.fractions[k].sum()) == pytest.approx(float(flat.anatomy.fractions[k].sum()), rel=.02)

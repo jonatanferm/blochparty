@@ -1471,7 +1471,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False,
-                ventricle_age: float | tuple[float, float] | None = None) -> DigitalPhantom:
+                ventricle_age: float | tuple[float, float] | None = None,
+                pitch: tuple[float, float] | None = None) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1494,7 +1495,9 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
     the other classes' draws do not change. ``ventricle_age`` [years] (a number, or (low, high) to
     draw uniformly): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
-    ``ventricle_displacement``, in MNI space before the deformation."""
+    ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
+    the head tipped about the left-right axis through its centre, nose down positive, by a normal
+    draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level)."""
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
     if size not in ("brainweb", "anthropometric", "anthropometric_shell"):
@@ -1521,7 +1524,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                                                magnitude=magnitude, spacing=spacing)
     size_draw, pose = None, None
     total = lambda d: d
-    if size != "brainweb" or yaw_sd:
+    if size != "brainweb" or yaw_sd or pitch is not None:
         # pull back x -> c + S^-1 R^-1 (x + d(x) - c): deformed, then turned by the yaw and resized about c
         rng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(6)[5])
         if size != "brainweb":
@@ -1534,18 +1537,26 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                            for k, h in enumerate(anatomy.voxel))
         yaw = math.radians(yaw_sd) * float(rng.standard_normal()) if yaw_sd else 0.
         pose = {"yaw_deg": math.degrees(yaw), "centre": list(centre), "factors": list(factors)}
+        tilt = 0.
+        if pitch is not None:
+            prng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(10)[9])
+            tilt = math.radians(pitch[0] + pitch[1] * float(prng.standard_normal()))
+            pose["pitch_deg"] = math.degrees(tilt)
         dt = displacement.dtype
         s = torch.tensor(factors, dtype=dt).view(3, 1, 1, 1)
         grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=dt) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
                                           indexing="ij"))
         c = torch.tensor(centre, dtype=dt).view(3, 1, 1, 1)
         cos, sin = math.cos(yaw), math.sin(yaw)
+        cp, sp = math.cos(tilt), math.sin(tilt)
 
         shell = _shell_translation(anatomy, factors, centre).to(dt) if size == "anthropometric_shell" else None
 
         def total(d):
             v = grid + d - c
-            v = torch.stack([v[0], cos * v[1] + sin * v[2], -sin * v[1] + cos * v[2]])  # R^-1 in the (y, x) plane
+            v = torch.stack([v[0], cos * v[1] + sin * v[2], -sin * v[1] + cos * v[2]])  # yaw^-1 in the (y, x) plane
+            if tilt:  # pitch^-1 in the (z, y) plane (nose down: z' = z cos - y sin, y' = y cos + z sin)
+                v = torch.stack([cp * v[0] + sp * v[1], -sp * v[0] + cp * v[1], v[2]])
             u = v / s
             if shell is not None:  # invert u -> u + T(c + u) by fixed-point steps (|dT/du| <= 1 - s < 1)
                 for _ in range(6):
