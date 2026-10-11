@@ -261,6 +261,9 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
     "legacy": ((2, 2, 2), "per_tissue", 4, 1e-5, "stratified"),
     # each voxel's composition exact, z a quadrature through the slice profile: no visible grain
     "real": ((4, 2, 2), "proportional", 3, 1e-4, "inplane"),
+    # 4x4x4 in-plane-jittered: the random positions' grain (Immerkaer sigma in flat brain, of p99) falls as
+    # 1 / sqrt(spins): 0.026 at 4x2x2, 0.017 at 4x3x3, 0.0136 here; real scans 0.014 with their noise
+    "real_fine": ((4, 4, 4), "proportional", 3, 1e-4, "inplane"),
 }
 
 
@@ -352,7 +355,7 @@ def main():
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
         args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric_shell", "protocol", 3.8
-        args.quality = "real"
+        args.quality = "real" if args.quality == "full" else args.quality
         args.readout_os = 2
         args.b1 = "birdcage"
         args.deep_grey = args.flow_void = True
