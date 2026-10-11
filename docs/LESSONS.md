@@ -694,6 +694,12 @@ says where it came from so it can be re-checked.
   locally (power 3, 1 mm window) moves too little mass to show. A Hessian sheetness filter on it
   (0.75 mm, non-maximum suppression along the normal) finds thin, plausible pieces, but sparse
   (3-13 mL in a 50 mm block) and still dashed; at 1.72 mm the change is barely visible.
+- **Sub-voxel spins leave a Monte-Carlo grain a CNN reads** (2026-10-11): random in-plane positions
+  (and random subcells per tissue) are a point sampling of the anatomy; through the 1.72 mm PSF they
+  add pixel-scale texture that falls as 1 / sqrt(spins): flat-brain Immerkaer sigma 0.026 at 5.4 M
+  spins per slice, 0.0136 at 21 M, the anatomy itself 0.011, real 0.014. A CNN on high-pass
+  residuals alone told real from simulated at AUC 0.985. Regular positions band (aliasing), a
+  shared per-voxel shift blotches. Count the grain before trusting a texture comparison.
 - **Open: why the real scalp is as bright as CSF** (2026-10-11): in the fastMRI 3 T T2 scans the
   scalp's top decile is 0.93 of ventricular CSF; the tissue values give fat / CSF ~0.63 at TR 6.5 s
   (fat T2 148 ms from CPMG, CSF partly saturated), and ours measure 0.68-0.73. A receive ring at

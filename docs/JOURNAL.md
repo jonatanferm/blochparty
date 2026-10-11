@@ -1567,4 +1567,15 @@ The parts of M5 that need no outside access, done while the user was away.
   The remaining tell is BrainWeb's cortex; the way on is a population of heads with resolved sulci
   (e.g. HCP or OASIS with FreeSurfer surfaces, IXI with a segmentation), which needs the user's
   decision on downloads and data-use terms.
+- **Structure or texture?** The same CNN on blurred images (sigma 1.5 px) still scores 0.979, on
+  high-pass residuals alone 0.985: two independent cues. The texture one is ours to fix: in flat
+  brain the simulated slices carry 0.022 (Immerkaer sigma, of p99) of pixel-scale texture, the
+  same anatomy rendered without spins 0.011, real scans 0.014 with their noise. It is the grain of
+  random in-plane spin positions and falls as 1 / sqrt(spins) (4x2x2 0.026, 2x4x4 0.017, 3x4x4
+  0.015, 4x4x4 0.0136); subcell centres band and a per-voxel shift makes it worse (0.037).
+  In-brain thermal noise is right: real 0.0036 of p99 (each scan's coil covariance from its
+  k-space corners, through the same recon), simulated 0.0031. Real coil noise is correlated
+  (median |r| 0.09-0.16, up to 0.5) and unequal (2.5-4x), so the background is a few-channel chi
+  (std/mean 0.30 raw) but the matching by the background mean still lands the brain's noise.
+  Quality "real_fine" (4x4x4) added; r16 runs it.
 
