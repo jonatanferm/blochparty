@@ -1560,4 +1560,11 @@ The parts of M5 that need no outside access, done while the user was away.
   images): full 0.973 [0.916, 0.999]; interior beyond 8 px of the head edge 0.991 [0.97, 1.0];
   outer 8 px ring only 0.924 [0.813, 0.985]; centre beyond 25 px 0.831 [0.664, 0.964]. The cortex
   carries most of it, the deep brain least: the same verdict as the eye.
+- **r15 (12 new heads, slices 1-7, + `--trace-sulci`, ~13 mL of sheets along BrainWeb's faint CSF
+  trace)**: CNN AUC 1.0 [1.0, 1.0] (r13 on the same slices 0.936), histogram AUC 0.86, blinded 12/12.
+  No better; the option stays experimental and off. The QSM Challenge 2.0 head (the one other local
+  full-head segmentation) has crisp labels but a noisy ribbon and few sulcal lines, and is one person.
+  The remaining tell is BrainWeb's cortex; the way on is a population of heads with resolved sulci
+  (e.g. HCP or OASIS with FreeSurfer surfaces, IXI with a segmentation), which needs the user's
+  decision on downloads and data-use terms.
 
