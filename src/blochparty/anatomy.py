@@ -638,9 +638,17 @@ def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     return anatomy if resolution is None else anatomy.resample(resolution)
 
 
+IXI_MIN_LNCC = 0.15  # registration quality below which a prepared head is not drawn (IXI598, 0.112: CSF all over)
+
+
 def ixi_subjects(root) -> list[int]:
-    """IXI ids with a prepared head under ``root`` (validation/anatomy/prepare_ixi.py writes root/prepared)."""
-    return sorted(int(p.stem[3:]) for p in (Path(root) / "prepared").glob("IXI*.npz"))
+    """IXI ids with a prepared head under ``root`` (validation/anatomy/prepare_ixi.py writes root/prepared)
+    whose registration to BrainWeb's frame reached ``IXI_MIN_LNCC`` (the rest segmented badly)."""
+    out = []
+    for p in sorted((Path(root) / "prepared").glob("IXI*.npz")):
+        if json.loads(str(np.load(p)["meta"]))["lncc"] >= IXI_MIN_LNCC:
+            out.append(int(p.stem[3:]))
+    return out
 
 
 def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32) -> tuple[Anatomy, dict]:
@@ -1767,7 +1775,16 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         meta["deep_grey"] = list(DEEP_GREY)
     if vent_draw is not None:
         meta["ventricles"] = vent_draw
-    anatomy = deform(anatomy, total(displacement * scale))
+    field = total(displacement * scale)
+    # where MNI's lateral-ventricle bodies (x 0, y -15, z +20 mm) landed: the output voxel whose source point is
+    # nearest (a prior for the slice-stack landmark; the models are MNI-registered, the pose moves them)
+    src = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=field.dtype) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
+                                     indexing="ij")) + field
+    mni = torch.tensor([20e-3 - anatomy.origin[2], -15e-3 - anatomy.origin[1], 0. - anatomy.origin[0]], dtype=field.dtype)
+    k = int(((src - mni.view(3, 1, 1, 1)) ** 2).sum(0).argmin())
+    meta["ventricle_landmark"] = [float(anatomy.origin[2] + (k // (anatomy.shape[1] * anatomy.shape[2])) * anatomy.voxel[0])]
+    del src
+    anatomy = deform(anatomy, field)
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)
     elif scalp == "layered_drawn":  # this head's thicknesses: normal draws with the measured between-subject SDs

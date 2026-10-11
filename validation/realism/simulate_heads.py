@@ -69,7 +69,7 @@ PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
 MONRO_BELOW_BODIES = 10e-3  # the foramen of Monro / basal-ganglia level below the ventricle bodies
 
 
-def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES) -> np.ndarray:
+def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES, prior_z: float | None = None) -> np.ndarray:
     """z [m] of slices 0..15. "landmarks": slice 0 at the largest lateral-ventricle cross-section, the
     brain top at slice 13.5. "protocol": slice 0 ``MONRO_BELOW_BODIES`` below that (the real slice 0
     shows frontal horns, caudate heads, thalami and the third ventricle), then ``PROTOCOL_SPACING``
@@ -80,6 +80,9 @@ def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES) 
     z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
     inside = ndimage.binary_erosion((brain + csf) > 0.5, iterations=round(15e-3 / anatomy.voxel[1]))
     deep = (csf * inside).reshape(len(z), -1).sum(1)
+    if prior_z is not None:  # within 12 mm of where MNI's ventricle bodies landed (segmented heads such as IXI's
+        # keep wide fissure and sulcal CSF inside the eroded brain near the vertex: it took one head's landmark 25 mm up)
+        deep = np.where(np.abs(z - prior_z) <= 12e-3, deep, 0)
     top = z[np.nonzero(brain.reshape(len(z), -1).sum(1) * np.prod(anatomy.voxel[1:]) > 50e-6)[0].max()]
     z0 = z[np.argmax(deep)]
     if mode == "protocol":
@@ -417,7 +420,8 @@ def main():
             thin_convexity_csf(head, args.sas_mm * 1e-3)
         traced = trace_sulci(head) if args.trace_sulci else None
         fields = head.field_maps()
-        zs = stack(head.anatomy, args.stack, MONRO_BELOW_BODIES if args.stack_offset_mm is None else args.stack_offset_mm * 1e-3)
+        zs = stack(head.anatomy, args.stack, MONRO_BELOW_BODIES if args.stack_offset_mm is None else args.stack_offset_mm * 1e-3,
+                   head.meta["ventricle_landmark"][0] if args.source == "ixi" else None)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
         kspace, timing = {}, []
 
