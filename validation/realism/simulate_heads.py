@@ -59,7 +59,8 @@ FOV, THICKNESS, SLICES = 0.22, 5e-3, 16
 
 def real_protocols(manifest: Path) -> list[dict]:
     m = json.loads(manifest.read_text())
-    return [{"file": k, "TR": v["TR_ms"] * 1e-3, "TE": v["TE_ms"] * 1e-3, "coils": v["kspace_shape"][1]}
+    return [{"file": k, "TR": v["TR_ms"] * 1e-3, "TE": v["TE_ms"] * 1e-3, "coils": v["kspace_shape"][1],
+             "refocus_deg": v.get("flip_deg") or 180.}
             for k, v in sorted(m.items()) if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2]
 
 
@@ -185,15 +186,17 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 }
 
 
-def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1) -> bp.Sequence:
+def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1,
+             refocus_deg=180.) -> bp.Sequence:
     """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
     the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
-    oversampling (the real scans: 2)."""
+    oversampling (the real scans: 2). ``refocus_deg``: the refocusing flip angle (the headers'
+    ``flipAngle_deg``: 180 in 11 of the 21 3 T scans, 140-179 in the rest)."""
     multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
     if readout_os != 1:
         multi["readout_oversampling"] = readout_os
     return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
-                     spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
+                     refocus_flip_deg=refocus_deg, spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
                      **multi)
 
 
@@ -245,6 +248,8 @@ def main():
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
     ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
     ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
+    ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
+                    help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
                     help="years, or lo,hi drawn uniformly per head: lateral ventricles enlarged for that age (Yamada 2023)")
     ap.add_argument("--sas-mm", type=float, default=0.0,
@@ -254,7 +259,7 @@ def main():
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void (no --age: open_sulci's 1 mm ridges make CSF specks that look fake)")
+                         "--flow-void --refocus protocol (no --age: open_sulci's 1 mm ridges make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
@@ -265,6 +270,7 @@ def main():
         args.readout_os = 2
         args.b1 = "birdcage"
         args.deep_grey = args.flow_void = True
+        args.refocus = "protocol"
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -304,7 +310,8 @@ def main():
         def prepare(i):
             """Slice i's phantom, coils and merged sequence (CPU), built while the GPU runs slice i - 1."""
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
-            seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os)
+            seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os,
+                           proto["refocus_deg"] if args.refocus == "protocol" else 180.)
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
@@ -330,7 +337,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm,
+                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus,
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
