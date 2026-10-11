@@ -155,6 +155,10 @@ def b1_plus(head, pos: torch.Tensor) -> torch.Tensor:
         v = q - c
         v = torch.stack([math.cos(yaw) * v[:, 0] - math.sin(yaw) * v[:, 1], math.sin(yaw) * v[:, 0] + math.cos(yaw) * v[:, 1],
                          v[:, 2]], -1)
+        tilt = math.radians(pose.get("pitch_deg", 0.))
+        if tilt:  # pitch^-1 in the (y, z) plane, as sample_head's pull-back
+            v = torch.stack([v[:, 0], -math.sin(tilt) * v[:, 2] + math.cos(tilt) * v[:, 1],
+                             math.cos(tilt) * v[:, 2] + math.sin(tilt) * v[:, 1]], -1)
         q = c + v / s
     return sample(*_B1["fm"], q)[:, 0] / _B1["norm"]
 
@@ -242,6 +246,7 @@ def main():
     ap.add_argument("--centre", action="store_true", help="field of view centred on the head (as an operator would)")
     ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
+    ap.add_argument("--pitch", default=None, help="mean,sd [deg], nose down positive (sample_head(pitch=))")
     ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
     ap.add_argument("--deep-grey", action="store_true",
@@ -259,7 +264,7 @@ def main():
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 (no --age: open_sulci's 1 mm ridges "
+                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 (no --age: open_sulci's 1 mm ridges "
                          "make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
@@ -274,6 +279,7 @@ def main():
         args.refocus = "protocol"
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
         args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
+        args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -289,6 +295,7 @@ def main():
         table = {3.0: tissuedb.tissue_table(3.0)}
     protocols = real_protocols(args.manifest)
     age = None if args.age is None else (tuple(float(a) for a in args.age.split(",")) if "," in args.age else float(args.age))
+    pitch = None if args.pitch is None else tuple(float(a) for a in args.pitch.split(","))
     vage = None if args.ventricle_age is None else (tuple(float(a) for a in args.ventricle_age.split(","))
                                                      if "," in args.ventricle_age else float(args.ventricle_age))
     args.out.mkdir(parents=True, exist_ok=True)
@@ -300,7 +307,7 @@ def main():
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
-                              ventricle_age=vage)
+                              ventricle_age=vage, pitch=pitch)
         if args.flow_void:
             flow_void(head)
         if args.sas_mm:
