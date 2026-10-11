@@ -717,6 +717,19 @@ says where it came from so it can be re-checked.
   are for five major sulci measured on 1 mm T1 (BrainVISA), not every sheet a medial axis finds.
   Opening also brings BrainWeb's grey/white volume (1.44, subject 04; 20-subject mean 1.63) to
   1.23 and its pial-to-white distance from 2.92 to 2.35 mm (adult cortex ~2.5).
+- **Segmenting IXI heads: what the EM gets wrong** (2026-10-11): with BrainWeb priors aligned by an affine
+  only, a 12-class EM on (log T1, log T2) places the brain well (the subject's intensities decide when
+  the CSF/GM/WM priors are shared at 8 mm) but swaps class identities in the thin head layers ("marrow"
+  came out dark, "skin" took the scalp fat): rules on bias-corrected intensities relative to the
+  subject's white matter do better there. IXI's T1 (3D, sagittal) covers the head, its T2 (axial,
+  112 x 1.2 mm) stops ~10 mm short of the vertex. Some scans carry skin markers that a 3 mm closing
+  welds to the scalp; above the ears an 8 mm disc opening per axial section removes them. One HTTP
+  stream from the IXI server ran at 0.65 MB/s, eight byte ranges at ~8 MB/s together.
+- **The MNI frame is taller than real heads** (2026-10-11): IXI subjects registered to BrainWeb's MNI
+  frame scale by ~0.85 vertically but ~0.9-1.0 across, so BrainWeb heads sized from ANSUR breadth and
+  length (height as their geometric mean) stay tall, and parameters fitted on them (the -10 deg pitch,
+  the 10 mm stack offset) absorbed that. IXI heads at their own size narrow a slice faster than the
+  real stacks under the same settings.
 - **Read the score's controls before its AUC** (2026-10-11): r16 (10 heads from 8 BrainWeb subjects,
   two heads lost mid-run on the swapping mini) scored real-vs-simulated CNN AUC 0.07 [0, 0.19] and
   histogram 0.06: inverted, not a success. Its simulated-vs-simulated control (4 subjects against 4)
