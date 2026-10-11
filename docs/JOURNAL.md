@@ -1709,4 +1709,14 @@ The parts of M5 that need no outside access, done while the user was away.
   "pure" CSF); ventricle-core references took CSF to 173 mL (11 % of ICV), local references (10 mm) to
   200 mL; on one head the image's high-slice tail improved (q85 3.33 -> 3.09) but the low slices moved
   away from real. With no independent check of which CSF volume is right, v3 keeps the EM posteriors.
+- **Blinded, six v3 IXI heads (T2 aligned, 15 mm offset)**: 10/12; both giveaways were slice-7 tiles that
+  sat at the wrong height: IXI255 a tiny vertex section (its deep-CSF maximum fell on wide fissure and
+  sulcal CSF at 47 mm instead of the ventricle bodies at ~20) and IXI598 a mottled section (a failed
+  segmentation: registration lncc 0.112, CSF throughout the brain, 6 % in the white-matter core).
+  Fixes (bd47ef2): heads with lncc < 0.15 are not drawn (IXI598, IXI586 rejected; 24 left; the others
+  0.16-0.22), and the IXI stack searches the deep-CSF maximum within 12 mm of where MNI's ventricle
+  bodies (0, -15, +20 mm) land after the pose (IXI255's slice 0: 28 -> 7 mm). Shape filters (a 2-3 mm
+  opening, a central box) did not separate the vertex fissure from the ventricles. IXI tally: 38/48.
+- **The mini is off-limits until 23:00 tonight** (user); r20 (16 IXI v3 heads, the 24 that pass QC, the
+  landmark prior, 15 mm offset) starts then by a local job that syncs first.
 
