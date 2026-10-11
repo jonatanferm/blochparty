@@ -1677,4 +1677,14 @@ The parts of M5 that need no outside access, done while the user was away.
   -10 deg pitch was fitted on them. Kept the anatomical offset for r19; its per-slice AUC will say
   whether the top slices carry the difference. Sulcal band statistics now match (7.95 / 34 / 0.27 vs
   7.25 / 31 / 0.25); the back's dark band is wide (4.0 vs 2.5 px).
+- **Blinded on r19's first eight heads (v2)**: 10/12; the cues that held were a lighter, hazier white
+  matter and cortex (three tiles) and IXI206's scalp split into two arcs. IXI tally: 28/36 (ixiB 10, ixiE
+  8, r19a 10): harder than BrainWeb's but above chance.
+- **T1 and T2 move apart** (230c44d): IXI's two scans are separate and heads move between them; the best
+  integer shift of T2's gradient magnitude onto T1's was 4+ mm in z (IXI206), ~2 mm (IXI012), ~1.4 mm
+  (IXI334), 0 (IXI148). Misaligned, the joint EM blurs every tissue boundary (a likely part of the
+  haze and the thick cortex: GM/WM volume median 1.43, 1.49 at 30 y) and the head mask doubles the
+  scalp. A rigid T2-to-T1 correction (gradient-magnitude correlation, 2 then 1 mm) fixes IXI206's scalp;
+  all 26 heads are being re-prepared (v3) for r20. Deep white matter is ~96-98 % white in both IXI and
+  BrainWeb, so the haze is not white-matter impurity.
 
