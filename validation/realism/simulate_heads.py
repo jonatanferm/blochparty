@@ -350,7 +350,7 @@ def main():
                     help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5; with "
-                         "--source ixi: --size native, no ventricle age, no rim calibration, --stack-offset-mm 15")
+                         "--source ixi: --size native, no ventricle age, no rim calibration")
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
                          f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
@@ -373,9 +373,6 @@ def main():
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
         if args.source == "ixi":  # real anatomy: no sulcal, ventricle, rim or scalp edits; the subject's own size
             args.size, args.ventricle_age, args.age = "native", None, None
-            # a calibration: IXI heads at their own height narrow a slice faster than the real stacks with slice 0
-            # 10 mm below the ventricle bodies; 15 mm fits the real area profile (rms 0.020 vs 0.038, slices 0-11)
-            args.stack_offset_mm = args.stack_offset_mm or 15.0
             args.sas_mm = 0.0
 
     def span(s):  # "a-b" or "a-b:step"
