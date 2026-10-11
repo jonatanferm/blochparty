@@ -96,22 +96,26 @@ def flow_void(head) -> None:
 
 
 def drop_detached(head) -> None:
-    """Tissue not attached to the head (BrainWeb subject 38 has a 0.4 mL blob of "skin" 20 mm in front
-    of the forehead, a marker in its source scan, and a few voxel specks) becomes air: every
-    connected component of the head mask (tissue > 0.5) but the largest, grown by a voxel to take
-    its partial voxels."""
+    """Tissue not attached to the head becomes air: BrainWeb subject 38 has a 0.4 mL blob of "skin"
+    20 mm in front of the forehead (a marker in its source scan), subject 42 hundreds of faint
+    "skin" pieces (fractions 0.05-0.5) around the neck and head, and several have voxel specks; in
+    the simulated slices they showed as dashes and lines outside the head. Everything more than 3
+    voxels from the head mask's largest component (tissue > 0.5) is dropped, whatever its fraction."""
     an = head.anatomy
     fr = an.fractions
-    tissue = sum(v for k, v in fr.items() if k != "background").numpy() > .5
-    lab, n = ndimage.label(tissue)
-    if n < 2:
+    total = sum(v for k, v in fr.items() if k != "background").numpy()
+    lab, n = ndimage.label(total > .5)
+    if n == 0:
         return
     sizes = np.bincount(lab.ravel())
     sizes[0] = 0
-    drop = torch.from_numpy(ndimage.binary_dilation((lab > 0) & (lab != np.argmax(sizes))) & ~(lab == np.argmax(sizes)))
+    keep = ndimage.binary_dilation(lab == np.argmax(sizes), iterations=3)
+    drop = torch.from_numpy(~keep & (total > 0))
+    if not bool(drop.any()):
+        return
+    moved = sum(torch.where(drop, v, torch.zeros_like(v)) for k, v in fr.items() if k != "background")
     out = {k: torch.where(drop, torch.zeros_like(v), v) for k, v in fr.items() if k != "background"}
     if "background" in fr:
-        moved = sum(torch.where(drop, v, torch.zeros_like(v)) for k, v in fr.items() if k != "background")
         out["background"] = torch.where(drop, (fr["background"] + moved).clamp(max=1), fr["background"])
     head.anatomy = replace(an, fractions=out)
 
