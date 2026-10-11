@@ -280,3 +280,18 @@ def test_ixi_heads(tmp_path):
         sample_head(3, source="ixi", age=50., **kw)
     with pytest.raises(ValueError):
         sample_head(3, size="native", root=tmp_path, voxel=(4e-3,) * 3)
+
+
+@pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
+def test_layered_drawn_scalp():
+    """scalp="layered_drawn": each head's dermis and subcutaneous thicknesses are drawn (Li 2024's means and
+    between-subject SDs; its own stream) and recorded; more fat than BrainWeb's lumped skin, other draws unchanged."""
+    from blochparty.anatomy import SCALP_LAYERS
+
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.)
+    plain, a, b = sample_head(1, **kw), sample_head(1, scalp="layered_drawn", **kw), sample_head(2, scalp="layered_drawn", **kw)
+    assert a.meta["scalp_layers"] != b.meta["scalp_layers"]
+    for h in (a, b):
+        assert all(0.25 * m <= v < m + 5e-3 for v, m in zip(h.meta["scalp_layers"], SCALP_LAYERS))
+    assert float(a.anatomy.fractions["fat"].sum()) > float(plain.anatomy.fractions["fat"].sum())
+    assert a.meta["draws"] == plain.meta["draws"]

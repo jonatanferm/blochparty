@@ -1156,6 +1156,7 @@ def draw_tissues(tissues: dict, generator: torch.Generator) -> tuple[dict, dict]
 # subcutaneous tissue 4.14 +- 1.10 mm, whole scalp 5.76 +- 1.14 mm (Li et al. 2024, Skin Res Technol
 # 30:e13863, doi:10.1111/srt.13863, Table 5).
 SCALP_LAYERS = (1.61e-3, 4.14e-3)
+SCALP_LAYERS_SD = (0.23e-3, 1.10e-3)  # between the 30 subjects (same table)
 
 
 def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous: float = SCALP_LAYERS[1]) -> Anatomy:
@@ -1596,6 +1597,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     properties, seeds). ``root`` is the BrainWeb data directory (default: the environment
     variable BLOCHPARTY_BRAINWEB; validation/anatomy/fetch_brainweb.py fetches it). ``scalp``:
     "brainweb" keeps BrainWeb's skin class, "layered" splits it into skin and subcutaneous fat
+    ("layered_drawn": this head's layer thicknesses drawn with ``SCALP_LAYERS_SD``, its own stream)
     (``layer_scalp``) after the deformation. ``size``: "brainweb" keeps the model's (MNI-template)
     size, "anthropometric" scales the head to a breadth and length drawn from ANSUR II
     (``anthropometric_scaling``), composed with the deformation into one resampling;
@@ -1622,8 +1624,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         raise ValueError("IXI heads have their own sulci, ventricles and age: no age= or ventricle_age=")
     if size == "native" and source != "ixi":
         raise ValueError("size='native' needs source='ixi' (a subject with its own size)")
-    if scalp not in ("brainweb", "layered"):
-        raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
+    if scalp not in ("brainweb", "layered", "layered_drawn"):
+        raise ValueError(f"scalp must be 'brainweb', 'layered' or 'layered_drawn', not {scalp!r}")
     if size not in ("brainweb", "anthropometric", "anthropometric_shell", "native"):
         raise ValueError(f"size must be 'brainweb', 'anthropometric', 'anthropometric_shell' or 'native', not {size!r}")
     root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
@@ -1768,6 +1770,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     anatomy = deform(anatomy, total(displacement * scale))
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)
+    elif scalp == "layered_drawn":  # this head's thicknesses: normal draws with the measured between-subject SDs
+        z = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(12)[11]).standard_normal(2)
+        layers = tuple(max(m + sd * float(v), 0.25 * m) for m, sd, v in zip(SCALP_LAYERS, SCALP_LAYERS_SD, z))
+        meta["scalp_layers"] = list(layers)
+        anatomy = layer_scalp(anatomy, *layers)
     if age_draw is not None:
         meta["age"] = age_draw
     if ixi_meta is not None:

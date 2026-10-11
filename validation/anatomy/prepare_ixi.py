@@ -7,9 +7,9 @@ per channel assigns the classes. Priors: BrainWeb 04's head classes smoothed 2 m
 smoothed 2 mm and split among CSF / grey / white by their 8 mm proportions, so the subject's intensities,
 not BrainWeb's sulci, place the cortex. Outside the skull the head classes come from rules on the
 bias-corrected intensities relative to the subject's white matter (the EM swapped them in the thin layers):
-fat bright in T1 and T2 (inside the bone shell: marrow), bone dark in both, soft tissue between: within 8 mm
-of the surface it is BrainWeb's "muscle/skin" (skin), which `layer_scalp` splits into dermis and
-subcutaneous fat as for BrainWeb's heads; deeper it is muscle (temporalis, neck). Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
+bone dark in both; fat by unmixing T2 between soft tissue (0.9 x white matter) and the subject's own pure
+fat, with a bright T1 (inside the bone shell: marrow); soft tissue the rest (skin within 8 mm of the
+surface, muscle deeper). The head is its largest connected piece. Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
 mm), age and sex (IXI.xls; nothing else of it is kept) and the tissue volumes in the subject's own size.
 Known gap: the T2 covers ~134 mm (MNI z <= ~92), so the scalp and skull above it are left as background
 (the brain ends at z ~75; the scored slices lie below ~50).
@@ -173,7 +173,7 @@ def prepare(ixi_id, root, atlas, fixed2):
     frac[0][~valid] = 1
     # outside the skull, rules on the bias-corrected intensities relative to the subject's white matter (the
     # EM's head classes swap identities where BrainWeb's affine-aligned priors miss the thin layers): fat bright
-    # in both (inside the bone shell: marrow), bone dark in both, soft tissue between (skin to 8 mm, then muscle)
+    # by intensity: bone dark in both, fat bright in T2 and T1 (inside the bone shell: marrow), soft tissue between
     corr = []
     for c in range(2):
         v = np.zeros(shape, np.float32)
@@ -183,9 +183,25 @@ def prepare(ixi_id, root, atlas, fixed2):
     r1, r2 = corr[0] / wmref[0], corr[1] / wmref[1]
     sig = lambda x: 1 / (1 + np.exp(-x))
     intra = ndimage.binary_fill_holes(ndimage.binary_closing(frac[[1, 2, 3, 8, 10]].sum(0) > .5, iterations=2))
-    head = ndimage.binary_fill_holes(ndimage.binary_closing((r1 > .25) | (r2 > .25) | intra, iterations=3))
-    p_fat = sig((r1 - .8) / .08) * sig((r2 - 1.2) / .15)
+    raw = ndimage.binary_closing((r1 > .25) | (r2 > .25) | intra, iterations=3)
+    # one piece, and nothing hanging on by a thread (skin markers, ghosts): the largest component of the mask
+    # opened by ~2 mm, grown back inside the mask
+    lab, _ = ndimage.label(ndimage.binary_opening(raw, iterations=2))
+    core = lab == np.argmax(np.bincount(lab[lab > 0]))
+    head = ndimage.binary_fill_holes(ndimage.binary_dilation(core, iterations=3) & raw)
+    # above the ears each axial section of the head is a convex oval: what an 8 mm disc opening removes there
+    # is an object on the skin (markers), not anatomy
+    zmm = origin[2] + np.arange(shape[0]) * atlas.voxel[0] * 1e3
+    disc = np.hypot(*np.mgrid[-8:9, -8:9]) <= 8
+    for kz in np.nonzero(zmm > 15)[0]:
+        if head[kz].any():
+            opened = ndimage.binary_opening(head[kz], structure=disc)
+            head[kz] = ndimage.binary_fill_holes(ndimage.binary_dilation(opened, iterations=2) & head[kz])
     p_bone = sig((.35 - r1) / .06) * sig((.45 - r2) / .08)
+    # fat by unmixing T2 between soft tissue (~0.9 x WM, temporalis) and the subject's own pure fat (98th
+    # percentile of T2 among T1-bright head tissue: orbital and scalp fat); T1 must be bright too
+    pure = np.percentile(r2[head & ~intra & (r1 > .8)], 98)
+    p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
     p_soft = np.clip(1 - p_fat - p_bone, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra
     depth = ndimage.distance_transform_edt(head)
@@ -200,7 +216,7 @@ def prepare(ixi_id, root, atlas, fixed2):
     frac[i["marrow"]][out_mask] = (p_fat * shell)[out_mask]
     frac[i["fat"]][out_mask] = (p_fat * ~shell)[out_mask]
     frac[i["skull"]][out_mask] = p_bone[out_mask]
-    frac[i["skin"]][out_mask] = (p_soft * (depth <= 8))[out_mask]  # BrainWeb's "muscle/skin": layer_scalp splits it
+    frac[i["skin"]][out_mask] = (p_soft * (depth <= 8))[out_mask]
     frac[i["muscle"]][out_mask] = (p_soft * (depth > 8))[out_mask]
     frac[i["background"]][~head] = 1
     for c in CLASSES:

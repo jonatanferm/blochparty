@@ -315,7 +315,7 @@ def main():
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
-    ap.add_argument("--scalp", choices=("brainweb", "layered"), default="brainweb",
+    ap.add_argument("--scalp", choices=("brainweb", "layered", "layered_drawn"), default="brainweb",
                     help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp)")
     ap.add_argument("--size", choices=("brainweb", "anthropometric", "anthropometric_shell"), default="brainweb",
                     help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized); "
@@ -344,11 +344,10 @@ def main():
     ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
                     help="birdcage: B1+ of the full-wave 3 T body coil map (b1_plus)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
-                    help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
+                    help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 (no --age: "
-                         "open_sulci's 1 mm ridges "
-                         "make CSF specks that look fake)")
+                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5; with "
+                         "--source ixi: --size native, no ventricle age, no rim calibration")
     ap.add_argument("--source", choices=("brainweb", "ixi"), default="brainweb",
                     help="ixi: heads segmented from IXI 3 T subjects (validation/anatomy/prepare_ixi.py); with the "
                          "preset: their own size, sulci and ventricles, no rim calibration")
@@ -357,7 +356,7 @@ def main():
     args = ap.parse_args()
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
-        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric_shell", "protocol", 3.8
+        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered_drawn", "anthropometric_shell", "protocol", 3.8
         args.quality = "real" if args.quality == "full" else args.quality
         args.readout_os = 2
         args.b1 = "birdcage"
