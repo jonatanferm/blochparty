@@ -126,6 +126,49 @@ def drop_detached(head) -> None:
     head.anatomy = replace(an, fractions=out)
 
 
+def trace_sulci(head, smooth=0.75e-3, ratio=0.8, curvature=0.0006, min_voxels=30, width=1e-3, fill=0.7) -> float:
+    """Experimental: open BrainWeb's closed sulci where its own faint CSF trace runs (its fuzzy CSF is
+    0.02-0.15 along their midlines, LESSONS). Hessian of the CSF fraction smoothed by ``smooth`` [m]
+    inside grey matter; sheet-like where the most negative eigenvalue (< -``curvature``) dominates the
+    other two by 1 / ``ratio``; thinned by non-maximum suppression along its eigenvector; connected
+    sheets of >= ``min_voxels``; widened to ``width`` [m] and filled to ``fill`` CSF from grey matter.
+    Returns the CSF added [m^3]."""
+    an = head.anatomy
+    fr = an.fractions
+    h = float(np.mean(an.voxel))
+    csf, gm = fr["csf"].numpy().astype(np.float32), fr["gm"].numpy().astype(np.float32)
+    cs = ndimage.gaussian_filter(csf, smooth / h)
+    g = np.gradient(cs)
+    region = (gm > .5) & ~ndimage.binary_dilation(csf > .4, iterations=1)
+    idx = np.nonzero(region)
+    H = np.empty((len(idx[0]), 3, 3), np.float32)
+    for i in range(3):
+        gi = np.gradient(g[i])
+        for j in range(i, 3):
+            H[:, i, j] = H[:, j, i] = gi[j][idx]
+    del g, gi
+    ev, evec = np.linalg.eigh(H)
+    del H
+    l1 = ev[:, 0]
+    sheet = (l1 < -curvature) & (np.abs(ev[:, 1]) < ratio * np.abs(l1)) & (np.abs(ev[:, 2]) < ratio * np.abs(l1))
+    z, y, x = (a[sheet] for a in idx)
+    nz, ny, nx = (evec[sheet, k, 0] for k in range(3))
+    c0 = cs[z, y, x]
+    up = ndimage.map_coordinates(cs, [z + nz, y + ny, x + nx], order=1)
+    down = ndimage.map_coordinates(cs, [z - nz, y - ny, x - nx], order=1)
+    keep = (c0 >= up) & (c0 >= down)
+    thin = np.zeros(cs.shape, bool)
+    thin[z[keep], y[keep], x[keep]] = True
+    lab, _ = ndimage.label(thin, structure=np.ones((3, 3, 3)))
+    sizes = np.bincount(lab.ravel())
+    sizes[0] = 0
+    thin = np.isin(lab, np.nonzero(sizes >= min_voxels)[0])
+    band = ndimage.distance_transform_edt(~thin, sampling=an.voxel) <= width / 2
+    move = torch.from_numpy(np.minimum(gm, fill) * band).to(fr["gm"].dtype)
+    head.anatomy = replace(an, fractions=fr | {"gm": fr["gm"] - move, "csf": fr["csf"] + move})
+    return float(move.sum()) * float(np.prod(an.voxel))
+
+
 def thin_convexity_csf(head, thickness: float) -> None:
     """A calibration to the fastMRI scans, not measured anatomy: CSF within ``thickness`` [m] of the
     calvarium (skull and marrow) and outside the brain's hull (closed by 3 mm: the subarachnoid layer, not the
@@ -292,6 +335,7 @@ def main():
                     help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
                     help="years, or lo,hi drawn uniformly per head: lateral ventricles enlarged for that age (Yamada 2023)")
+    ap.add_argument("--trace-sulci", action="store_true", help="experimental: open sulci along BrainWeb's faint CSF trace")
     ap.add_argument("--sas-mm", type=float, default=0.0,
                     help="calibration: the outer mm of convexity CSF become inner table (thin_convexity_csf)")
     ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
@@ -356,6 +400,7 @@ def main():
             flow_void(head)
         if args.sas_mm:
             thin_convexity_csf(head, args.sas_mm * 1e-3)
+        traced = trace_sulci(head) if args.trace_sulci else None
         fields = head.field_maps()
         zs = stack(head.anatomy, args.stack)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
@@ -392,7 +437,7 @@ def main():
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
                 "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
-                "override": args.override,
+                "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
