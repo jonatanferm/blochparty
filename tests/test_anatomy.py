@@ -432,25 +432,60 @@ def test_proportional_sampling_conserves_each_tissue_and_has_k_spins():
     assert len(ph) == expect
 
 
+def _two_banks(theta_deg=0., shape=(30, 48, 64), h=0.5e-3):
+    """White matter on both sides of a 6 mm grey band (two touching cortical banks; its midline at
+    x' = 12.75 mm, x' turned by theta in the (y, x) plane), CSF above z = 12 mm; far from MNI's deep grey."""
+    nz, ny, nx = shape
+    z, y, x = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h for n in shape), indexing="ij")
+    t = math.radians(theta_deg)
+    u = x * math.cos(t) + y * math.sin(t)
+    below = z < 12e-3
+    wm = (below & ((u < 9.75e-3) | (u > 15.75e-3))).double()
+    gm = (below & (wm == 0)).double()
+    an = Anatomy({"wm": wm, "gm": gm, "csf": (~below).double()}, (h,) * 3, (0.1, 0.1, 0.1))
+    return an, u
+
+
 def test_open_sulci_puts_csf_on_the_midline_between_two_banks():
-    """Two white-matter blocks with a 6 mm grey band between them (two touching cortical banks):
-    width W of CSF goes onto the band's midline, W x the sheet's area of it, nothing elsewhere."""
+    """open_sulci: width W of CSF goes onto the band's midline, W x the sheet's area of it (axis-aligned
+    and turned 30 deg), taken from grey matter only; nothing is opened in a grey layer over a bumpy
+    white surface (no second bank); width 0 changes nothing."""
     pytest.importorskip("scipy")
-    nz, ny, nx = 6, 30, 40
-    wm = torch.zeros(nz, ny, nx, dtype=torch.float64)
-    wm[..., :17] = 1
-    wm[..., 23:] = 1
-    gm = 1 - wm
-    an = Anatomy({"wm": wm, "gm": gm, "csf": torch.zeros_like(wm)}, (1e-3,) * 3, (0., 0., 0.))
-    out = bp.open_sulci(an, 2e-3, depth_max=1.)
-    csf = out.fractions["csf"]
-    assert torch.equal(out.fractions["gm"] + csf, gm) and torch.equal(out.fractions["wm"], wm)
-    assert float(csf[..., :17].sum() + csf[..., 23:].sum()) == 0
-    # the midline lies between columns 19 and 20; 2 mm of CSF over (nz x ny) mm^2, edges excepted
-    inner = csf[1:-1, 1:-1]
-    assert float(inner.sum()) == pytest.approx(2 * inner.shape[0] * inner.shape[1], rel=0.25)
-    assert float(inner[..., 19:21].mean()) > 0.5
-    assert torch.equal(bp.open_sulci(an, 0.).fractions["csf"], an.fractions["csf"])
+    W, h = 1.2e-3, 0.5e-3
+    for theta in (0., 30.):
+        an, u = _two_banks(theta)
+        out = bp.open_sulci(an, W)
+        added = out.fractions["csf"] - an.fractions["csf"]
+        assert torch.allclose(out.fractions["gm"] + out.fractions["csf"], an.fractions["gm"] + an.fractions["csf"])
+        assert torch.equal(out.fractions["wm"], an.fractions["wm"]) and float(added.min()) >= 0
+        assert float(added[an.fractions["wm"] > 0].abs().sum()) == 0
+        # inside a window away from the box edges: within W / 2 + h of the midline, W x its length x height
+        nz, ny, nx = an.shape
+        z, y, x = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h for n in an.shape), indexing="ij")
+        win = (z >= 1e-3) & (z < 11e-3) & (y >= 3e-3) & (y < (ny - 6) * h) & (x >= 3e-3) & (x < (nx - 6) * h)
+        assert float(added[win & ((u - 12.75e-3).abs() > W / 2 + h)].sum()) == 0
+        s = torch.linspace(-0.1, 0.1, 400001, dtype=torch.float64)
+        t = math.radians(theta)
+        px, py = 12.75e-3 * math.cos(t) - s * math.sin(t), 12.75e-3 * math.sin(t) + s * math.cos(t)
+        inside = (py >= 3e-3 - h / 2) & (py < (ny - 6) * h - h / 2) & (px >= 3e-3 - h / 2) & (px < (nx - 6) * h - h / 2)
+        length = float(inside.sum()) * float(s[1] - s[0])
+        assert float(added[win].sum()) * h ** 3 == pytest.approx(W * length * 10e-3, rel=0.1)
+    # a 3 mm grey layer over white matter with 0.5 mm bumps, or 3 mm deep, 6 mm wide grooves: no sulcus
+    shape = (30, 48, 64)
+    z, y, x = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h for n in shape), indexing="ij")
+    for top in (7e-3 + 0.5e-3 * torch.sin(2 * math.pi * x / 4e-3) * torch.sin(2 * math.pi * y / 4e-3),
+                7e-3 + 1.5e-3 * torch.sin(2 * math.pi * x / 6e-3)):
+        wm, gm = (z < top).double(), ((z >= top) & (z < 10e-3)).double()
+        an = Anatomy({"wm": wm, "gm": gm, "csf": (z >= 10e-3).double()}, (h,) * 3, (0.1, 0.1, 0.1))
+        assert float((bp.open_sulci(an, W).fractions["csf"] - an.fractions["csf"]).sum()) == 0
+    assert bp.open_sulci(an, 0.) is an
+
+
+def test_sulcal_width_follows_jin_2018():
+    """sulcal_width: Jin et al. 2018's means and SDs at their groups' mean ages, linear between."""
+    assert bp.sulcal_width(47.2) == pytest.approx((1.27e-3, 0.17e-3))
+    assert bp.sulcal_width(67.04) == pytest.approx((1.49e-3, 0.20e-3))
+    assert bp.sulcal_width(25.)[0] < bp.sulcal_width(80.)[0]
 
 
 def test_myelin_water_is_a_second_free_water_species():

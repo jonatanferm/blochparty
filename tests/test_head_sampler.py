@@ -11,7 +11,8 @@ import pytest
 import torch
 
 from blochparty.anatomy import (DEFAULT_TISSUES, Anatomy, DigitalPhantom, _bspline_weights, deform,
-                                deformation_jacobian, draw_tissues, random_deformation, sample_head, to_phantom)
+                                deformation_jacobian, draw_tissues, random_deformation, sample_head, sulcal_width,
+                                to_phantom)
 
 DATA = Path(__file__).parents[1] / "validation" / "anatomy" / "data"
 
@@ -103,7 +104,7 @@ def test_realistic_head_options():
     """size="anthropometric": the head measures the drawn ANSUR II breadth and length (the random
     deformation adds a few mm), a normal adult brain; "anthropometric_shell" the same size with a
     smaller brain and more skull; yaw_sd turns it without changing volumes;
-    age widens the sulci (more CSF, less GM); the defaults add none of these."""
+    age opens the closed sulci to that age's width (more CSF, less GM); the defaults add none of these."""
     from blochparty.anatomy import head_dimensions
 
     base = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3)
@@ -126,7 +127,8 @@ def test_realistic_head_options():
     for k in ("gm", "wm", "csf"):
         assert float(turned.anatomy.fractions[k].sum()) == pytest.approx(float(sized.anatomy.fractions[k].sum()), rel=0.02)
     old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.)
-    assert old.meta["age"]["sulcal_widening"] == pytest.approx(40 * 0.71e-4)
+    mean, sd = sulcal_width(70.)
+    assert abs(old.meta["age"]["sulcal_width"] - mean) < 4 * sd and 50e-6 < old.meta["age"]["sulcal_csf"] < 250e-6
     assert float(old.anatomy.fractions["csf"].sum()) > float(sized.anatomy.fractions["csf"].sum())
     assert float(old.anatomy.fractions["gm"].sum()) < float(sized.anatomy.fractions["gm"].sum())
 
@@ -187,7 +189,7 @@ def test_shell_resize_keeps_the_skull_thickness():
 def test_ventricles_grow_with_age():
     """ventricle_age: subject 04's lateral ventricles (MNI region, 13 mL at 1 mm) scale by Yamada
     2023's age ratio (1 at 30, 1.93 at 70); the head's CSF grows and its brain shrinks by about the
-    same volume; 25 years changes nothing."""
+    same volume; 25 years changes nothing; "age" takes the head's age (and needs one)."""
     from blochparty.anatomy import load_brainweb, ventricle_factor, ventricle_mask
 
     an = load_brainweb(4, DATA, voxel=(2e-3,) * 3)
@@ -203,6 +205,10 @@ def test_ventricles_grow_with_age():
     gain = csf(old) - csf(plain)
     assert 0.6 * 0.93 * old.meta["ventricles"]["source_volume"] < gain < 1.4 * 0.93 * old.meta["ventricles"]["source_volume"]
     assert brain(plain) - brain(old) == pytest.approx(gain, rel=.5)
+    one = sample_head(1, age=(20., 80.), ventricle_age="age", **kw)  # the head's own age for both
+    assert one.meta["ventricles"]["years"] == one.meta["age"]["years"]
+    with pytest.raises(ValueError):
+        sample_head(1, ventricle_age="age", **kw)
 
 
 @pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")

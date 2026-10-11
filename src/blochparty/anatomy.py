@@ -1196,6 +1196,7 @@ def label_deep_grey(anatomy: Anatomy) -> Anatomy:
 # Lateral-ventricle volume [mL] by age: Yamada et al. 2023 (Eur Radiol 33:7099, doi:10.1007/s00330-023-09632-x,
 # Table 3; 133 healthy Japanese adults, AI segmentation of 3D T1): < 40 y 17.3 +- 7.2 (n 47), 40-59 y
 # 19.4 +- 7.5 (n 49), >= 60 y 33.4 +- 13.4 (n 37); placed at 30, 50 and 70 y, linear between, flat beyond.
+BRAINWEB_AGE = 30.  # BrainWeb's 20 models are young adults, taken as 30
 VENTRICLE_AGE = ((30., 17.3, 7.2), (50., 19.4, 7.5), (70., 33.4, 13.4))
 
 
@@ -1289,71 +1290,121 @@ def ndimage_dilate(mask: np.ndarray, radius: float, voxel) -> np.ndarray:
     return ndimage.distance_transform_edt(~mask, sampling=voxel) <= radius
 
 
-# Sulcal width grows 0.71 mm per decade (0.45-0.94 by sulcus) in 90 healthy adults aged 20-82
-# (Kochunov et al. 2005, Hum Brain Mapp 26:210, doi:10.1002/hbm.20198, Table III); BrainWeb's models
-# are young adults, taken as 30.
-SULCAL_WIDENING = 0.71e-4  # m per year
-BRAINWEB_AGE = 30.
+# Sulcal width, the mean span of the intrasulcal CSF along the normals of the sulcal mesh (BrainVISA on
+# FreeSurfer surfaces, 1.5 T T1, five major sulci per hemisphere), in the PATH study: 1.27 +- 0.17 mm at
+# 47.2 y (n 403) and 1.49 +- 0.20 mm at 67.0 y (n 390) (Jin et al. 2018, Front Aging Neurosci 10:339,
+# doi:10.3389/fnagi.2018.00339, Results and Table 1); linear between and beyond. Kochunov et al. 2005
+# (Hum Brain Mapp 26:210; 90 adults aged 20-82, the same definition) report 0.71 mm per decade, six
+# times steeper.
+SULCAL_WIDTH_AGE = ((47.2, 1.27e-3, 0.17e-3), (67.04, 1.49e-3, 0.20e-3))
 
 
-def _ridge(d: np.ndarray) -> np.ndarray:
-    """Voxels that are a local maximum of ``d`` along one of the 13 directions: >= the neighbour on one
-    side, > the other (a plateau of two, the midline of an even-width band, keeps one voxel)."""
-    import itertools
-
-    out = np.zeros(d.shape, bool)
-    for v in (v for v in itertools.product((-1, 0, 1), repeat=3) if v > (0, 0, 0)):
-        a, b = np.roll(d, v, axis=(0, 1, 2)), np.roll(d, tuple(-x for x in v), axis=(0, 1, 2))
-        out |= (d >= a) & (d > b)
-    return out
+def sulcal_width(age: float) -> tuple[float, float]:
+    """Mean and between-subject SD of sulcal width [m] at ``age`` [years] (``SULCAL_WIDTH_AGE``)."""
+    (a0, w0, s0), (a1, w1, s1) = SULCAL_WIDTH_AGE
+    t = (float(age) - a0) / (a1 - a0)
+    return w0 + t * (w1 - w0), max(s0 + t * (s1 - s0), 0.)
 
 
-def open_sulci(anatomy: Anatomy, width: float, depth_max: float = 20e-3) -> Anatomy:
-    """Widen the sulci by ``width`` [m] of CSF: where two cortical banks meet (grey matter > 0.5,
-    1-5 mm from white matter, on the ridge of the distance to white matter, with white matter again
-    straight through on the far side, no CSF next to it, within ``depth_max`` of the CSF around the
-    brain), grey matter within width / 2 of that midline becomes CSF (voxel-weighted at the edges).
-    BrainWeb's fuzzy segmentation lets many banks touch without CSF between them; real sulci hold
-    CSF, more with age (``SULCAL_WIDENING``). Experimental: on a 1 mm grid the ridges are broken,
-    and the CSF comes out as specks that make simulated T2w images look more fake, not less."""
+def _deep_grey_r2(origin, shape, voxel):
+    """Each ``DEEP_GREY`` ellipsoid's normalised squared radius on a grid (origin x, y, z; shape and voxel z, y, x; MNI)."""
+    x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(origin, shape[::-1], voxel[::-1]))
+    for regions in DEEP_GREY.values():
+        for (cx, cy, cz), (ax, ay, az) in regions:
+            yield ((((z - cz) / az) ** 2)[:, None, None] + (((y - cy) / ay) ** 2)[None, :, None]
+                   + (((np.abs(x) - cx) / ax) ** 2)[None, None, :])
+
+
+def open_sulci(anatomy: Anatomy, width: float, separation: float = 3e-3, opposed: float = 0.5) -> Anatomy:
+    """Open closed sulci to ``width`` [m] of CSF. BrainWeb's fuzzy models (1.5 T scans at 1 mm) give
+    narrow sulci to grey matter: two cortical banks touch with no CSF between them, and T2-weighted
+    slices show speckle where real ones show sulcal lines. A closed sulcus is grey matter reached from
+    two white-matter banks: the lambda-medial axis of the region outside white matter (Chazal and
+    Lieutier 2005), i.e. neighbouring voxels whose nearest white-matter points lie >= ``separation``
+    apart, in directions facing each other (cosine below -``opposed``: within 60 deg of opposite, so
+    a shallow groove in the white surface is not a sulcus). Bumps of the white surface smaller than
+    that make no axis (ridges of the distance to white matter do: an earlier version opened those and
+    made specks). The cerebellum's fissures get the same width (no measurement there). Kept: grey
+    matter > 0.2, outside the deep grey regions (``DEEP_GREY`` scaled by 1.3), in sheets touching the
+    CSF around the brain. A sheet voxel's distance to the midplane is half the difference of its
+    distances to the two banks, its neighbours' adds their distance to the sheet; CSF fills width / 2
+    either side, voxel-weighted, never below what is there, taken from grey matter. Needs MNI
+    coordinates (a BrainWeb model before ``deform``) and a fine grid: ``sample_head`` opens at the
+    native 0.5 mm and then resamples."""
     from scipy import ndimage
 
     if width <= 0:
         return anatomy
-    fr = {k: v.numpy().astype(np.float64) for k, v in anatomy.fractions.items()}
-    gm, wm, csf = fr["gm"], fr["wm"], fr["csf"]
-    vox = tuple(float(v) for v in anatomy.voxel)
-    dw, (iz, iy, ix) = ndimage.distance_transform_edt(wm < .5, sampling=vox, return_indices=True)
-    # distance to the CSF around the brain (connected to the outside; ventricles are not)
-    c = csf > .3
-    outside = ((gm + wm) < .5) & ~c
-    opened = ndimage.binary_opening(c, structure=np.ones((3, 3, 3)))
-    lab, _ = ndimage.label(opened)
-    touch = np.unique(lab[ndimage.binary_dilation(outside, iterations=2) & opened])
-    outer = np.isin(lab, touch[touch > 0]) | (c & ~opened) | outside
-    do = ndimage.distance_transform_edt(~outer, sampling=vox)
-    cand = (gm > .5) & (dw >= 1e-3) & (dw <= 5e-3) & (do <= depth_max) & _ridge(dw) & ~(ndimage.maximum_filter(csf, 3) > .3)
-    z, y, x = np.nonzero(cand)
-    vz, vy, vx = iz[z, y, x] - z, iy[z, y, x] - y, ix[z, y, x] - x
-    ok = np.zeros(len(z), bool)
-    for f in (1., 1.25, 1.5, 1.75, 2.):  # white matter again on the far side: two banks
-        q = [np.clip(np.round(a - f * v).astype(int), 0, n - 1) for a, v, n in zip((z, y, x), (vz, vy, vx), wm.shape)]
-        ok |= wm[q[0], q[1], q[2]] > .5
-    ridge = np.zeros(gm.shape, bool)
-    ridge[z[ok], y[ok], x[ok]] = True
-    # an even-width band's midline is a plateau of two ridge voxels, h / 2 either side of it: a ridge
-    # voxel is half of one when its neighbour away from its nearest white matter is ridge at the same depth
-    z, y, x, vz, vy, vx = z[ok], y[ok], x[ok], vz[ok], vy[ok], vx[ok]
-    norm = np.sqrt(vz ** 2 + vy ** 2 + vx ** 2) + 1e-12
-    q = [np.clip(a - np.round(v / norm).astype(int), 0, n - 1) for a, v, n in zip((z, y, x), (vz, vy, vx), wm.shape)]
-    pair = np.zeros(gm.shape, bool)
-    pair[z, y, x] = ridge[q[0], q[1], q[2]] & (np.abs(dw[q[0], q[1], q[2]] - dw[z, y, x]) < 1e-6)
-    dr, (rz, ry, rx) = ndimage.distance_transform_edt(~ridge, sampling=vox, return_indices=True)
+    fr = anatomy.fractions
+    gm_all, wm_all, csf_all = (fr[k].numpy() for k in ("gm", "wm", "csf"))
+    brain = (gm_all + wm_all) > .5
+    if not brain.any():
+        return anatomy
+    vox = np.array(anatomy.voxel, dtype=np.float64)
+    pad = [int(np.ceil(4e-3 / v)) for v in vox]
+    box = []
+    for k in range(3):
+        idx = np.nonzero(brain.any(tuple(j for j in range(3) if j != k)))[0]
+        box.append(slice(max(int(idx[0]) - pad[k], 0), int(idx[-1]) + pad[k] + 1))
+    box = tuple(box)
+    gm, wm, csf = (a[box].astype(np.float32) for a in (gm_all, wm_all, csf_all))
+    white = wm > .5
+    F = ndimage.distance_transform_edt(~white, sampling=vox, return_distances=False, return_indices=True).astype(np.int32)
+    # the strongest shock at each voxel: its partner across it (axis, side) and the separation
+    best = np.zeros(gm.shape, np.float32)
+    part = np.full(gm.shape, -1, np.int8)
+    grid = np.indices(gm.shape, dtype=np.int32)
+    for ax in range(3):
+        a, b = [slice(None)] * 3, [slice(None)] * 3
+        a[ax], b[ax] = slice(0, -1), slice(1, None)
+        a, b = tuple(a), tuple(b)
+        sep = np.sqrt(sum(((F[k][a] - F[k][b]) * vox[k]) ** 2 for k in range(3))).astype(np.float32)
+        dot = sum((F[k][a] - grid[k][a]).astype(np.float32) * (F[k][b] - grid[k][b]).astype(np.float32)
+                  * np.float32(vox[k] ** 2) for k in range(3))
+        norm = np.sqrt(sum(((F[k][a] - grid[k][a]) * vox[k]) ** 2 for k in range(3))
+                       * sum(((F[k][b] - grid[k][b]) * vox[k]) ** 2 for k in range(3))).astype(np.float32)
+        hit = np.where((sep >= separation) & (dot < -opposed * norm), sep, 0).astype(np.float32)
+        for sl, code in ((a, 2 * ax), (b, 2 * ax + 1)):
+            upd = hit > best[sl]
+            best[sl] = np.where(upd, hit, best[sl])
+            part[sl] = np.where(upd, code, part[sl])
+    del grid
+    origin = tuple(o + sl.start * h for o, sl, h in zip(anatomy.origin, box[::-1], anatomy.voxel[::-1]))
+    deep = np.zeros(gm.shape, bool)
+    for r2 in _deep_grey_r2(origin, gm.shape, anatomy.voxel):
+        deep |= r2 < 1.3 ** 2
+    sheet = (best > 0) & (gm > .2) & ~deep
+    # the CSF around the brain: CSF > 0.5 connected to the space outside the (closed, filled) brain
+    c = csf > .5
+    outside = ~ndimage.binary_fill_holes(ndimage.binary_closing(brain[box], iterations=max(pad[0] * 3 // 4, 1)))
+    lab, _ = ndimage.label(c | outside)
+    outer = np.isin(lab, np.unique(lab[outside])) & c
+    lab, _ = ndimage.label(sheet, structure=np.ones((3, 3, 3)))
+    touch = np.unique(lab[ndimage.binary_dilation(outer, iterations=2) & sheet])
+    sheet = np.isin(lab, touch[touch > 0])
+    del lab, outer, outside, c
+    # each voxel near a sheet: half the difference of its distances to the two banks, its own (its
+    # nearest white point) and the other (whichever of the nearest sheet voxel's two banks is farther)
     h = float(np.mean(vox))
-    dmid = dr + pair[rz, ry, rx] * h / 2
-    move = torch.from_numpy(gm * np.clip((width / 2 - dmid) / h + .5, 0, 1)).to(anatomy.fractions["gm"].dtype)
-    return replace(anatomy, fractions=anatomy.fractions | {"gm": anatomy.fractions["gm"] - move,
-                                                           "csf": anatomy.fractions["csf"] + move})
+    dist, I = ndimage.distance_transform_edt(~sheet, sampling=vox, return_indices=True)
+    near = dist <= width / 2 + h
+    del dist
+    p = np.stack(np.nonzero(near))
+    s_ = I[:, near]
+    del I
+    code = part[s_[0], s_[1], s_[2]].astype(np.int64)
+    partner = s_ + np.where(np.arange(3)[:, None] == code // 2, np.where(code % 2 == 0, 1, -1), 0)
+    own, a_, b_ = (F[:, i[0], i[1], i[2]] * vox[:, None] for i in (p, s_, partner))
+    other = np.where(np.linalg.norm(a_ - own, axis=0) > np.linalg.norm(b_ - own, axis=0), a_, b_)
+    pos = p * vox[:, None]
+    r = np.abs(np.linalg.norm(pos - other, axis=0) - np.linalg.norm(pos - own, axis=0)) / 2
+    del F, part, best
+    target = np.zeros(gm.shape)
+    target[near] = np.clip((width / 2 - r) / h + .5, 0, 1)
+    move = np.clip(np.minimum(target - csf, gm), 0, None) * ~deep
+    full = torch.zeros_like(fr["gm"])
+    full[box] = torch.from_numpy(move).to(full.dtype)
+    return replace(anatomy, fractions=fr | {"gm": fr["gm"] - full, "csf": fr["csf"] + full})
 
 
 # Head breadth (euryon-euryon) and length (glabella-opisthocranion) [m]: mean, SD and their correlation,
@@ -1489,12 +1540,13 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     skull's and scalp's thickness. ``yaw_sd``
     [deg]: the head turned about the scanner's z axis through its centre by N(0, yaw_sd^2) (0: as
     the model lies; BrainWeb is aligned to MNI space, scanned heads are not). ``age`` [years] (a
-    number, or (low, high) to draw uniformly): sulci widened by ``SULCAL_WIDENING`` per year beyond
-    ``BRAINWEB_AGE`` (``open_sulci``); None leaves them as the model has them. ``deep_grey``: the
+    number, or (low, high) to draw uniformly): the closed sulci opened (``open_sulci``, on the native
+    0.5 mm grid before resampling) to a width drawn from ``sulcal_width`` (mean and between-subject SD
+    for that age, its own stream); None leaves them as the model has them. ``deep_grey``: the
     caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
-    the other classes' draws do not change. ``ventricle_age`` [years] (a number, or (low, high) to
-    draw uniformly): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
+    the other classes' draws do not change. ``ventricle_age`` [years] (a number, (low, high) to
+    draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
     draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level)."""
@@ -1507,18 +1559,37 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T")
+    if isinstance(ventricle_age, str) and (ventricle_age != "age" or age is None):
+        raise ValueError('ventricle_age must be years, (low, high), or "age" with age given')
     if deep_grey and (missing := [k for k in DEEP_GREY if k not in table[field_T]]):
         raise ValueError(f"deep_grey needs tissue properties for {missing} (tissuedb.tissue_table)")
     streams = [int(s.generate_state(1)[0]) for s in np.random.SeedSequence(int(seed)).spawn(5)]
     if subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
-    anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
+    age_draw = None
+    if age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
+        years = float(age) if np.isscalar(age) else float(np.random.default_rng(
+            np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
+        mean, sd = sulcal_width(years)
+        width = max(mean + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()), 0.)
+        native = load_brainweb(subject, root, dtype=dtype)
+        before = float(native.fractions["csf"].sum())
+        native = open_sulci(native, width)
+        age_draw = {"years": years, "sulcal_width": width,
+                    "sulcal_csf": (float(native.fractions["csf"].sum()) - before) * float(np.prod(native.voxel))}
+        anatomy = native if _triple(voxel, "voxel", True) == native.voxel else native.resample(voxel)
+        del native
+    else:
+        anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
     if deep_grey:
         anatomy = label_deep_grey(anatomy)  # in MNI space, before the deformation
     vent_draw = None
     if ventricle_age is not None:
         vrng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(9)[8])
-        years = float(ventricle_age) if np.isscalar(ventricle_age) else float(vrng.uniform(*ventricle_age))
+        if isinstance(ventricle_age, str):  # "age": the head's age (validated above)
+            years = age_draw["years"]
+        else:
+            years = float(ventricle_age) if np.isscalar(ventricle_age) else float(vrng.uniform(*ventricle_age))
         vent_draw = {"years": years, "factor": ventricle_factor(years)}
     displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
                                                magnitude=magnitude, spacing=spacing)
@@ -1594,9 +1665,6 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     anatomy = deform(anatomy, total(displacement * scale))
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)
-    if age is not None:
-        years = float(age) if np.isscalar(age) else float(np.random.default_rng(
-            np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
-        meta["age"] = {"years": years, "sulcal_widening": max(years - BRAINWEB_AGE, 0.) * SULCAL_WIDENING}
-        anatomy = open_sulci(anatomy, meta["age"]["sulcal_widening"])
+    if age_draw is not None:
+        meta["age"] = age_draw
     return DigitalPhantom(anatomy, tissues, field_T, options, meta)

@@ -324,7 +324,7 @@ def main():
     ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
     ap.add_argument("--pitch", default=None, help="mean,sd [deg], nose down positive (sample_head(pitch=))")
-    ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head (sample_head(age=): sulci)")
+    ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head: closed sulci opened to that age's width (sample_head(age=), Jin 2018)")
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
     ap.add_argument("--deep-grey", action="store_true",
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
@@ -337,7 +337,7 @@ def main():
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
                     help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
-                    help="years, or lo,hi drawn uniformly per head: lateral ventricles enlarged for that age (Yamada 2023)")
+                    help="years, lo,hi drawn uniformly per head, or 'age' (the head's --age): lateral ventricles enlarged for that age (Yamada 2023)")
     ap.add_argument("--trace-sulci", action="store_true", help="experimental: open sulci along BrainWeb's faint CSF trace")
     ap.add_argument("--sas-mm", type=float, default=0.0,
                     help="calibration: the outer mm of convexity CSF become inner table (thin_convexity_csf)")
@@ -386,8 +386,9 @@ def main():
     protocols = real_protocols(args.manifest)
     age = None if args.age is None else (tuple(float(a) for a in args.age.split(",")) if "," in args.age else float(args.age))
     pitch = None if args.pitch is None else tuple(float(a) for a in args.pitch.split(","))
-    vage = None if args.ventricle_age is None else (tuple(float(a) for a in args.ventricle_age.split(","))
-                                                     if "," in args.ventricle_age else float(args.ventricle_age))
+    vage = None if args.ventricle_age is None else ("age" if args.ventricle_age == "age" else
+                                                    tuple(float(a) for a in args.ventricle_age.split(","))
+                                                    if "," in args.ventricle_age else float(args.ventricle_age))
     args.out.mkdir(parents=True, exist_ok=True)
     for seed in span(args.seeds):
         dest = args.out / f"sim_{seed:03d}.npz"
