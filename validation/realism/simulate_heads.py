@@ -287,7 +287,7 @@ def main():
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 --coil-radius 0.125 (no --age: "
+                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 2 --pitch -10,5 (no --age: "
                          "open_sulci's 1 mm ridges "
                          "make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
@@ -302,9 +302,8 @@ def main():
         args.deep_grey = args.flow_void = True
         args.refocus = "protocol"
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
-        args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
+        args.sas_mm = args.sas_mm or 2.0  # a calibration (thin_convexity_csf)
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
-        args.coil_radius = 0.125  # the head coil's inner surface (24-26 cm across), not the 18 cm default
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
