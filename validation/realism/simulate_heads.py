@@ -95,6 +95,27 @@ def flow_void(head) -> None:
     head.tissues["vessels"] = replace(p, pd=Distribution(0., None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True))
 
 
+def drop_detached(head) -> None:
+    """Tissue not attached to the head (BrainWeb subject 38 has a 0.4 mL blob of "skin" 20 mm in front
+    of the forehead, a marker in its source scan, and a few voxel specks) becomes air: every
+    connected component of the head mask (tissue > 0.5) but the largest, grown by a voxel to take
+    its partial voxels."""
+    an = head.anatomy
+    fr = an.fractions
+    tissue = sum(v for k, v in fr.items() if k != "background").numpy() > .5
+    lab, n = ndimage.label(tissue)
+    if n < 2:
+        return
+    sizes = np.bincount(lab.ravel())
+    sizes[0] = 0
+    drop = torch.from_numpy(ndimage.binary_dilation((lab > 0) & (lab != np.argmax(sizes))) & ~(lab == np.argmax(sizes)))
+    out = {k: torch.where(drop, torch.zeros_like(v), v) for k, v in fr.items() if k != "background"}
+    if "background" in fr:
+        moved = sum(torch.where(drop, v, torch.zeros_like(v)) for k, v in fr.items() if k != "background")
+        out["background"] = torch.where(drop, (fr["background"] + moved).clamp(max=1), fr["background"])
+    head.anatomy = replace(an, fractions=out)
+
+
 def thin_convexity_csf(head, thickness: float) -> None:
     """A calibration to the fastMRI scans, not measured anatomy: CSF within ``thickness`` [m] of the
     calvarium (skull and marrow) and outside the brain's hull (closed by 3 mm: the subarachnoid layer, not the
@@ -308,6 +329,7 @@ def main():
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
                               ventricle_age=vage, pitch=pitch)
+        drop_detached(head)
         if args.flow_void:
             flow_void(head)
         if args.sas_mm:

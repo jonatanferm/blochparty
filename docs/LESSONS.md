@@ -668,6 +668,15 @@ says where it came from so it can be re-checked.
   (2026-10-11): with one grey-matter T2 (96.5 ms) the basal ganglia shone like cortex; at 3 T iron
   puts them near white matter (Krug 2022: 57-76 ms). Labelled by MNI regions: caudate 3.3,
   putamen 4.9 mL per side; thalamus 3.3, pallidum 0.3 mL (the rest stays white matter).
+- **A morphological opening can eat the real scalp** (2026-10-11): `lab.head_mask` opens the
+  thresholded image twice; in real scans the thin, dim lateral scalp at the low slices does not
+  survive it, so real heads measured 143 mm left-right at slice 0 (opened once: 157) and their area
+  looked flat for 35 mm (it falls like ours, only slower). The simulated scalp survived, so the
+  same function biased real against simulated. Check a mask on the images it is used on.
+- **Routine axial slices are tilted to BrainWeb's AC-PC frame** (2026-10-11): sampled heads lost
+  area faster with height than the real stacks (slice 8: 0.73 vs 0.79 of slice 0; slice 15: 0.15 vs
+  0.21). A vertical stretch filled the top too much; tipping the head 10 deg nose up matched all
+  of slices 5, 8, 12 and 15 (0.89 / 0.77 / 0.50 / 0.21 against 0.94 / 0.79 / 0.48 / 0.21).
 - **A resized grid's margin is empty, not air** (2026-10-11): pull-back resampling fills points
   outside the source grid with zeros in every class, background included, so `1 - background`
   calls the margin tissue and `fill_holes` then swallows the air around the head. Use
