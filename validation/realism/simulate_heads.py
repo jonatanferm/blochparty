@@ -69,7 +69,7 @@ PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
 MONRO_BELOW_BODIES = 10e-3  # the foramen of Monro / basal-ganglia level below the ventricle bodies
 
 
-def stack(anatomy, mode: str = "landmarks") -> np.ndarray:
+def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES) -> np.ndarray:
     """z [m] of slices 0..15. "landmarks": slice 0 at the largest lateral-ventricle cross-section, the
     brain top at slice 13.5. "protocol": slice 0 ``MONRO_BELOW_BODIES`` below that (the real slice 0
     shows frontal horns, caudate heads, thalami and the third ventricle), then ``PROTOCOL_SPACING``
@@ -83,7 +83,7 @@ def stack(anatomy, mode: str = "landmarks") -> np.ndarray:
     top = z[np.nonzero(brain.reshape(len(z), -1).sum(1) * np.prod(anatomy.voxel[1:]) > 50e-6)[0].max()]
     z0 = z[np.argmax(deep)]
     if mode == "protocol":
-        return z0 - MONRO_BELOW_BODIES + np.arange(SLICES) * PROTOCOL_SPACING
+        return z0 - offset + np.arange(SLICES) * PROTOCOL_SPACING
     return z0 + np.arange(SLICES) * (top - z0) / 13.5
 
 
@@ -347,7 +347,10 @@ def main():
                     help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5; with "
-                         "--source ixi: --size native, no ventricle age, no rim calibration")
+                         "--source ixi: --size native, no ventricle age, no rim calibration, --stack-offset-mm 15")
+    ap.add_argument("--stack-offset-mm", type=float, default=None,
+                    help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
+                         f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
     ap.add_argument("--source", choices=("brainweb", "ixi"), default="brainweb",
                     help="ixi: heads segmented from IXI 3 T subjects (validation/anatomy/prepare_ixi.py); with the "
                          "preset: their own size, sulci and ventricles, no rim calibration")
@@ -367,6 +370,9 @@ def main():
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
         if args.source == "ixi":  # real anatomy: no sulcal, ventricle, rim or scalp edits; the subject's own size
             args.size, args.ventricle_age, args.age = "native", None, None
+            # a calibration: IXI heads at their own height narrow a slice faster than the real stacks with slice 0
+            # 10 mm below the ventricle bodies; 15 mm fits the real area profile (rms 0.020 vs 0.038, slices 0-11)
+            args.stack_offset_mm = args.stack_offset_mm or 15.0
             args.sas_mm = 0.0
 
     def span(s):  # "a-b" or "a-b:step"
@@ -411,7 +417,7 @@ def main():
             thin_convexity_csf(head, args.sas_mm * 1e-3)
         traced = trace_sulci(head) if args.trace_sulci else None
         fields = head.field_maps()
-        zs = stack(head.anatomy, args.stack)
+        zs = stack(head.anatomy, args.stack, MONRO_BELOW_BODIES if args.stack_offset_mm is None else args.stack_offset_mm * 1e-3)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
         kspace, timing = {}, []
 
@@ -448,7 +454,7 @@ def main():
                 "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
-                "stack": args.stack,
+                "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",
