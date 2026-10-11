@@ -1544,4 +1544,16 @@ The parts of M5 that need no outside access, done while the user was away.
   intensity W1 0.025 (0.041), quartiles 0.256 / 0.375 / 0.558 against real 0.242 / 0.344 / 0.539.
   Blinded on its first nine heads: 12/12, by the speckled cortex and bright posterior sulcal CSF at
   the high slices: BrainWeb's closed sulci (LESSONS), which no setting here reaches.
+- **r14 (12 new heads, slices 1-7, GM T2 83 ms as an experiment)** against r13 on the same slices:
+  CNN AUC 0.905 [0.78, 0.99] vs 0.936 [0.82, 0.998], histogram AUC 0.866 vs 0.898, GM/WM 1.54 vs
+  1.58 (real 1.49); blinded 12/12 (two tiles by things stuck to the head: BrainWeb 18's marker,
+  a thin line in a tilted 42; trimmed, ed15108). The database keeps 96.5 ms until sources robust
+  to stimulated echoes are in (LESSONS lists leads).
+- **Sulci**: three openers failed (white-matter-distance ridge, Hessian sheets, distance slab), and
+  so did using BrainWeb's own faint CSF trace along the closed sulci (real, but too noisy as a
+  ridge). The anatomy, not the physics, is what still gives the simulated slices away; the next
+  step is a richer anatomy source (needs a download: the user's call) or surface-based sulci.
+- Blinded tally this session: r4-r5 12/12; r6-r7 10/12; r9 30/36; r11 12/12; r12 30/36; r13 24/24;
+  r14 12/12. Caveat: I have looked at the 21 real scans dozens of times and recognise some; a fair
+  human test needs real scans not seen before.
 

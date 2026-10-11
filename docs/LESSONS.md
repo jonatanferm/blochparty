@@ -687,7 +687,12 @@ says where it came from so it can be re-checked.
   sheet filter (2-3 mm blobs, 62 mL in a 50 mm block); and a third time as "grey matter >= 1.8 mm
   from white matter and >= 1.5 mm from CSF", which also hollows grey matter that is only thick
   where cut tangentially (53 mL; busier cortex at 1.72 mm). Needs surface-based sulci (pial
-  surfaces) or another anatomy source.
+  surfaces) or another anatomy source. One lead: BrainWeb did keep a trace of the closed sulci.
+  At 0.5 mm, grey matter dips to ~0.8-0.9 along their midlines, where CSF is 0.02-0.15 (90th
+  percentile inside GM 0.08), in continuous lines. But ridges of that trace are as noisy as
+  the others (dotted along nearly all grey matter at a 0.03 threshold), and concentrating it
+  locally (power 3, 1 mm window) moves too little mass to show. Coherent sheet extraction
+  (structure tensor) on the dip field is untried.
 - **Open: why the real scalp is as bright as CSF** (2026-10-11): in the fastMRI 3 T T2 scans the
   scalp's top decile is 0.93 of ventricular CSF; the tissue values give fat / CSF ~0.63 at TR 6.5 s
   (fat T2 148 ms from CPMG, CSF partly saturated), and ours measure 0.68-0.73. A receive ring at
