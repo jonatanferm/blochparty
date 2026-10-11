@@ -1738,4 +1738,8 @@ The parts of M5 that need no outside access, done while the user was away.
 - **My blinded sheets are wearing out**: 12/12 on six v5 heads (unmixing, GM T2 83 ms), but these were the six
   subjects I had just looked at in three variants; I now recognise some IXI brains by shape (IXI334's bright
   posterior midline). The CNN (r20) and a fresh observer are the fair judges from here.
+- **A quiz for a fresh eye**: `outputs/real_or_simulated.html` (local only: the real tiles are fastMRI), 12 real
+  and 12 simulated slices at the final settings (v5 heads, GM T2 83 ms), shuffled, scored in the page; built
+  by the scratch quiz.py, its key unseen by me. 24 v5 heads prepared (all pass QC); ~30 more subjects being
+  prepared into prepared_more/ for a larger pool. r20 starts on the mini after 23:00.
 
