@@ -895,6 +895,11 @@ says where it came from so it can be re-checked.
 
 ## Process and tooling
 
+- **Scratch scripts named like standard modules break imports** (2026-10-11): `inspect.py` once,
+  then a `profile.py` next to a new script made torch's optimizer import fail (`cProfile` imports
+  `profile`); Python puts the script's directory first on the path. Keep scratch scripts in their
+  own directory, with names no module has.
+
 - **Idle GPU threads alias spin 0: guard every write.** Threads past the last spin read spin 0's
   inputs (index clamped) and must not write. One unguarded store in the adjoint's replay let 255 idle
   threads overwrite spin 0's states with zeros: every gradient but λ and PD came out ~0, which looked
