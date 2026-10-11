@@ -203,6 +203,20 @@ def centre(anatomy, zs) -> tuple[float, float]:
             anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1])
 
 
+def coil_offset(anatomy, zs, cy: float, radius: float, gap: float) -> float:
+    """Anterior offset [m] of the receive ring's centre from the field-of-view centre ``cy`` when the head
+    rests on the coil's posterior side: the ring's posterior-most point ``gap`` behind the head's most
+    posterior point (from 30 mm below slice 0 up: the occiput, not the neck). The real images are
+    brighter at the back than at the front (white matter at the front 0.89 of the back's, the outer
+    ring 0.71: validation/realism/orientation.py's display), as a head lying on the posterior elements
+    gives; a ring centred on the head gives 1.00 and 0.82."""
+    head = (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
+    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
+    rows = head[z >= zs[0] - 30e-3]
+    back = anatomy.origin[1] + np.nonzero(rows.any((0, 2)))[0][0] * anatomy.voxel[1]
+    return back - cy - gap + radius
+
+
 B1_MAP = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "em" / "body.npz"
 _B1 = {}
 
@@ -338,8 +352,12 @@ def main():
     ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
     ap.add_argument("--override", action="append", default=[],
                     help="experiment: class.property=value on the tissue table (e.g. gm.t2=0.083), marked assumed")
-    ap.add_argument("--coil-radius", type=float, default=0.18,
-                    help="receive ring radius [m] (birdcage_sensitivities); head coils' elements sit at ~0.12-0.13 m")
+    ap.add_argument("--coil-radius", type=float, default=None,
+                    help="receive ring radius [m] (birdcage_sensitivities; default 0.18, the preset 0.14); head coils' "
+                         "elements sit at ~0.12-0.14 m")
+    ap.add_argument("--coil-gap-mm", type=float, default=None,
+                    help="the head rests on the coil's posterior side: the receive ring's back this far behind the "
+                         "head's back (coil_offset); default: the ring centred on the head")
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
                     help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
@@ -352,8 +370,9 @@ def main():
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
-                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5; with "
-                         "--source ixi: --size native, no ventricle age, no rim calibration")
+                         "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 "
+                         "--coil-radius 0.14 --coil-gap-mm 25; with --source ixi: --size native, no ventricle age, no "
+                         "rim calibration")
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
                          f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
@@ -374,9 +393,15 @@ def main():
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
         args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
+        # the head rests on the coil's posterior elements (coil_offset): a 14 cm ring 25 mm behind the head's back
+        # matches the real images' front-to-back fall (white matter 0.89, outer ring 0.71; IXI012: 0.83, 0.70)
+        args.coil_radius = args.coil_radius or 0.14
+        args.coil_gap_mm = 25.0 if args.coil_gap_mm is None else args.coil_gap_mm
         if args.source == "ixi":  # real anatomy: no sulcal, ventricle, rim or scalp edits; the subject's own size
             args.size, args.ventricle_age, args.age = "native", None, None
             args.sas_mm = 0.0
+
+    args.coil_radius = args.coil_radius or 0.18
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -423,6 +448,7 @@ def main():
         zs = stack(head.anatomy, args.stack, MONRO_BELOW_BODIES if args.stack_offset_mm is None else args.stack_offset_mm * 1e-3,
                    head.meta["ventricle_landmark"][0] if args.source == "ixi" else None)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
+        ring = 0.0 if args.coil_gap_mm is None else coil_offset(head.anatomy, zs, cy, args.coil_radius, args.coil_gap_mm * 1e-3)
         kspace, timing = {}, []
 
         def prepare(i):
@@ -438,7 +464,8 @@ def main():
                 ph.b1 = b1_plus(head, ph.pos).to(ph.pos.dtype)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
-            return seq, ph, bp.birdcage_sensitivities(ph.pos, proto["coils"], radius=args.coil_radius)
+            ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP
+            return seq, ph, bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius)
 
         slices = list(span(args.slices))
         with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap
@@ -455,7 +482,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1),
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,
