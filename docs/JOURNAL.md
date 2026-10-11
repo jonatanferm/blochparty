@@ -1532,4 +1532,16 @@ The parts of M5 that need no outside access, done while the user was away.
   gave tiles away; detached tissue is dropped.
 - Dead ends: membership sharpening (power 2; no better), GM T2 85 ms (no visible change), a 9 mm
   deformation (swirls). The "grain" metric flips sign between slice sets; not used.
+- **r11 / r12** (12 new heads each): the 12.5 cm ring (r11) lowered the CNN AUC to 0.967 but the
+  blinded test went to 12/12 (bright peripheral cortex, GM/WM 1.73, and a black-looking bone band);
+  back to 18 cm with 2 mm thinning (r12): blinded 30/36, CNN 1.0, histogram AUC 0.86, but the
+  cortical CSF broke into dots (6f1fe24, then 1.5 mm again: f73fc96).
+- **Cleanups**: faint "skin" around BrainWeb 42's neck and fuzzy-classifier haze in the air are
+  dropped with the marker (0982579); simulate_heads frees memory between heads (a465208; one
+  process grew to 15 GB on the mini and swapped).
+- **r13, the scoring protocol of f0-f4** (20 new heads, slices 0-12, realistic preset at f73fc96):
+  CNN AUC 0.973 [0.916, 0.999] (f4: 0.998 [0.992, 1]), histogram AUC 0.774 [0.662, 0.879] (0.911),
+  intensity W1 0.025 (0.041), quartiles 0.256 / 0.375 / 0.558 against real 0.242 / 0.344 / 0.539.
+  Blinded on its first nine heads: 12/12, by the speckled cortex and bright posterior sulcal CSF at
+  the high slices: BrainWeb's closed sulci (LESSONS), which no setting here reaches.
 
