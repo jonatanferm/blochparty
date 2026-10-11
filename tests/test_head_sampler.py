@@ -234,3 +234,49 @@ def test_pitch_tips_the_face_down_and_keeps_volumes():
     assert z1 > z0 and y1 < y0
     for k in ("gm", "wm", "csf"):
         assert float(down.anatomy.fractions[k].sum()) == pytest.approx(float(flat.anatomy.fractions[k].sum()), rel=.02)
+
+
+def _fake_ixi(root, ixi_id=7, scale=0.9):
+    """A prepared IXI head on a small grid: nested spheres of BrainWeb's classes, as prepare_ixi.py writes."""
+    import numpy as np
+
+    classes = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+    n, h = 40, 4e-3
+    z, y, x = np.meshgrid(*(np.arange(n) - n / 2 + .5,) * 3, indexing="ij")
+    r = np.sqrt(z ** 2 + y ** 2 + x ** 2)
+    frac = np.zeros((len(classes), n, n, n), np.float32)
+    for name, (lo, hi) in {"wm": (0, 8), "gm": (8, 11), "csf": (11, 13), "skull": (13, 15), "skin": (15, 18)}.items():
+        frac[classes.index(name)][(r >= lo) & (r < hi)] = 1
+    frac[0][r >= 18] = 1
+    origin = (-n / 2 * h,) * 3
+    meta = {"ixi_id": ixi_id, "age": 55.0, "sex": "f", "classes": classes,
+            "affine_mm": [[scale, 0, 0, 0], [0, scale, 0, 0], [0, 0, scale, 0], [0, 0, 0, 1]],
+            "lncc": 0.2, "volumes_ml": {}, "origin": list(origin), "voxel": [h] * 3, "shape": [n] * 3}
+    (root / "ixi" / "prepared").mkdir(parents=True)
+    np.savez_compressed(root / "ixi" / "prepared" / f"IXI{ixi_id:03d}.npz", fractions=np.round(frac * 255).astype(np.uint8),
+                        meta=json.dumps(meta))
+
+
+def test_ixi_heads(tmp_path):
+    """source="ixi": a prepared IXI head loads with its meta, sample_head draws it, size="native" restores its own
+    size from the registration's scale (0.9 here: the brain shrinks ~0.73 in volume), and age= / ventricle_age=
+    / size="native" for BrainWeb are refused."""
+    import numpy as np
+    from blochparty.anatomy import ixi_subjects, load_ixi
+
+    _fake_ixi(tmp_path)
+    assert ixi_subjects(tmp_path / "ixi") == [7]
+    an, meta = load_ixi(7, tmp_path / "ixi")
+    total = sum(an.fractions.values())
+    assert meta["age"] == 55.0 and float((total - 1).abs().max()) < 1e-5
+    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0.)
+    head = sample_head(3, source="ixi", **kw)
+    assert head.meta["source"] == "ixi" and head.meta["ixi"]["ixi_id"] == 7 and head.meta["subject"] == 7
+    native = sample_head(3, source="ixi", size="native", **kw)
+    assert native.meta["size"]["factors"] == pytest.approx([0.9] * 3)
+    brain = lambda h: float((h.anatomy.fractions["gm"] + h.anatomy.fractions["wm"]).sum())
+    assert brain(native) / brain(head) == pytest.approx(0.9 ** 3, rel=0.1)
+    with pytest.raises(ValueError):
+        sample_head(3, source="ixi", age=50., **kw)
+    with pytest.raises(ValueError):
+        sample_head(3, size="native", root=tmp_path, voxel=(4e-3,) * 3)

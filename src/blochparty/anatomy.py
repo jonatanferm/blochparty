@@ -638,6 +638,28 @@ def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     return anatomy if resolution is None else anatomy.resample(resolution)
 
 
+def ixi_subjects(root) -> list[int]:
+    """IXI ids with a prepared head under ``root`` (validation/anatomy/prepare_ixi.py writes root/prepared)."""
+    return sorted(int(p.stem[3:]) for p in (Path(root) / "prepared").glob("IXI*.npz"))
+
+
+def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32) -> tuple[Anatomy, dict]:
+    """An IXI 3 T head (Hammersmith, IXI dataset, CC BY-SA 3.0) prepared by validation/anatomy/prepare_ixi.py:
+    BrainWeb's 12 classes on BrainWeb's 1 mm MNI grid, segmented from the subject's own T1 and T2 (EM with
+    BrainWeb priors, affine registration), so the MNI-based steps (deep grey regions, ventricle prior, slice
+    stack) apply. Returns the anatomy (resampled to ``voxel`` if given) and the preparation's meta: age,
+    sex, the affine (MNI mm -> the subject's world mm; its scale is the subject's size), volumes."""
+    path = Path(root) / "prepared" / f"IXI{int(subject):03d}.npz"
+    data = np.load(path)
+    meta = json.loads(str(data["meta"]))
+    raw = data["fractions"]
+    fractions = {k: torch.from_numpy(raw[i].astype(np.float32) / 255).to(dtype) for i, k in enumerate(meta["classes"])}
+    anatomy = Anatomy(_renormalize(fractions), tuple(meta["voxel"]), tuple(meta["origin"]))
+    if voxel is not None and _triple(voxel, "voxel", True) != anatomy.voxel:
+        anatomy = anatomy.resample(voxel)
+    return anatomy, meta
+
+
 def _properties(anatomy, table, field_T):
     if field_T not in table:
         raise ValueError(f"no tissue table for {field_T} T; provide explicit values (no field interpolation)")
@@ -1563,7 +1585,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
-                pitch: tuple[float, float] | None = None, sulci: str = "conserved") -> DigitalPhantom:
+                pitch: tuple[float, float] | None = None, sulci: str = "conserved",
+                source: str = "brainweb") -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1593,10 +1616,16 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
     draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level)."""
+    if source not in ("brainweb", "ixi"):
+        raise ValueError(f"source must be 'brainweb' or 'ixi', not {source!r}")
+    if source == "ixi" and (age is not None or ventricle_age is not None):
+        raise ValueError("IXI heads have their own sulci, ventricles and age: no age= or ventricle_age=")
+    if size == "native" and source != "ixi":
+        raise ValueError("size='native' needs source='ixi' (a subject with its own size)")
     if scalp not in ("brainweb", "layered"):
         raise ValueError(f"scalp must be 'brainweb' or 'layered', not {scalp!r}")
-    if size not in ("brainweb", "anthropometric", "anthropometric_shell"):
-        raise ValueError(f"size must be 'brainweb', 'anthropometric' or 'anthropometric_shell', not {size!r}")
+    if size not in ("brainweb", "anthropometric", "anthropometric_shell", "native"):
+        raise ValueError(f"size must be 'brainweb', 'anthropometric', 'anthropometric_shell' or 'native', not {size!r}")
     root = root or os.environ.get("BLOCHPARTY_BRAINWEB")
     if root is None:
         raise ValueError("pass root=, the BrainWeb data directory (validation/anatomy/fetch_brainweb.py)")
@@ -1609,10 +1638,19 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if deep_grey and (missing := [k for k in DEEP_GREY if k not in table[field_T]]):
         raise ValueError(f"deep_grey needs tissue properties for {missing} (tissuedb.tissue_table)")
     streams = [int(s.generate_state(1)[0]) for s in np.random.SeedSequence(int(seed)).spawn(5)]
-    if subject is None:
+    ixi_meta = None
+    if source == "ixi":
+        ixi_root = Path(root) / "ixi"
+        if subject is None:
+            pool = ixi_subjects(ixi_root)
+            subject = pool[int(np.random.default_rng(streams[0]).integers(len(pool)))]
+        subject = int(str(subject).removeprefix("IXI"))
+    elif subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     age_draw = None
-    if age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
+    if source == "ixi":
+        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype)
+    elif age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
         years = float(age) if np.isscalar(age) else float(np.random.default_rng(
             np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
         native = load_brainweb(subject, root, dtype=dtype)
@@ -1656,7 +1694,14 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if size != "brainweb" or yaw_sd or pitch is not None:
         # pull back x -> c + S^-1 R^-1 (x + d(x) - c): deformed, then turned by the yaw and resized about c
         rng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(6)[5])
-        if size != "brainweb":
+        if size == "native":  # the subject's own size: the scale of its registration (MNI -> its world)
+            lin = np.array(ixi_meta["affine_mm"])[:3, :3]
+            factors = tuple(float(np.linalg.norm(lin[:, a])) for a in (2, 1, 0))  # (z, y, x)
+            head = _head_mask(anatomy)
+            centre = tuple(float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
+                           for k, h in enumerate(anatomy.voxel))
+            size_draw = {"native": True, "factors": list(factors)}
+        elif size != "brainweb":
             factors, centre, size_draw = anthropometric_scaling(anatomy, rng, shell=size == "anthropometric_shell")
             size_draw["factors"] = list(factors)
         else:
@@ -1725,4 +1770,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         anatomy = layer_scalp(anatomy)
     if age_draw is not None:
         meta["age"] = age_draw
+    if ixi_meta is not None:
+        meta["source"] = "ixi"
+        meta["ixi"] = {k: ixi_meta[k] for k in ("ixi_id", "age", "sex", "lncc", "volumes_ml")}
     return DigitalPhantom(anatomy, tissues, field_T, options, meta)

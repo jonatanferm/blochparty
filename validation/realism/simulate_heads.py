@@ -349,6 +349,9 @@ def main():
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 (no --age: "
                          "open_sulci's 1 mm ridges "
                          "make CSF specks that look fake)")
+    ap.add_argument("--source", choices=("brainweb", "ixi"), default="brainweb",
+                    help="ixi: heads segmented from IXI 3 T subjects (validation/anatomy/prepare_ixi.py); with the "
+                         "preset: their own size, sulci and ventricles, no rim calibration")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
@@ -363,6 +366,9 @@ def main():
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
         args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
         args.pitch = args.pitch or "-10,5"  # mean fitted to the real stacks' head-area profile; SD assumed
+        if args.source == "ixi":  # real anatomy: no sulcal, ventricle, rim or scalp edits; the subject's own size
+            args.size, args.ventricle_age, args.age = "native", None, None
+            args.sas_mm = 0.0
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -398,7 +404,7 @@ def main():
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
-                              ventricle_age=vage, pitch=pitch)
+                              ventricle_age=vage, pitch=pitch, source=args.source)
         drop_detached(head)
         if args.flow_void:
             flow_void(head)
@@ -440,7 +446,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack,
