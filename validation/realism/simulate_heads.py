@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import math
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 import json
 import time
 from pathlib import Path
@@ -49,6 +50,7 @@ import torch
 from scipy import ndimage
 
 import blochparty as bp
+from blochparty.anatomy import Distribution
 from blochparty.sequence import System
 
 ROOT = Path(__file__).resolve().parents[2] / "validation" / "anatomy" / "data"
@@ -81,6 +83,32 @@ def stack(anatomy, mode: str = "landmarks") -> np.ndarray:
     if mode == "protocol":
         return z0 - MONRO_BELOW_BODIES + np.arange(SLICES) * PROTOCOL_SPACING
     return z0 + np.arange(SLICES) * (top - z0) / 13.5
+
+
+def flow_void(head) -> None:
+    """BrainWeb's vessel class holds the dural sinuses and large vessels; their blood flows at
+    ~10-30 cm/s, and through a 5 mm slice a TSE echo at 113 ms keeps < 3 % of static blood's signal
+    from 10 cm/s up (the engine's moving spins, tests/test_motion.py::test_tse_flow_void). Their
+    spins are left out (PD 0 after the draw, so no other draw moves); susceptibility stays."""
+    p = head.tissues["vessels"]
+    head.tissues["vessels"] = replace(p, pd=Distribution(0., None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True))
+
+
+def thin_convexity_csf(head, thickness: float) -> None:
+    """A calibration to the fastMRI scans, not measured anatomy: CSF within ``thickness`` [m] of the
+    calvarium (skull and marrow) and outside the brain's hull (closed by 3 mm: the subarachnoid layer, not the
+    sulci) becomes inner table. Real profiles aligned at the bone (frontal: 0.16 at the bone, then
+    0.28-0.44) show a thinner, dimmer layer under the calvarium than BrainWeb's (0.29, then up to
+    0.64), and 0.57 mm reconstructions a thin line at most; 1-2 mm brackets them."""
+    an = head.anatomy
+    fr = an.fractions
+    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *bp.anatomy.DEEP_GREY)).numpy() > .5
+    hull = ndimage.binary_fill_holes(ndimage.binary_closing(brain, iterations=round(3e-3 / an.voxel[1])))
+    bone = (fr["skull"] + fr["marrow"]).numpy() > .5  # the calvarium, not the falx and tentorium
+    d = ndimage.distance_transform_edt(~bone, sampling=an.voxel)
+    w = torch.from_numpy(np.clip((thickness + an.voxel[1] / 2 - d) / an.voxel[1], 0, 1) * ~hull).to(fr["csf"].dtype)
+    move = fr["csf"] * w
+    head.anatomy = replace(an, fractions=fr | {"csf": fr["csf"] - move, "skull": fr["skull"] + move})
 
 
 def centre(anatomy, zs) -> tuple[float, float]:
@@ -205,8 +233,9 @@ def main():
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
     ap.add_argument("--scalp", choices=("brainweb", "layered"), default="brainweb",
                     help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp)")
-    ap.add_argument("--size", choices=("brainweb", "anthropometric"), default="brainweb",
-                    help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized)")
+    ap.add_argument("--size", choices=("brainweb", "anthropometric", "anthropometric_shell"), default="brainweb",
+                    help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized); "
+                         "_shell: by scaling the skull's contents, the skull and scalp keeping their thickness")
     ap.add_argument("--centre", action="store_true", help="field of view centred on the head (as an operator would)")
     ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
@@ -215,22 +244,25 @@ def main():
     ap.add_argument("--deep-grey", action="store_true",
                     help="caudate, putamen, pallidum and thalamus as their own tissues (sample_head(deep_grey=); --table tissuedb)")
     ap.add_argument("--deform-mm", type=float, default=3.0, help="random deformation magnitude [mm] (sample_head(magnitude=))")
+    ap.add_argument("--flow-void", action="store_true", help="BrainWeb's vessels (sinuses, large arteries) as TSE flow voids (flow_void())")
+    ap.add_argument("--sas-mm", type=float, default=0.0,
+                    help="calibration: the outer mm of convexity CSF become inner table (thin_convexity_csf)")
     ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
                     help="birdcage: B1+ of the full-wave 3 T body coil map (b1_plus)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
-                    help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric --centre "
-                         "--stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey (no --age: open_sulci's 1 mm "
-                         "ridges make CSF specks that look fake)")
+                    help="realistic: --multislice --mt --table tissuedb --scalp layered --size anthropometric_shell "
+                         "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
+                         "--flow-void (no --age: open_sulci's 1 mm ridges make CSF specks that look fake)")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
-        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric", "protocol", 3.8
+        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered", "anthropometric_shell", "protocol", 3.8
         args.quality = "real"
         args.readout_os = 2
         args.b1 = "birdcage"
-        args.deep_grey = True
+        args.deep_grey = args.flow_void = True
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
@@ -255,6 +287,10 @@ def main():
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3)
+        if args.flow_void:
+            flow_void(head)
+        if args.sas_mm:
+            thin_convexity_csf(head, args.sas_mm * 1e-3)
         fields = head.field_maps()
         zs = stack(head.anatomy, args.stack)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
@@ -289,7 +325,8 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "stack": args.stack,
+                "age": head.meta.get("age"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm,
+                "stack": args.stack,
                 "readout_os": args.readout_os, "b1": args.b1, "quality": args.quality,
                 "spins": list(spins), "sampling": sampling, "jitter": jitter, "slab_voxels": 2 * half + 1, "rf_raster": rf_raster,
                 "jacobian": head.meta["deformation"]["jacobian"], "n": args.n, "readouts": "nufft", "pulses": "reuse",

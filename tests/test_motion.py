@@ -213,3 +213,26 @@ def test_gpu_diffusion_under_field_model():
         out = metal.simulate_metal(ph, seq, coils, scanner=scanner, seed=3)
         assert float((out.signal.to(ref.signal.dtype) - ref.signal).abs().max() / ref.signal.abs().max()) < 2e-4
         assert float((out.m.double() - ref.m).abs().max() / ref.m.abs().max()) < 3e-3
+
+
+def test_tse_flow_void():
+    """Blood streaming through a 5 mm slice at 10 cm/s keeps < 5 % of static blood's signal at a TSE
+    echo near 113 ms (echo 11 at 10.26 ms spacing; static ~2/3 of echo 1): the premise of treating
+    BrainWeb's vessels as flow voids (validation/realism/simulate_heads.py, flow_void)."""
+    metal = pytest.importorskip("blochparty.metal")
+    if not metal.available():
+        pytest.skip("no Apple GPU")
+    seq = bp.tse_2d(16, 0.22, etl=16, esp=0.01026, tr=0.5, slice_thickness=5e-3, n_dummy=0, dtype=torch.float32)
+    dur = float(seq.dt.sum())
+
+    def echo11(v, dz=25e-6):
+        z = torch.arange(-(v * dur + 4e-3), 4e-3, dz, dtype=f64)
+        n = len(z)
+        ph = spins(torch.stack([torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64), z], -1),
+                   motion=bp.Motion(velocity=torch.tensor([0., 0., v], dtype=f64).expand(n, 3).contiguous()))
+        ph = replace(ph, t1=torch.full((n,), 1.74, dtype=f64), t2=torch.full((n,), .275, dtype=f64))
+        return float(metal.simulate_metal(ph, seq).signal[0].abs().double().reshape(16, -1).mean(1)[10])
+
+    static = echo11(0.)
+    assert echo11(0.10) < 0.05 * static and echo11(0.20) < 0.05 * static
+    assert 0.5 * static < echo11(0.005) < static  # slow flow loses only part
