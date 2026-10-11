@@ -2,7 +2,8 @@
 
 Per subject: the T1 is registered (affine, local NCC, 4 then 2 mm) to a T1-like image made from BrainWeb
 subject 04's fractions, T1 and T2 are resampled onto BrainWeb's grid (they share world coordinates: one
-session), and an EM with one Gaussian per class in (log T1, log T2) and a cubic-polynomial log-bias field
+session, though the head moves between them: the T2 is rigidly aligned to the T1 by the correlation of their
+gradient magnitudes), and an EM with one Gaussian per class in (log T1, log T2) and a cubic-polynomial log-bias field
 per channel assigns the classes. Priors: BrainWeb 04's head classes smoothed 2 mm; the intracranial total
 smoothed 2 mm and split among CSF / grey / white by their 8 mm proportions, so the subject's intensities,
 not BrainWeb's sulci, place the cortex. Outside the skull the head classes come from rules on the
@@ -113,6 +114,53 @@ def onto(vol, aff_vol, M, shape_zyx, origin_mm):
     return sample(vol, torch.tensor(aff_vol, dtype=torch.float32), pts).numpy()
 
 
+def _rot(angles):
+    a, b, c = angles
+    one, zero = torch.ones(()), torch.zeros(())
+    rx = torch.stack([torch.stack([one, zero, zero]), torch.stack([zero, torch.cos(a), -torch.sin(a)]), torch.stack([zero, torch.sin(a), torch.cos(a)])])
+    ry = torch.stack([torch.stack([torch.cos(b), zero, torch.sin(b)]), torch.stack([zero, one, zero]), torch.stack([-torch.sin(b), zero, torch.cos(b)])])
+    rz = torch.stack([torch.stack([torch.cos(c), -torch.sin(c), zero]), torch.stack([torch.sin(c), torch.cos(c), zero]), torch.stack([zero, zero, one])])
+    return rz @ ry @ rx
+
+
+def align_t2(t1_grid, t2, a2, M, shape_zyx, origin_mm, iters=(120, 60)):
+    """Rigid correction R (the subject's world mm -> world mm, about the head's centre) so that T2 sampled at
+    R(M x) matches T1 on the grid: IXI's T1 and T2 are separate scans and the head moves between them
+    (up to 4+ mm). Cost: correlation of their gradient magnitudes inside the head (contrast-independent)."""
+    def gradmag(v):
+        gz, gy, gx = v[2:, 1:-1, 1:-1] - v[:-2, 1:-1, 1:-1], v[1:-1, 2:, 1:-1] - v[1:-1, :-2, 1:-1], v[1:-1, 1:-1, 2:] - v[1:-1, 1:-1, :-2]
+        return torch.sqrt(gz ** 2 + gy ** 2 + gx ** 2 + 1e-8)
+    angles = torch.zeros(3, requires_grad=True)
+    shift = torch.zeros(3, requires_grad=True)
+    nz, ny, nx = shape_zyx
+    aff2 = torch.tensor(a2, dtype=torch.float32)
+    for step, (stride, it) in enumerate(zip((2, 1), iters)):
+        g = np.stack(np.meshgrid(np.arange(0, nx, stride), np.arange(0, ny, stride), np.arange(0, nz, stride), indexing="ij"), -1) \
+            + np.asarray(origin_mm)
+        pts = torch.tensor(g, dtype=torch.float32).permute(2, 1, 0, 3) @ torch.tensor(M[:3, :3], dtype=torch.float32).T \
+            + torch.tensor(M[:3, 3], dtype=torch.float32)
+        centre = pts.reshape(-1, 3).mean(0)
+        ref = torch.tensor(ndimage.gaussian_filter(t1_grid, stride)[::stride, ::stride, ::stride].copy())
+        g1 = gradmag(ref)
+        mask = (ref[1:-1, 1:-1, 1:-1] > .1)
+        g1 = (g1 - g1[mask].mean()) / g1[mask].std()
+        sm = ndimage.gaussian_filter(t2, stride)
+        opt = torch.optim.Adam([{"params": [angles], "lr": 2e-3}, {"params": [shift], "lr": 0.3}])
+        for _ in range(it):
+            opt.zero_grad()
+            moved = (pts - centre) @ _rot(angles).T + centre + shift
+            g2 = gradmag(sample(sm, aff2, moved))
+            g2 = (g2 - g2[mask].mean()) / g2[mask].std()
+            loss = -(g1 * g2)[mask].mean()
+            loss.backward()
+            opt.step()
+    R = np.eye(4)
+    rot = _rot(angles.detach()).numpy()
+    c = centre.numpy()
+    R[:3, :3], R[:3, 3] = rot, c - rot @ c + shift.detach().numpy()
+    return R, -float(loss.detach())
+
+
 def em(y, prior, basis, iters=30):
     """EM: y (C, N) log intensities, prior (K, N), basis (N, T) for the log-bias field; posteriors (K, N)"""
     C, N = y.shape
@@ -154,8 +202,11 @@ def prepare(ixi_id, root, atlas, fixed2):
     t2, a2 = load_ras(t2p)
     M, score = register(*fixed2, t1, a1)
     shape, origin = atlas.shape, np.array(atlas.origin) * 1e3
-    chans = [onto(t1, a1, M, shape, origin), onto(t2, a2, M, shape, origin)]
-    valid = (onto(np.ones_like(t1), a1, M, shape, origin) > 0.99) & (onto(np.ones_like(t2), a2, M, shape, origin) > 0.99)
+    c1 = onto(t1, a1, M, shape, origin)
+    R2, t2score = align_t2(c1, t2, a2, M, shape, origin)
+    M2 = R2 @ M
+    chans = [c1, onto(t2, a2, M2, shape, origin)]
+    valid = (onto(np.ones_like(t1), a1, M, shape, origin) > 0.99) & (onto(np.ones_like(t2), a2, M2, shape, origin) > 0.99)
     fr = {k: atlas.fractions[k].numpy().astype(np.float32) for k in CLASSES}
     intra = ndimage.gaussian_filter(sum(fr[k] for k in BRAIN), 2.0)
     share = {k: ndimage.gaussian_filter(fr[k], 8.0) + 0.02 for k in BRAIN}
@@ -225,7 +276,9 @@ def prepare(ixi_id, root, atlas, fixed2):
     frac /= frac.sum(0, keepdims=True)
     scale = abs(np.linalg.det(M[:3, :3])) * 1e-3  # mL per MNI voxel in the subject's own size
     vol = {c: round(float(frac[i].sum()) * scale, 1) for i, c in enumerate(CLASSES) if c != "background"}
-    return frac, M, score, vol, {"t1": t1p.name, "t2": t2p.name}, round(time.time() - t0)
+    t2_motion = {"shift_mm": np.round(R2[:3, 3], 2).tolist(), "rotation_deg": round(float(np.degrees(np.arccos(np.clip((np.trace(R2[:3, :3]) - 1) / 2, -1, 1)))), 2),
+                 "gradient_r": round(t2score, 3)}
+    return frac, M, score, vol, {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion}, round(time.time() - t0)
 
 
 if __name__ == "__main__":
