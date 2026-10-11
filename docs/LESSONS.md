@@ -610,8 +610,18 @@ says where it came from so it can be re-checked.
   the inverse FFT, then the central rows of the oversampled readout and the central columns of the
   phase direction (to the reconstruction matrix, 384 x 384 over 220 mm), reproduces the files'
   `reconstruction_rss` with correlation 1.0000000. The readout runs anterior-posterior (image
-  rows), anterior is up. The 3 T AXT2 stacks (16 x 5 mm) run from the lateral ventricles (slice 0)
-  to above the vertex (slice 15) in all 21 volumes.
+  rows), posterior is up (corrected 2026-10-12: the next entry). The 3 T AXT2 stacks (16 x 5 mm) run
+  from the lateral ventricles (slice 0) to above the vertex (slice 15) in all 21 volumes.
+- **fastMRI's brain images show the head posterior up; a mean-image correlation cannot tell** (2026-10-12):
+  for two days the simulated heads were displayed anterior up against posterior-up real ones. The first
+  check correlated mean images (r 0.94 as-is, 0.82 flipped), but an AP flip barely changes a mean oval;
+  reading the anatomy by eye failed too (the flattened, dark-banded edge I took for the occiput on the
+  pad is the forehead and frontal sinus). What settled it: a head-shape statistic that separated the
+  two sets perfectly (the width of the real heads peaks 0.34-0.44 of their length from the top row, of
+  IXI's 29 axial T2 heads, oriented by their NIfTI affines, 0.48-0.62 from the front; the values
+  mirror each other), and an interior template from IXI (each slice cropped to its head's box,
+  central ellipse only): real slices match it flipped in 91 % of 147. Check an orientation against
+  data whose orientation is known, with a feature that is not symmetric (`validation/realism/orientation.py`).
 - **Unbalanced person-wise folds bias a classifier against the held-out people**: a real-vs-real
   null test gave AUC 0.20 for a histogram logistic regression (CI excluding 0.5) when folds held
   out people without balancing classes; dealing each class's people round-robin into folds moved

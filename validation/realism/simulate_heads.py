@@ -9,8 +9,10 @@ head (5.1 mm for BrainWeb subject 04, against 5 mm slices in the real data).
 
 The real scans read out anterior-posterior; the phantom is turned by -90 deg about z, (x, y) ->
 (y, -x), so the simulated readout (x) runs anterior-posterior too and chemical shift and artefacts
-point the same way. ``to_real_orientation`` turns the image back (anterior up, patient right on
-the image left, as fastMRI shows it).
+point the same way. ``to_real_orientation`` turns the image to the way fastMRI's reconstruction shows
+it: posterior up (validation/realism/orientation.py; until 2026-10-12 the simulated heads were shown
+anterior up against posterior-up real ones), columns as before (left-right is not established; the
+score flips it at random).
 
 Noise-free k-space (coils, 128, 128; k = 0 at index 64) is saved per slice; noise is added later,
 calibrated to the real images' noise floor, so the noise model can change without simulating again.
@@ -248,9 +250,10 @@ def turn(ph: bp.Phantom) -> bp.Phantom:
 
 
 def to_real_orientation(img: np.ndarray) -> np.ndarray:
-    """Simulated (y', x') image -> fastMRI display: rows anterior to posterior, columns patient right
-    to left."""
-    return img.T[::-1, :]
+    """Simulated (y', x') image -> fastMRI display: rows posterior to anterior (fastMRI's stored images
+    show the head posterior up: validation/realism/orientation.py), columns from the patient's right
+    (+x) to left (left-right is not established against the real data)."""
+    return img.T
 
 
 def interleaved(count=SLICES) -> list[int]:
