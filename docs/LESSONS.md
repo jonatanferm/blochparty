@@ -677,6 +677,15 @@ says where it came from so it can be re-checked.
   area faster with height than the real stacks (slice 8: 0.73 vs 0.79 of slice 0; slice 15: 0.15 vs
   0.21). A vertical stretch filled the top too much; tipping the head 10 deg nose up matched all
   of slices 5, 8, 12 and 15 (0.89 / 0.77 / 0.50 / 0.21 against 0.94 / 0.79 / 0.48 / 0.21).
+- **BrainWeb's CSF sits in the wrong place for T2w realism** (2026-10-11): at the vertex levels most
+  sulci are closed (two grey banks touching, no CSF) and a continuous CSF rim wraps the brain, at
+  0.5 mm as at 1 mm; real 3 T scans show a thin outer layer and long sulcal lines. Its 1.5 T source
+  scans could not resolve narrow sulcal CSF, so it went to grey matter. Thinning the rim (a
+  calibration) removes one tell and exposes the other: the broken sulcal CSF reads as speckle (2 mm:
+  10.3 components per 1000 px of 17 px; real 7.2 of 31). Opening the closed sulci failed twice: on
+  the ridge of the white-matter distance (salt along the sulci, at 0.5 mm too) and on a Hessian
+  sheet filter (2-3 mm blobs, 62 mL in a 50 mm block). Needs surface-based sulci (pial surfaces) or
+  another anatomy source.
 - **Open: why the real scalp is as bright as CSF** (2026-10-11): in the fastMRI 3 T T2 scans the
   scalp's top decile is 0.93 of ventricular CSF; the tissue values give fat / CSF ~0.63 at TR 6.5 s
   (fat T2 148 ms from CPMG, CSF partly saturated), and ours measure 0.68-0.73. A receive ring at
