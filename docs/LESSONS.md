@@ -699,11 +699,18 @@ says where it came from so it can be re-checked.
   A 32-echo 2D train inflates apparent T2 through stimulated echoes, and our engine plays those
   echoes itself, so it needs the intrinsic T2; the real images' GM/WM (1.50 against our 1.58)
   lean the same way. Needs sources robust to stimulated echoes (EMC, nonselective CPMG,
-  single-echo series).
+  single-echo series). Leads not yet in the database: Utkur 2025 (MRM, 1 volunteer: 3D GRASE GM
+  75.7, WM 59.5 ms); a multi-slice CPMG study with stimulated-echo correction reporting cortical GM
+  79-88 ms by lobe (source not traced).
 - **A resized grid's margin is empty, not air** (2026-10-11): pull-back resampling fills points
   outside the source grid with zeros in every class, background included, so `1 - background`
   calls the margin tissue and `fill_holes` then swallows the air around the head. Use
   "sum of tissue classes > 0.5" (`_head_mask`).
+
+- **A long simulate_heads run grows** (2026-10-11): one process over many realistic heads reached
+  15 GB on the 16 GB mini (allocator caches across heads), which swapped with another user's 5 GB
+  app and slowed slices 3-5x. It now frees memory between heads; for long batches, one process per
+  head also works.
 
 ## Other simulators
 
