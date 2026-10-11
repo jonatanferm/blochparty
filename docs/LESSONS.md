@@ -677,6 +677,20 @@ says where it came from so it can be re-checked.
   area faster with height than the real stacks (slice 8: 0.73 vs 0.79 of slice 0; slice 15: 0.15 vs
   0.21). A vertical stretch filled the top too much; tipping the head 10 deg nose up matched all
   of slices 5, 8, 12 and 15 (0.89 / 0.77 / 0.50 / 0.21 against 0.94 / 0.79 / 0.48 / 0.21).
+- **Open: why the real scalp is as bright as CSF** (2026-10-11): in the fastMRI 3 T T2 scans the
+  scalp's top decile is 0.93 of ventricular CSF; the tissue values give fat / CSF ~0.63 at TR 6.5 s
+  (fat T2 148 ms from CPMG, CSF partly saturated), and ours measure 0.68-0.73. A receive ring at
+  the coil's surface (12.5 cm, 1/r) brightens the scalp but also the cortex (GM/WM 1.73 vs real
+  1.50), and the full-wave 8-loop map makes the periphery 1.4-2x brighter than the real images
+  allow; a blinded test went back to 12/12 with it. Candidates left: a steeper near field than 1/r
+  with 3 T central brightening, fat's effective T2 in a 10 ms-spaced train (one 3 T study reports
+  371 ms), ventricular CSF dimmed by pulsation.
+- **Grey matter T2 at 3 T rests on two numbers** (2026-10-11): the database pools Lu 2005 (CPMG, 83
+  ms) and Wansapura 1999 (110 ms, its abstract's GM/WM labels swapped by the curator, flagged).
+  A 32-echo 2D train inflates apparent T2 through stimulated echoes, and our engine plays those
+  echoes itself, so it needs the intrinsic T2; the real images' GM/WM (1.50 against our 1.58)
+  lean the same way. Needs sources robust to stimulated echoes (EMC, nonselective CPMG,
+  single-echo series).
 - **A resized grid's margin is empty, not air** (2026-10-11): pull-back resampling fills points
   outside the source grid with zeros in every class, background included, so `1 - background`
   calls the margin tissue and `fill_holes` then swallows the air around the head. Use
