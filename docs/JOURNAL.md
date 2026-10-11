@@ -1649,4 +1649,18 @@ The parts of M5 that need no outside access, done while the user was away.
   for BrainWeb). Rendered IXI anatomy shows long sulcal lines and a thin midline at the vertex where
   BrainWeb has a grey slab; first simulated IXI heads look like the real scans at slices 5-7. Known
   gap: the T2 covers MNI z <= ~92, so the scalp above is background (above the scored slices).
+- **Blinded, six IXI heads (v1, quality real)**: 10/12, with several guesses; the cues were a uniform
+  bright scalp ring (fixed 4.14 mm `layer_scalp` everywhere), orbits and frontal sinus at slice 2 (a
+  -19.5 deg pitch draw, 2 SD), and a squiggle in front of the forehead (a skin marker in IXI277's own
+  scan, attached to the scalp). One IXI tile passed as real.
+- **IXI v2 + drawn scalp** (4fb9fed): scalp fat by unmixing the subject's bias-corrected T2 between soft
+  tissue (0.9 x WM, temporalis) and its own pure fat (98th percentile of T1-bright head tissue; orbital
+  fat 2.3-3.8 x WM in T2), the head one connected piece and, above MNI z 15 mm, each axial section
+  opened by an 8 mm disc (the marker goes); `scalp="layered_drawn"` (preset) draws each head's dermis
+  and subcutaneous thickness from Li 2024 (1.61 +- 0.23, 4.14 +- 1.10 mm). IXI's own fat alone made the
+  scalp dimmer than fastMRI's (the real scalp is as bright as CSF), so the layers stay on top of it.
+  26 subjects re-prepared (~3 min each); age trends on v1: GM/ICV 0.484 -> 0.437 from 25 to 75 y
+  (r -0.78), CSF/ICV 0.194 -> 0.229 (r 0.69), ICV men 1465, women 1290 mL.
+- **r18 stopped** after 6 of 20 v1 heads (230 s per slice on the swapping mini); **r19**: 16 IXI v2 heads,
+  one subject each, spins 2x4x4, slices 1-7, then the score with its controls.
 
