@@ -1667,4 +1667,14 @@ The parts of M5 that need no outside access, done while the user was away.
   before)**: 8/12, mostly guesses (two simulated tiles taken for real, two real for simulated). The
   blinded tally on BrainWeb heads was 10-12/12 all day; one 12-tile sheet is weak evidence (8 of 12
   is not significantly above chance), so r19's 16 heads get several sheets and the CNN with its controls.
+- **Open: IXI heads narrow a slice too fast.** On the six v2 heads, brain-interior quantiles at slices 5-7
+  (q50 / q70 / q85 over q15) are 1.71 / 2.68 / 3.90 against real 1.31 / 1.79 / 2.67 (slices 1-4 closer:
+  1.45 / 1.95 / 2.85 vs 1.30 / 1.71 / 2.51), and head area falls faster (slice 7 / slice 1: 0.78 vs
+  real 0.86, BrainWeb 0.84). Pitch (-12 to 0 deg) barely moves the anatomy's area profile; a stack
+  offset of 15 mm instead of 10 matches it (rms 0.020 vs 0.038 over slices 0-11), but anatomy argues
+  for ~8.5 mm at IXI's measured height (Monro ~10 mm below the bodies in MNI, z scale ~0.85). The MNI
+  frame is taller than real heads, so BrainWeb heads sized by breadth and length stayed tall and the
+  -10 deg pitch was fitted on them. Kept the anatomical offset for r19; its per-slice AUC will say
+  whether the top slices carry the difference. Sulcal band statistics now match (7.95 / 34 / 0.27 vs
+  7.25 / 31 / 0.25); the back's dark band is wide (4.0 vs 2.5 px).
 
