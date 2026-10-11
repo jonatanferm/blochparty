@@ -11,6 +11,8 @@ fat bright in T1 and T2 (inside the bone shell: marrow), bone dark in both, soft
 of the surface it is BrainWeb's "muscle/skin" (skin), which `layer_scalp` splits into dermis and
 subcutaneous fat as for BrainWeb's heads; deeper it is muscle (temporalis, neck). Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
 mm), age and sex (IXI.xls; nothing else of it is kept) and the tissue volumes in the subject's own size.
+Known gap: the T2 covers ~134 mm (MNI z <= ~92), so the scalp and skull above it are left as background
+(the brain ends at z ~75; the scored slices lie below ~50).
 
     uv run --with xlrd python validation/anatomy/prepare_ixi.py [--subjects 12,13 | --count 40] [--root ...]
 """

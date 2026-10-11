@@ -84,7 +84,7 @@ def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES):
             sigma = target * np.percentile(clean, 99) / units[c]
             noisy = k + sigma * (rng.standard_normal(k.shape) + 1j * rng.standard_normal(k.shape))
             img = R.normalise(SH.to_real_orientation(R.recon(noisy)))
-            items.append((f"sim:subject{meta['subject']:02d}", s, img))  # heads of one subject: one person
+            items.append((f"sim:{meta.get('source') or 'brainweb'}{meta['subject']:03d}", s, img))  # heads of one subject: one person
     return items
 
 
@@ -244,7 +244,7 @@ def main():
     real, floor = real_set(args.cache, args.fastmri, slices)
     sim = sim_set(args.sim, floor, slices=slices)
     print(f"{len(real)} real slices from {len({i[0] for i in real})} scans, {len(sim)} simulated from "
-          f"{len({i[0] for i in sim})} BrainWeb subjects; real noise floor {np.median(list(floor.values())):.4f} of p99", flush=True)
+          f"{len({i[0] for i in sim})} source subjects; real noise floor {np.median(list(floor.values())):.4f} of p99", flush=True)
     results = []
     res, s = run("real vs simulated", real, sim, device, args.epochs)
     results.append(res)

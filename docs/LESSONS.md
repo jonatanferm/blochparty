@@ -717,6 +717,12 @@ says where it came from so it can be re-checked.
   are for five major sulci measured on 1 mm T1 (BrainVISA), not every sheet a medial axis finds.
   Opening also brings BrainWeb's grey/white volume (1.44, subject 04; 20-subject mean 1.63) to
   1.23 and its pial-to-white distance from 2.92 to 2.35 mm (adult cortex ~2.5).
+- **Read the score's controls before its AUC** (2026-10-11): r16 (10 heads from 8 BrainWeb subjects,
+  two heads lost mid-run on the swapping mini) scored real-vs-simulated CNN AUC 0.07 [0, 0.19] and
+  histogram 0.06: inverted, not a success. Its simulated-vs-simulated control (4 subjects against 4)
+  gave 0.008 where 0.5 is expected; person-split cross-validation over a handful of people anti-learns
+  (each held-out person sits closer to the other class's training people). Score runs need ~15+
+  distinct subjects, and a control far from 0.5 voids the headline number.
 - **Sub-voxel spins leave a Monte-Carlo grain a CNN reads** (2026-10-11): random in-plane positions
   (and random subcells per tissue) are a point sampling of the anatomy; through the 1.72 mm PSF they
   add pixel-scale texture that falls as 1 / sqrt(spins): flat-brain Immerkaer sigma 0.026 at 5.4 M

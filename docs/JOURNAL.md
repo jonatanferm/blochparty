@@ -1634,3 +1634,19 @@ The parts of M5 that need no outside access, done while the user was away.
   T1 0.94 x 0.94 x 1.2 mm, T2, ages; CC BY-SA 3.0) are being fetched (`validation/anatomy/fetch_ixi.py`,
   parallel byte ranges: one stream ran at 0.65 MB/s) to segment into BrainWeb's 12 classes on its
   MNI grid (affine registration to a T1-like image from BrainWeb's fractions works: 94 s, det 0.83).
+- **r16 (real_fine, 4x4x4 spins, BrainWeb preset)**: two heads died silently on the swapping mini, 10
+  heads from 8 subjects; the score's sim-vs-sim control came out 0.008 (anti-learning with 4 people
+  per side), so its real-vs-sim AUC 0.07 means nothing (LESSONS). The other measures: in-brain grain
+  0.0132 of p99 (real 0.0141, r13 0.0226), so the spin grain is gone; the finest spectral bands
+  (0.33-0.48 cycles/px) now at 0.50-0.77 of real (r13 0.74-0.87); blinded 12/12 by the anatomy
+  (dark gap under the skull, hazy lateral cortex, midline band).
+- **IXI heads** (f86012d): `validation/anatomy/prepare_ixi.py` segments each 3 T subject into
+  BrainWeb's 12 classes on its 1 mm MNI grid (affine to a T1-like BrainWeb image, EM on log T1 / log T2
+  with BrainWeb priors and a cubic log-bias field; outside the skull, intensity rules: the EM swapped
+  classes in the thin head layers). ~3 min, 13 MB per subject; age and sex kept from IXI.xls (ages
+  20-82, median 48, 93 of 185 women). `load_ixi`, `sample_head(source="ixi", size="native")`,
+  `simulate_heads --source ixi` (no rim calibration, no sulcal or ventricle edits; layered scalp as
+  for BrainWeb). Rendered IXI anatomy shows long sulcal lines and a thin midline at the vertex where
+  BrainWeb has a grey slab; first simulated IXI heads look like the real scans at slices 5-7. Known
+  gap: the T2 covers MNI z <= ~92, so the scalp above is background (above the scored slices).
+
