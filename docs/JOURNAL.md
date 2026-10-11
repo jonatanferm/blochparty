@@ -1579,3 +1579,58 @@ The parts of M5 that need no outside access, done while the user was away.
   (std/mean 0.30 raw) but the matching by the background mean still lands the brain's noise.
   Quality "real_fine" (4x4x4) added; r16 runs it.
 
+## 2026-10-11 — Opening BrainWeb's closed sulci; conserved CSF; IXI as the next anatomy
+
+- **Opened sulci** (`open_sulci` rewritten; `sample_head(age=)`): a closed sulcus is grey matter
+  reached from two facing white-matter banks, found with the feature transform (neighbouring voxels
+  whose nearest white points are >= 3 mm apart and within 60 deg of opposite: the lambda-medial axis)
+  on BrainWeb's native 0.5 mm grid, kept where the sheet touches the CSF around the brain, outside the
+  deep grey regions; CSF fills the age's width (Jin et al. 2018: 1.27 mm at 47 y, 1.49 at 67, with
+  their between-subject SD) either side of the midplane, then the head is resampled (0e2f15f; peak
+  memory 6.9 -> 3.8 GB by opening a three-class copy, 24e1db8). Unlike the four earlier openers it
+  draws continuous sulcal lines; 0.5 mm bumps and 3 mm grooves open nothing (tests); 20 subjects
+  get 117-210 mL at 1.3 mm (MNI size). Subject 04's CSF 254 -> 322 mL (25 y) / 381 mL (75 y, with
+  ventricles of the same age; Yamada 2023 287 / 389). Opening brings BrainWeb's grey/white volume
+  1.44 -> 1.23 and its pial-to-white distance 2.92 -> 2.35 mm. The ridge opener is gone.
+- **Matched pair (local, quality real, 6 heads, slices 1-7)**: the same heads with (A) and without (B)
+  opened sulci. Blinded on A: 10/12 (one sim at slice 6 taken for real, one real for sim; r13-r15
+  were 12/12). Cortical-band CSF (slices 2-6, components per 1000 px / mean px / bright fraction):
+  real 7.2 / 31 / 0.25 (10-90 %: 5.1-9.6 / 11-66 / 0.14-0.33); B 8.8 / 21 / 0.19; A 4.9 / 65 / 0.33,
+  i.e. from the real lower half to its upper edge, with young draws (25-48 y). Brain power spectrum
+  over real, by band 0.025-0.475 cycles/px: B 1.4-1.5 low, ~1.0 mid, 0.72-0.86 high (soft); A 1.6-1.95
+  low and mid, 1.26-1.50 high. GM/WM 1.63 -> 1.59 (real 1.49); the rim under the skull brighter
+  (front 0.77 -> 0.82, side 0.70 -> 0.79; real 0.71 / 0.61). Per head the excess follows the subject
+  (BrainWeb 04 and 45 already bright, 42 matches real) more than the width.
+- **Width x 0.6 (pair C, same heads)**: cortical-band CSF 6.7 / 42 / 0.28 (real 7.2 / 31 / 0.25), the
+  spectrum's high bands ~1.0 of real (mid 1.36-1.64); blinded 12/12 nonetheless, by hazy lateral
+  patches and a foggy, mottled cortex: no longer the sulci.
+- **The fog is BrainWeb's diffuse CSF**: grey-dominant voxels hold 37.6 mL of CSF (3.9 % on average,
+  subject 04), which at T2w lifts grey matter ~9 %, the gap between our GM/WM (1.59) and real (1.49).
+  It is the blurred trace of the sulci now opened explicitly. Grey matter T2 (96.5 ms, the median of
+  Lu 2005 83 ms and Wansapura 1999 110 ms) is the other suspect; the 3 T literature with
+  slice-selective multi-echo fits runs to 147 ms (Mumuni 2015), so it needs stimulated-echo-robust
+  sources (EMC: Radunsky 2021; Wiggermann 2020 3 T values only in a figure). Parked.
+- **Brain-interior intensity quantiles settle the amount** (q70 / q85 over q15 ~ white matter, slices
+  1-4; real 1.71 / 2.51): unopened 1.73 / 2.55, Jin x 0.6 1.91 / 2.83, Jin x 1.0 2.07 / 3.22,
+  gathered + Jin 2.07 / 3.19 (slices 5-7: real 1.79 / 2.67, unopened 1.70 / 2.27). The real images
+  hold about BrainWeb's amount of bright CSF, in lines rather than a rim and diffuse speckle. Hence
+  **conserved sulci** (0988ea3, now `sample_head(age=)`'s default): each grey/CSF mixture outside the
+  deep nuclei goes to its larger share (`gather_cortical_csf`), the sheets take the width that
+  keeps the CSF volume (`open_sulci(volume=)`), widened by Jin's slope (0.011 mm/yr) beyond 30 y;
+  `sulci="measured"` keeps Jin's widths. On the six heads: 1.67 / 2.42 and 1.78 / 2.36; cortical-band
+  CSF 8.9 / 21 / 0.20 (young draws, 25-48 y, so thin lines). Subject 04 at 25 y: CSF unchanged
+  (253.7 mL), 19.9 mL gathered.
+- **Blinded, six local heads each (quality real)**: Jin widths 10/12, x 0.6 12/12, gathered + Jin
+  12/12, conserved 10/12 (one miss was subject 42's skin wedge at the source grid's front edge, a
+  cut of BrainWeb's field of view the pitch lifts into slice 3 in front of the forehead, which I read
+  as a real skin marker). What still gives tiles away: a broad light band along the midline at
+  slices 6-7 (subjects 04, 45: BrainWeb's posterior medial cortex is a ~15 mm grey slab with no
+  white cores, which no opener can split), hazy lateral patches, dense fine lines at slice 7.
+- **Checked and not the tell**: head aspect (left-right / front-back 0.81-0.82 at slices 1-7, real
+  0.79-0.81), the dark band under the scalp (front 2.5 px vs real 2.0, back 3.5 vs 2.5; before the
+  rim calibration it was narrower than real, so later changes widened it, by 0.5-1 px).
+- **Anatomy source**: the remaining tells (midline grey slab, hazy patches, fine lines at slice 7) are
+  BrainWeb's 1.5 T, 1 mm segmentation. With the user's go-ahead, IXI's 3 T subjects (Hammersmith,
+  T1 0.94 x 0.94 x 1.2 mm, T2, ages; CC BY-SA 3.0) are being fetched (`validation/anatomy/fetch_ixi.py`,
+  parallel byte ranges: one stream ran at 0.65 MB/s) to segment into BrainWeb's 12 classes on its
+  MNI grid (affine registration to a T1-like image from BrainWeb's fractions works: 94 s, det 0.83).
