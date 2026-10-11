@@ -641,6 +641,37 @@ says where it came from so it can be re-checked.
   (foramen of Monro), ~10 mm below the lateral ventricles' largest cross-section. The head-area
   profile alone cannot separate offset from spacing (a valley of equal fits); anatomy picks the
   offset, and then contiguous 5 mm slices fit.
+- **fastMRI headers hold more protocol than the manifest kept** (2026-10-11): `reconSpace` z is
+  the slice thickness (5 mm; `encodedSpace` z says 7.5, a padded value, not a gap or a thickness),
+  `sequenceParameters` has `echo_spacing` (10.26 ms at TE 113, so TE is echo 11; we played 12.6 ms
+  and echo 9 of 16), and `flipAngle_deg` is the refocusing angle (180 in 11 of the 21 3 T AXT2,
+  140-179 in the rest). No echo-train length anywhere.
+- **Measure layers aligned at a landmark, not at a fixed depth** (2026-10-11): a band 5-7 px below
+  the head edge said the simulated calvarium was too dark (0.26 vs 0.35-0.41), and BrainWeb's
+  marrow became yellow (fatty) marrow. Aligned at each ray's bone minimum, the same images say the
+  opposite (bone 0.27-0.29 vs real 0.16-0.21): the scalp and skull thicknesses differ, so a fixed
+  depth samples different layers in real and simulated heads. 0.57 mm reconstructions of six real
+  heads show a uniformly dark frontal bone, no bright diploe; the mapping went back to the
+  unspecified (trabecular) marrow.
+- **p99 normalisation couples the scalp to the brain** (2026-10-11): in the real scans the scalp's
+  top decile (0.89) is as bright as ventricular CSF (0.87); in ours the scalp was 0.79 and CSF
+  1.02, so CSF set the scale alone and the whole brain came out ~13 % brighter. A dim scalp makes
+  a bright brain.
+- **The bright rim under the skull is the tell** (2026-10-11): blinded r5 12/12 again, picked by a
+  continuous bright CSF rim just inside the skull and speckled bright cortex. Aligned at the bone,
+  real and simulated profiles agree from 5 px in; the excess is the first 2-4 px (0.62-0.64 vs
+  0.39-0.44 frontal). Not the receive ring (12 cm: rim unchanged, white matter periphery worse),
+  not grey-matter T2 (85 ms: no change), not marrow. Thinning BrainWeb's subarachnoid layer by
+  1.5-2 mm matches, but removes 16-25 % of the CSF, while BrainWeb's total (245 mL after resizing,
+  18.5 % of ICV) is already at or below young adults' (Yamada 2023: 287 mL; older 389 mL). Open.
+- **BrainWeb labels the deep nuclei grey matter, and much of the pallidum and thalamus white**
+  (2026-10-11): with one grey-matter T2 (96.5 ms) the basal ganglia shone like cortex; at 3 T iron
+  puts them near white matter (Krug 2022: 57-76 ms). Labelled by MNI regions: caudate 3.3,
+  putamen 4.9 mL per side; thalamus 3.3, pallidum 0.3 mL (the rest stays white matter).
+- **A resized grid's margin is empty, not air** (2026-10-11): pull-back resampling fills points
+  outside the source grid with zeros in every class, background included, so `1 - background`
+  calls the margin tissue and `fill_holes` then swallows the air around the head. Use
+  "sum of tissue classes > 0.5" (`_head_mask`).
 
 ## Other simulators
 
