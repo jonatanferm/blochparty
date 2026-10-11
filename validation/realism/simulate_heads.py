@@ -38,6 +38,7 @@ their bound pool (``to_phantom(mt=True)``); ``--table tissuedb`` draws the tissu
 from __future__ import annotations
 
 import argparse
+import gc
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
@@ -385,6 +386,10 @@ def main():
                 "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
         print(json.dumps(meta), flush=True)
+        del head, fields, kspace
+        gc.collect()  # one process over many heads grew to 15 GB on a 16 GB machine
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
 
 if __name__ == "__main__":
