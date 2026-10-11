@@ -11,7 +11,7 @@ the bias-corrected T1 and T2 against local pure intensities (``unmix_partial_vol
 to a step in intensity and doubled the CSF in boundary voxels). Outside the skull the head classes come from rules on the
 bias-corrected intensities relative to the subject's white matter (the EM swapped them in the thin layers):
 bone dark in both; fat by unmixing T2 between soft tissue (0.9 x white matter) and the subject's own pure
-fat, with a bright T1 (inside the bone shell: marrow); soft tissue the rest (skin within 8 mm of the
+fat (the median T2 of T1-bright head tissue), with a bright T1 (inside the bone shell: marrow); soft tissue the rest (skin within 8 mm of the
 surface, muscle deeper). The head is its largest connected piece. Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
 mm), age and sex (IXI.xls; nothing else of it is kept) and the tissue volumes in the subject's own size.
 Known gap: the T2 covers ~134 mm (MNI z <= ~92), so the scalp and skull above it are left as background
@@ -298,9 +298,12 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
             opened = ndimage.binary_opening(head[kz], structure=disc)
             head[kz] = ndimage.binary_fill_holes(ndimage.binary_dilation(opened, iterations=2) & head[kz])
     p_bone = sig((.35 - r1) / .06) * sig((.45 - r2) / .08)
-    # fat by unmixing T2 between soft tissue (~0.9 x WM, temporalis) and the subject's own pure fat (98th
-    # percentile of T2 among T1-bright head tissue: orbital and scalp fat); T1 must be bright too
-    pure = np.percentile(r2[head & ~intra & (r1 > .8)], 98)
+    # fat by unmixing T2 between soft tissue (~0.9 x WM, temporalis) and the subject's own pure fat: the median T2
+    # of head tissue brighter than WM in T1 (fat, marrow). The 98th percentile of T2 among T1-bright tissue (to
+    # 2026-10-12; IXI012 3.09 x WM against a median of 1.41) unmixed subcutaneous fat to about a third: its own fat
+    # then gave a simulated scalp 35-40 % short of fastMRI's in signal over WM, and the 4 mm layer laid on top
+    # (layer_scalp) 35-65 % over
+    pure = float(np.median(r2[head & ~intra & (r1 > 1.)]))
     p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
     p_soft = np.clip(1 - p_fat - p_bone, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra

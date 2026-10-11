@@ -335,8 +335,9 @@ def main():
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
-    ap.add_argument("--scalp", choices=("brainweb", "layered", "layered_drawn"), default="brainweb",
-                    help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp)")
+    ap.add_argument("--scalp", choices=("brainweb", "layered", "layered_drawn"), default=None,
+                    help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp); "
+                         "brainweb (default): the anatomy's own classes")
     ap.add_argument("--size", choices=("brainweb", "anthropometric", "anthropometric_shell"), default="brainweb",
                     help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized); "
                          "_shell: by scaling the skull's contents, the skull and scalp keeping their thickness")
@@ -372,7 +373,7 @@ def main():
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 "
                          "--coil-radius 0.14 --coil-gap-mm 25; with --source ixi: --size native, no ventricle age, no "
-                         "rim calibration")
+                         "rim calibration, the subject's own scalp (--scalp brainweb)")
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
                          f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
@@ -384,7 +385,9 @@ def main():
     args = ap.parse_args()
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
-        args.table, args.scalp, args.size, args.stack, args.yaw_sd = "tissuedb", "layered_drawn", "anthropometric_shell", "protocol", 3.8
+        args.table, args.size, args.stack, args.yaw_sd = "tissuedb", "anthropometric_shell", "protocol", 3.8
+        # BrainWeb lumps scalp fat into "skin": a drawn layer; IXI heads keep their own scalp fat (prepare_ixi)
+        args.scalp = args.scalp or ("brainweb" if args.source == "ixi" else "layered_drawn")
         args.quality = "real" if args.quality == "full" else args.quality
         args.readout_os = 2
         args.b1 = "birdcage"
@@ -401,6 +404,7 @@ def main():
             args.size, args.ventricle_age, args.age = "native", None, None
             args.sas_mm = 0.0
 
+    args.scalp = args.scalp or "brainweb"
     args.coil_radius = args.coil_radius or 0.18
 
     def span(s):  # "a-b" or "a-b:step"
