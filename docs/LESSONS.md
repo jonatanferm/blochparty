@@ -654,6 +654,23 @@ says where it came from so it can be re-checked.
 - **Measure the thing, not a proxy that mixes two layers** (2026-10-12): "skin to the darkest point of the skull"
   said our posterior scalp was 1.2 mm too thick and led to a compression model; skin to the skull's outer surface said
   the scalp was 1.6 mm too thin and the skull's dark band too wide.
+- **A residual fitted per voxel carries the source images' noise, amplified** (2026-10-12): T2 from the ratio of two
+  echoes (IXI's TE 8 / 100 ms) turns ~2 % image noise into ~4 % per voxel after 0.7 mm smoothing, and r25's first heads
+  had 1.4-2.4 x the real fine texture in the hemispheres. Smooth the fitted map (1.5 mm: log SD 0.19 -> 0.05 on IXI012,
+  the structure above 2 mm kept: same-person RMS 0.074 against 0.072), within each tissue so that boundaries the
+  labels already carry stay sharp; check a fitted map's power spectrum against the real images' before simulating.
+- **Fit a residual only where the model and the source images share geometry** (2026-10-12): outside the skull the
+  phantom's fat sits where it belongs (the water-fat shift undone) but the subject's images still show it shifted, so
+  the residual "corrected" the scalp layers against misplaced fat and dimmed the posterior scalp peak from 0.65 to
+  0.43 of p99 (real 0.83). The residual is now fitted inside the skull only.
+- **A correlation across a run's heads is not a parameter's effect** (2026-10-12): in r24 the posterior scalp-to-brain
+  depth correlated with each head's drawn pitch (r -0.64, anterior +0.74) and suggested +8 deg instead of -10; the
+  same 16 heads as proxy images at fixed pitches -10..+10 moved it by < 1 px (posterior 7.8-8.5, anterior 5.2-6.5).
+  The subjects carried the variation. Sweep the parameter on the same heads before changing it.
+- **Compare against the same anatomy version** (2026-10-12): r24's heads were v8 (IXI's fat still 1.63 mm posterior),
+  the proxies v10 (shift undone); their 1.5 px posterior / anterior disagreement looked like a simulation effect.
+  Simulating the v10 head with and without fat's chemical shift moved the edges by ~0.5 px (the expected 0.56 px:
+  434 Hz over 128 samples at 10 us); v8 -> v10 moved the posterior dark minimum 5.0 -> 4.5 px (real 4.5).
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 

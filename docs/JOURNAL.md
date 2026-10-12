@@ -1907,3 +1907,27 @@ The parts of M5 that need no outside access, done while the user was away.
   x0.98-1.09, grey matter PD x1.06, scalp soft tissue T2 x1.52 / PD x0.68. Same-person check (scanner trend removed
   from both): brain |log ratio| median 0.064 -> 0.032, 2 mm-smoothed RMS 0.080 -> 0.072. 24 heads re-prepared as v10
   (fat shift undone + residual maps) for r25.
+- **r25 (v10 heads with the residual) stopped after two heads** (IXI012 seed 200, IXI445 seed 210, against r24's same
+  heads): the brain moved the right way (central / peripheral white matter 0.873 -> 0.907, real 0.931; white-matter
+  share at slices 5-7 0.38 / 0.31 / 0.34 -> 0.47 / 0.34 / 0.42, real 0.47 / 0.44 / 0.44; posterior lumpiness 0.071 ->
+  0.054, real 0.042), but the hemispheres' fine texture rose to 1.4-2.4 x real (r24 ~1.0: the echo ratio's noise in the
+  maps on top of the assumed texture) and the posterior scalp dimmed (peak 0.65 -> 0.43 of p99, real 0.83: the
+  residual fitted the phantom's unshifted scalp fat against the subject's shifted images).
+- **Residual v11** (9b8d0f8): fitted inside the skull only, smoothed 1.5 mm within each voxel's largest tissue (log SD
+  on IXI012 0.19 -> 0.054 for T2, 0.23 -> 0.065 for PD; same-person 2 mm-smoothed RMS 0.074 vs v10's 0.072 and labels
+  only 0.080), fractions bit-identical to v10; simulate_heads drops the assumed GRF texture when the residual is on (the
+  fitted maps are the subject's own within-tissue variation). 24 heads re-prepared as v11 for r26.
+- **The posterior layers, with r26 waiting for its heads.** At the back of the head, edge-aligned profiles (half the
+  scalp peak, 1.72 mm pixels, slices 3-7) put r24's dark minimum at 6-6.5 px and the brain (0.4 of p99) at 9.5 px
+  against the real 4.5 and 7.0, while the front read 4.0 against 6.5 and the sides matched (6.5 / 6.5). Not the
+  labels: IXI012's own T2 on the MNI grid has the dark zone 7-10 mm deep and its labels reproduce it to ~1 mm. Not the
+  pitch: across r24's heads the depths tracked the drawn pitch (r -0.64 / +0.74), but proxy images of the same 16
+  heads at fixed pitches -10 to +10 deg (each class's spin-echo signal, 5 mm slabs, the receive ring's RSS; scratch
+  pitchfit3.py) moved them < 1 px, and the head-area rms stays best at -10 (0.027 vs 0.033-0.039): pitch kept. Mostly
+  the v8 anatomy: IXI012 simulated on v10 (fat shift undone) moves the posterior minimum 5.0 -> 4.5 px and the brain
+  8.0 -> 7.5; with fat's chemical shift switched off (all peaks at 0 ppm, scratch sim_noshift.py) the edges move
+  another ~0.5 px, the expected 0.56 px (the real scans' shift direction is not settled by one head). The skull band
+  stays darker than real (IXI012 0.07, r24 0.12-0.16, real 0.19-0.27). The fastMRI headers (Biograph mMR, 2.89 T)
+  give a 384 x 396 encoding, echo spacing 10.26 ms, no readout bandwidth.
+- The v11 preparation thrashed the laptop (18 GB swap with the pitch fits running); the last 17 heads moved to the mini
+  (~250 s each, two jobs).
