@@ -1,9 +1,10 @@
-"""Fetch the IXI dataset's 3 T subjects (Hammersmith Hospital, Philips Intera 3 T): T1 and T2 volumes and
+"""Fetch the IXI dataset's 3 T subjects (Hammersmith Hospital, Philips Intera 3 T): T1, T2 and PD volumes and
 the demographics sheet, from Imperial College's IXI page (brain-development.org/ixi-dataset, CC BY-SA 3.0:
 acknowledge "IXI dataset, brain-development.org"). Each tar (4.84 and 3.85 GB) is fetched in parallel byte
 ranges (one stream ran at 0.65 MB/s, eight ranges at ~2 MB/s each) to a temporary file, only the HH files
 are extracted (~1/3), and the tar is deleted. The first fetch pins every kept file's SHA-256 in
-<root>/ixi/manifest.json; later runs verify against it and never refresh pins silently.
+<root>/ixi/manifest.json; later runs verify against it and never refresh pins silently. A contrast with no pinned
+files yet (PD, added 2026-10-12: the first echo of the T2's dual-echo TSE, TE 8 ms) is fetched and its pins added.
 
     uv run python validation/anatomy/fetch_ixi.py [--root validation/anatomy/data] [--offline]
 """
@@ -16,7 +17,7 @@ import subprocess
 
 HERE = Path(__file__).resolve().parent
 BASE = "https://biomedic.doc.ic.ac.uk/brain-development/downloads/IXI/"
-TARS = {"T1": ("IXI-T1.tar", 4840816640), "T2": ("IXI-T2.tar", 3853445120)}
+TARS = {"T1": ("IXI-T1.tar", 4840816640), "T2": ("IXI-T2.tar", 3853445120), "PD": ("IXI-PD.tar", 4068966400)}
 SHEET = ("IXI.xls", 210432)
 SITE = "-HH-"  # Hammersmith Hospital, the 3 T scanner
 
@@ -37,7 +38,9 @@ def fetch(root, offline=False):
         raise FileNotFoundError(manifest_path)
     for contrast, (name, size) in TARS.items():
         dest = out / contrast
-        if manifest is None:
+        if manifest is None or not any(k.startswith(contrast + "/") for k in manifest["files"]):
+            if offline:
+                raise FileNotFoundError(f"{contrast} not fetched yet")
             dest.mkdir(parents=True, exist_ok=True)
             tar = out / (name + ".part")
             parts, n = [], 8
@@ -58,6 +61,12 @@ def fetch(root, offline=False):
                 raise ValueError(f"{name}: {tar.stat().st_size} bytes, expected {size}")
             subprocess.run(["tar", "-x", "-f", str(tar), "-C", str(dest), "--include", f"*{SITE}*"], check=True)
             tar.unlink()
+            if manifest is not None:  # a new contrast: pin its files, keep every existing pin
+                manifest["files"] |= {str(q.relative_to(out)): {"bytes": q.stat().st_size, "sha256": sha256(q)}
+                                      for q in sorted(dest.rglob("*")) if q.is_file()}
+                manifest["urls"][contrast] = BASE + name
+                manifest["archive_bytes"][contrast] = size
+                manifest_path.write_text(json.dumps(manifest, indent=1))
     sheet = out / SHEET[0]
     if manifest is None:
         subprocess.run(["curl", "-fsSL", "--retry", "2", BASE + SHEET[0], "-o", str(sheet)], check=True)
