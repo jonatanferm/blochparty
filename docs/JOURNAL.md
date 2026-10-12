@@ -1783,4 +1783,18 @@ The parts of M5 that need no outside access, done while the user was away.
 - Dead end: a temporalis rule in prepare_ixi (only 2 mm of skin where the soft tissue under the surface is
   thicker than 10 mm) fired across the upper head too, where the outer table is detected in patches; with the
   heads' own fat it is moot. The lateral scalp, with the own fat: 9.5 against 10.3.
-- 24 heads re-prepared with the median fat reference (prepared_v6) for r21: orientation, coil, own scalp.
+- **Where the CNN looks** (scratch regions.py: score.py's test on images masked to a band of distance from the
+  head's edge, the rest zeroed). r20, orientation fixed: the head's outer 0-6 px alone (scalp and skull) CNN
+  0.998, histogram 0.984; 6-14 px 0.81 / 0.73; deeper than 12 px (brain) 0.79 / 0.79. The tell is the outside
+  of the head, not the brain.
+- **The dark band at the skull was muscle** (03d0513). The outer band's quantiles in our heads were too dark
+  at the bottom (q10 0.056 against 0.136): the dark band at the skull ~4 px wide against ~1.5. The segmented
+  bone is thin (IXI012 1.7-5.6 mm along rays); next to it lay 3-7 mm of "muscle", prepare_ixi's label for soft
+  tissue deeper than 8 mm, which at T2 30 ms is black at TE 113 ms. That tissue reads 0.53-0.80 x WM in the
+  subject's own T2 at every depth (skin-like 0.77, muscle 0.21 at IXI's TR 5725.8 / TE 100 ms by our tissue
+  values), so soft tissue is now unmixed between skin and muscle by its T2. IXI012 (muscle 433 -> 290 mL):
+  outer band 0.157 / 0.227 / 0.382 / 0.623 / 0.833 against the real 0.136 / 0.214 / 0.375 / 0.616 / 0.859
+  (v6 0.056 / 0.130 / 0.227 / 0.470 / 0.764); the side and back profiles close to the real ones, IXI012's
+  forehead short of fat.
+- The v6 preparation (median fat only) was stopped half-way; 24 heads re-prepared as v7 (both changes) for r21:
+  orientation, coil, own scalp fat, soft tissue by T2.

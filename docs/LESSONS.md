@@ -626,6 +626,14 @@ says where it came from so it can be re-checked.
   null test gave AUC 0.20 for a histogram logistic regression (CI excluding 0.5) when folds held
   out people without balancing classes; dealing each class's people round-robin into folds moved
   it toward 0.5 but not all the way (0.27). Calibrate small AUC differences with a permutation test.
+- **Ask the classifier where it looks before tuning by eye** (2026-10-12): rerunning the realism CNN on images
+  masked to bands of distance from the head's edge (the rest zeroed) said at once that the outer 6 px (scalp
+  and skull) separated real from simulated (AUC 0.998) and the brain did not (0.79), after days spent on the
+  cortex. Then a band's intensity quantiles track a fix in minutes, before a full run.
+- **A segmentation label is a contrast claim** (2026-10-12): prepare_ixi called soft tissue deeper than 8 mm
+  "muscle", and the simulator gave it muscle's T2 (30 ms, black in a T2 TSE), though the subject's own T2 read
+  it at 0.5-0.8 x WM. Check what each label's tissue values predict for the source scan against the source
+  scan itself (here: soft tissue unmixed between skin and muscle by its T2).
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
