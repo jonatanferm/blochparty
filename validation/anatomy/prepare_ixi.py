@@ -11,8 +11,8 @@ the bias-corrected T1 and T2 against local pure intensities (``unmix_partial_vol
 to a step in intensity and doubled the CSF in boundary voxels). Outside the skull the head classes come from rules on the
 bias-corrected intensities relative to the subject's white matter (the EM swapped them in the thin layers):
 bone dark in both; fat by unmixing T2 between soft tissue (0.9 x white matter) and the subject's own pure
-fat (the median T2 of T1-bright head tissue), with a bright T1 (inside the bone shell: marrow); soft tissue the rest (skin within 8 mm of the
-surface, muscle deeper). The head is its largest connected piece. Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
+fat (the median T2 of T1-bright head tissue), with a bright T1 (inside the bone shell: marrow); soft tissue the rest,
+unmixed by its T2 between skin and muscle (``soft_references``). The head is its largest connected piece. Posteriors are stored as fractions (uint8 / 255) with the affine (BrainWeb mm -> IXI world
 mm), age and sex (IXI.xls; nothing else of it is kept) and the tissue volumes in the subject's own size.
 Known gap: the T2 covers ~134 mm (MNI z <= ~92), so the scalp and skull above it are left as background
 (the brain ends at z ~75; the scored slices lie below ~50).
@@ -241,6 +241,20 @@ def unmix_partial_volume(post, y, bias, idx, shape):
     return out
 
 
+IXI_T2 = {"tr": 5.726, "te": 0.100}  # Hammersmith's T2: TR 5725.8 ms, TE 100 ms, ETL 16 (brain-development.org/scanner-philips-medical-systems-intera-3t)
+
+
+def soft_references():
+    """T2-weighted brightness of skin and muscle relative to white matter in IXI's T2, from the tissue values the
+    simulator uses at 3 T (spin echo: PD (1 - exp(-TR/T1)) exp(-TE/T2)); about 0.77 and 0.21."""
+    from blochparty import tissuedb
+    table = tissuedb.tissue_table(3.0)
+    tr, te = IXI_T2["tr"], IXI_T2["te"]
+    signal = {k: table[k].pd.mean * (1 - np.exp(-tr / table[k].t1.mean)) * np.exp(-te / table[k].t2.mean)
+              for k in ("skin", "muscle", "wm")}
+    return signal["skin"] / signal["wm"], signal["muscle"] / signal["wm"]
+
+
 def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     t0 = time.time()
     t1p = next((root / "T1").glob(f"IXI{ixi_id:03d}-HH-*-T1.nii.gz"))
@@ -307,7 +321,6 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
     p_soft = np.clip(1 - p_fat - p_bone, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra
-    depth = ndimage.distance_transform_edt(head)
     out_mask = head & ~intra & valid
     i = {c: CLASSES.index(c) for c in CLASSES}
     keep_in = ("csf", "gm", "wm", "vessels", "dura")
@@ -319,8 +332,14 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     frac[i["marrow"]][out_mask] = (p_fat * shell)[out_mask]
     frac[i["fat"]][out_mask] = (p_fat * ~shell)[out_mask]
     frac[i["skull"]][out_mask] = p_bone[out_mask]
-    frac[i["skin"]][out_mask] = (p_soft * (depth <= 8))[out_mask]
-    frac[i["muscle"]][out_mask] = (p_soft * (depth > 8))[out_mask]
+    # soft tissue unmixed by its T2 between skin and muscle, at the brightness the simulator's own tissue values give
+    # them in IXI's T2 (soft_references). Until 2026-10-12 soft tissue deeper than 8 mm was muscle: IXI012's soft
+    # tissue at MNI z 5-50 reads 0.56-0.70 x WM in T2 at every depth, so a block of near-black muscle (T2 30 ms)
+    # under the scalp made the simulated dark band at the skull ~4 px wide against the real ~1.5
+    r_skin, r_muscle = soft_references()
+    m = np.clip((r_skin - r2) / (r_skin - r_muscle), 0, 1)
+    frac[i["skin"]][out_mask] = (p_soft * (1 - m))[out_mask]
+    frac[i["muscle"]][out_mask] = (p_soft * m)[out_mask]
     frac[i["background"]][~head] = 1
     for c in CLASSES:
         if c != "background":
