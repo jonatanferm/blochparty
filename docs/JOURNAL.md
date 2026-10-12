@@ -1752,3 +1752,35 @@ The parts of M5 that need no outside access, done while the user was away.
   scalp is too bright (0.80 vs 0.54): `layer_scalp` lays 4 mm of fat over the temporalis, where real scalp
   has little. Simulated heads are also ~7 % larger in area at slices 1-3 (8.2-8.3 vs 7.7 kpx).
 
+
+## 2026-10-12 — Upside-down heads, the coil and the scalp
+
+- **The simulated heads were upside down against the real ones** (6eccb75). Measuring head shape for the
+  bright frontal rim, the real heads' width peaked 0.34-0.44 of their length from the top row and IXI's axial
+  T2 heads (oriented by their NIfTI affines) 0.48-0.62 from the front, with no overlap between 21 and 29
+  people, and the simulated heads matched IXI. No tilt closes that gap (even 40 deg nose-down left IXI heads
+  at 0.44-0.47), so I checked orientation itself: an IXI interior template matches 91 % of 147 real slices
+  flipped up-down (r 0.35 vs 0.22) and the simulated ones as displayed (0.32 vs 0.22). fastMRI shows the
+  head posterior up; `to_real_orientation` showed ours anterior up since the first score (a mean-image check
+  could not see an AP flip; I had read the forehead's dark band as the occiput on the pad). Fixed;
+  `validation/realism/orientation.py` keeps the check. r20 rescored, same k-space: CNN AUC 0.998 [0.99, 1.0]
+  (was 0.959), histogram 0.927 (orientation-free), controls 0.44 / 0.46. Every earlier front/back finding
+  compared our front with the real back: the "bright frontal rim" of r20 is at our front against the real
+  front's 0.31-0.33 (still too bright: 0.48-0.52), and the real back is bright.
+- **The head lies on the coil** (5600381). With matched orientation the real images fall from back to front
+  (white matter q25: front / back 0.89; outer ring 0.71) and ours did not (1.00, 0.82): a head resting on the
+  posterior elements. `coil_offset` puts the receive ring's back a gap behind the occiput; re-weighting r20
+  by the rings' RSS ratio bracketed the real numbers with a 14 cm ring and a 20-30 mm gap (preset: 25 mm).
+  Simulated on IXI012: 0.83 / 0.70.
+- **Scalp: IXI's own fat, unmixed against the median** (e40f17d). Next to the real heads, every simulated
+  one had a uniform white scalp halo: the preset laid Li 2024's 4 mm vertex fat layer everywhere. Integrated
+  scalp signal over white matter (back / side / front): fastMRI 15.1 / 10.3 / 9.8; IXI012 with the layer
+  20.3 / 17.1 / 13.1, with its own segmented fat 8.6 / 6.7 / 6.1, because prepare_ixi's pure fat was the
+  98th percentile of T1-bright tissue's T2 (3.09 x WM; median 1.41) and unmixed subcutaneous fat to a third.
+  With the median: 14.6 / 9.5 / 6.9 (fat 120 -> 274 mL). IXI's raw T2 itself shows a dim scalp (5-6 over
+  WM: the late echo of a dual-echo TSE), so it is no direct reference for fastMRI's fat. The preset keeps IXI
+  heads' own scalp; BrainWeb heads keep the layer.
+- Dead end: a temporalis rule in prepare_ixi (only 2 mm of skin where the soft tissue under the surface is
+  thicker than 10 mm) fired across the upper head too, where the outer table is detected in patches; with the
+  heads' own fat it is moot. The lateral scalp, with the own fat: 9.5 against 10.3.
+- 24 heads re-prepared with the median fat reference (prepared_v6) for r21: orientation, coil, own scalp.
