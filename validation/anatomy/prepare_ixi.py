@@ -247,6 +247,13 @@ def unmix_partial_volume(post, y, bias, idx, shape):
     return out
 
 
+# IXI's T2 places fat 1.63 mm posterior of the water tissue around it (median over the 24 run subjects, IQR 1.09-2.14,
+# all 24 the same way): in the scalp at MNI z 10-50, fat's mean depth below the skin minus skin and muscle's is -2.6 mm
+# at the back, +0.8 mm at the front and -1.6 mm at the sides (the natural layering), half the front-back difference
+# being the shift: a water-fat shift along a front-back readout (434 Hz at 3 T over ~330 Hz per 1.25 mm pixel). Left
+# in, our heads had fat at the skin and soft tissue against the skull at the back (fastMRI's 0.57 mm images: the
+# reverse) and fat pressed into the bone at the front. Removed by moving the fat map anterior before it is assigned.
+IXI_FAT_SHIFT_MM = 1.63
 IXI_T2 = {"tr": 5.726, "te": 0.100}  # Hammersmith's T2: TR 5725.8 ms, TE 100 ms, ETL 16 (brain-development.org/scanner-philips-medical-systems-intera-3t)
 
 
@@ -325,6 +332,8 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     # (layer_scalp) 35-65 % over
     pure = float(np.median(r2[head & ~intra & (r1 > 1.)]))
     p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
+    # undo the T2's water-fat shift: its fat sits IXI_FAT_SHIFT_MM posterior of the water tissue (front-back readout)
+    p_fat = np.clip(ndimage.shift(p_fat, (0, IXI_FAT_SHIFT_MM / (atlas.voxel[1] * 1e3), 0), order=1, mode="nearest"), 0, 1) * (1 - p_bone)
     p_soft = np.clip(1 - p_fat - p_bone, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra
     out_mask = head & ~intra & valid
