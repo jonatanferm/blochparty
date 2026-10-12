@@ -59,14 +59,48 @@ def real_set(cache: Path, root: Path = R.FASTMRI, slices=SLICES):
     return items, floor
 
 
-def unit_floor(coils, n=128, rng=None):
-    """Background median of the RSS image of unit-sigma complex noise in ``coils`` channels."""
+def noise_covariances(cache: Path, root: Path = R.FASTMRI) -> dict:
+    """{file: (C, C) complex covariance of its coil noise}, from each real scan's background: the four 12 x 12 corners
+    of its per-coil images at the realism resolution (central 128 x 128 of k-space on the 220 mm field of view), over
+    all slices. Cached in ``cache``/noise_cov.json (computing it needs the fastMRI files). Real coil noise is
+    correlated and unequal: the real background's SD / median is 0.163 and its skew 0.41, independent equal-sigma
+    noise in 16 coils gives 0.126 and 0.20."""
+    path = cache / "noise_cov.json"
+    if path.exists():
+        raw = json.loads(path.read_text())
+        return {k: np.array(v["re"]) + 1j * np.array(v["im"]) for k, v in raw.items()}
+    import h5py
+    out = {}
+    c = CORNER
+    for f in R.manifest(root=root):
+        with h5py.File(f, "r") as h:
+            k = h["kspace"][()]
+            hdr = __import__("ismrmrd").xsd.CreateFromDocument(h["ismrmrd_header"][()])
+        rx, ry = hdr.encoding[0].reconSpace.matrixSize.x, hdr.encoding[0].reconSpace.matrixSize.y
+        coil = R.crop_centre(R.centred_ifft(k, (-2, -1)), (rx, ry))  # (S, C, rx, ry)
+        low = np.stack([R.centred_ifft(R.lowres_kspace(sl, 128), (-2, -1)) for sl in coil])  # (S, C, 128, 128)
+        x = np.concatenate([low[..., :c, :c], low[..., :c, -c:], low[..., -c:, :c], low[..., -c:, -c:]], -1)
+        x = np.moveaxis(x, 1, 0).reshape(x.shape[1], -1)  # (C, samples)
+        cov = x @ x.conj().T / x.shape[1]
+        out[f.name] = cov
+    path.write_text(json.dumps({k: {"re": v.real.tolist(), "im": v.imag.tolist()} for k, v in out.items()}))
+    return out
+
+
+def unit_floor(coils, n=128, rng=None, chol=None):
+    """Background median of the RSS image of unit-sigma complex noise in ``coils`` channels, coloured by ``chol`` (the
+    Cholesky factor of a coil covariance scaled to mean variance 1) if given."""
     rng = rng or np.random.default_rng(0)
     k = (rng.standard_normal((coils, n, n)) + 1j * rng.standard_normal((coils, n, n)))
+    if chol is not None:
+        k = np.tensordot(chol, k, 1)
     return float(np.median(R.recon(k)))
 
 
-def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES):
+def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES, covariances=None):
+    """[(person, slice, image)] from simulate_heads output: complex Gaussian noise added to the k-space at the paired
+    real scan's background floor (relative to the 99th percentile), coloured by that scan's coil covariance if
+    ``covariances`` ({file: (C, C)}, ``noise_covariances``) holds it, white and equal across coils otherwise."""
     rng = np.random.default_rng(seed)
     items, units = [], {}
     for f in sorted(sim_dir.glob("sim_*.npz")):
@@ -79,10 +113,17 @@ def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES):
                 continue
             k = d[key].astype(np.complex128)
             c = k.shape[0]
-            units.setdefault(c, unit_floor(c))
+            cov = None if covariances is None else covariances.get(meta["protocol"]["file"])
+            chol = None if cov is None or cov.shape[0] != c else np.linalg.cholesky(cov * c / np.real(np.trace(cov)))
+            unit = (c, None if chol is None else meta["protocol"]["file"])
+            if unit not in units:
+                units[unit] = unit_floor(c, chol=chol)
             clean = R.recon(k)
-            sigma = target * np.percentile(clean, 99) / units[c]
-            noisy = k + sigma * (rng.standard_normal(k.shape) + 1j * rng.standard_normal(k.shape))
+            sigma = target * np.percentile(clean, 99) / units[unit]
+            noise = rng.standard_normal(k.shape) + 1j * rng.standard_normal(k.shape)
+            if chol is not None:
+                noise = np.tensordot(chol, noise, 1)
+            noisy = k + sigma * noise
             img = R.normalise(SH.to_real_orientation(R.recon(noisy)))
             items.append((f"sim:{meta.get('source') or 'brainweb'}{meta['subject']:03d}", s, img))  # heads of one subject: one person
     return items
@@ -236,13 +277,17 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("outputs/realism"))
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--slices", default="0-12", help="slice indices used on both sides, a-b or a-b:step")
+    ap.add_argument("--white-noise", action="store_true",
+                    help="simulated noise white and equal across coils (before 2026-10-12) instead of each paired "
+                         "scan's coil covariance (noise_covariances)")
     args = ap.parse_args()
     rng_, _, step = args.slices.partition(":")
     slices = range(int(rng_.split("-")[0]), int(rng_.split("-")[-1]) + 1, int(step or 1))
     args.out.mkdir(parents=True, exist_ok=True)
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     real, floor = real_set(args.cache, args.fastmri, slices)
-    sim = sim_set(args.sim, floor, slices=slices)
+    covs = None if args.white_noise else noise_covariances(args.cache, args.fastmri)
+    sim = sim_set(args.sim, floor, slices=slices, covariances=covs)
     print(f"{len(real)} real slices from {len({i[0] for i in real})} scans, {len(sim)} simulated from "
           f"{len({i[0] for i in sim})} source subjects; real noise floor {np.median(list(floor.values())):.4f} of p99", flush=True)
     results = []
