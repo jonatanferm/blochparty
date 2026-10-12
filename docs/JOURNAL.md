@@ -1838,3 +1838,16 @@ The parts of M5 that need no outside access, done while the user was away.
   stay larger (an older clinical population).
 - **Cubic resampling** (82a79cb): deform(order=3) and prepare_ixi onto(order=3); 24 heads re-prepared as v8 (GM / WM /
   CSF volumes within 1 % of v7, skull +10 %, all pass QC); 47 more subjects being prepared as v8 for a larger pool.
+- **r23 (the 396-line linear ordering) stopped after 3 heads**: on those heads against r22's, the phase-axis fine
+  structure in a central patch came within 1.25-1.75 of real power at high k (reverse-centric 2.0-3.9), hemisphere
+  texture slightly closer; the background beside the head 1.17 x the floor (reverse-centric 1.08, real 1.09: a halo of
+  the short-T2 scalp tissue along the phase axis, not ghost copies). The 396-line ordering goes into r24.
+- **The coil noise is coloured** (9b2abbd): the real scans' background is wider and more skewed than independent
+  equal-sigma noise in 16 coils gives (SD / median 0.163, skew 0.41 vs 0.126 / 0.20): their coil SDs span 0.66-1.38
+  of the mean and correlate (|r| 0.13-0.17). score.py now estimates each real scan's coil covariance from its image
+  corners and colours the paired simulation's noise with it (background 0.158 / 0.35). r21 rescored: CNN AUC 1.0 ->
+  0.971 [0.92, 1.0] (by slice 0.96-0.98), controls 0.42 / 0.43; histogram 0.735 -> 0.841 (CIs overlap). The quiz
+  pages use the same noise.
+- **r24 running** (v8 heads with cubic resampling and pull-back, falx, slice 0 12.5 mm below the ventricle bodies,
+  396-line linear ordering; r21's subjects and seeds, ages 20-82, median 52): 14.7 M spins per slice; the mini held
+  14 GB and swapped, so simulate_heads --serial (14716ce) builds one slice's phantom at a time (6 GB); ~135 s per slice.
