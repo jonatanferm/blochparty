@@ -339,6 +339,7 @@ def tse_2d(
     other_rf_raster: float | None = None,
     bound_only_beyond: float | None = None,
     readout_oversampling: int = 1,
+    acquired_lines: int | None = None,
 ) -> Sequence:
     """2D turbo spin echo (CPMG): per shot a ``excite_flip_deg`` pulse along x, then ``etl``
     refocusing pulses along y every ``esp`` (None: the shortest possible), echoes at
@@ -375,6 +376,12 @@ def tse_2d(
     the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a
     scanner sequence (``write_pulseq`` refuses ``bound_only``).
 
+    ``acquired_lines`` (default None): the n lines are the centre of a scan of this many
+    phase-encode lines in ``ordering`` "linear" (as cropping a scanner's full matrix to its central
+    n lines does): each line takes the echo it had there, so the n lines span only the echoes near
+    the effective one; shots = the most lines on one echo, and echoes left without a line play
+    without a readout (ky = 0). Needs ``acquired_lines`` >= n, not n % etl == 0.
+
     ``readout_oversampling`` (default 1): ``os`` times the readout samples at ``dwell / os`` on the
     same gradient and flat top: the same k-space extent over ``os`` times the field of view along x
     (as scanners do, so tissue beyond ``fov`` does not fold in); ``meta["matrix"]`` becomes
@@ -388,8 +395,10 @@ def tse_2d(
         slice_order = [float(z) for z in slice_order]
         if slice_order.count(0.0) != 1 or slice_thickness is None:
             raise ValueError("slice_order needs slice_thickness and exactly one 0.0 (this slice)")
-    if n % etl:
+    if acquired_lines is None and n % etl:
         raise ValueError(f"n = {n} is not a multiple of etl = {etl}")
+    if acquired_lines is not None and (acquired_lines < n or ordering != "linear"):
+        raise ValueError("acquired_lines needs ordering 'linear' and at least n lines")
     if spoiling not in ("ideal", "gradient"):
         raise ValueError(f"spoiling must be 'ideal' or 'gradient', not {spoiling!r}")
     sysm = system or System()
@@ -407,6 +416,12 @@ def tse_2d(
     elif ordering != "linear":
         raise ValueError(f"ordering must be 'linear', 'centric' or 'reverse_centric', not {ordering!r}")
     lines = [[order[e * n_shots + s] for e in range(etl)] for s in range(n_shots)]  # [shot][echo] -> ky index
+    if acquired_lines is not None:  # the echo of line i in the full scan's linear ordering
+        band = [[] for _ in range(etl)]
+        for i in range(n):
+            band[min(etl - 1, (i - n // 2 + acquired_lines // 2) * etl // acquired_lines)].append(i)
+        n_shots = max(len(b) for b in band)
+        lines = [[b[s] if s < len(b) else None for b in band] for s in range(n_shots)]
 
     args = (rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps)
     exc = _excitation(excite_flip_deg, *args)
@@ -494,14 +509,15 @@ def tse_2d(
         _pad(b, esp / 2 - h0)
         for e, r in enumerate(refs):
             line = lines[shot - n_dummy][e] if acquire else n // 2
-            ky = (line - n // 2) * dk
+            read = acquire and line is not None
+            ky = (line - n // 2) * dk if read else 0.0
             b.block(*r.grads, rf=_with_phase(r.rf, math.pi / 2))
             b.block(_lobe((0.0, ky, crush), t_c, ramps, sysm, dtype))
             _pad(b, esp / 2 - h1)
-            b.block(ro.grad, adc=ADC(n * os_, dwell / os_, ro.adc_delay) if acquire else None, duration=ro.duration)
+            b.block(ro.grad, adc=ADC(n * os_, dwell / os_, ro.adc_delay) if read else None, duration=ro.duration)
             _pad(b, esp / 2 - h2)
             b.block(_lobe((0.0, -ky, crush), t_c, ramps, sysm, dtype))
-            if acquire:
+            if read:
                 kspace_index += range(line * n * os_, (line + 1) * n * os_)
         if spoiling == "gradient":
             b.block(_lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype))
@@ -516,7 +532,8 @@ def tse_2d(
     line_echo = [0] * n
     for s in range(n_shots):
         for e in range(etl):
-            line_echo[lines[s][e]] = e
+            if lines[s][e] is not None:
+                line_echo[lines[s][e]] = e
     seq = b.build(matrix=(n, n * os_), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell / os_, tr=tr,
                   esp=esp, etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
                   line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,

@@ -231,6 +231,22 @@ def test_tse_kspace_and_echo_times(kw):
         assert all(le[n // 2 + j] >= le[n // 2 + j + 1] for j in range(n // 2 - 1))
 
 
+def test_tse_acquired_lines_takes_the_full_scans_echoes():
+    """n = 16 central lines of a 40-line linear scan with etl 8 (5 lines per echo there): line i keeps the echo it
+    had in the full scan, so the 16 lines span echoes 2-5 only; every grid point is read once at its own k."""
+    n, fov, etl, full = 16, 0.22, 8, 40
+    seq = tse_2d(n, fov, etl=etl, acquired_lines=full)
+    le = seq.meta["line_echo"]
+    assert le == [(i - n // 2 + full // 2) * etl // full for i in range(n)]
+    assert set(le) == {2, 3, 4, 5} and seq.meta["te"] == pytest.approx((le[n // 2] + 1) * seq.meta["esp"])
+    assert sorted(seq.meta["kspace_index"].tolist()) == list(range(n * n))
+    tc = rf_centres(seq)
+    refocus = [j for j in range(len(tc)) if j % (etl + 1)]
+    assert (k_at_adc(seq, refocus) - grid_k(n, fov, seq.meta["kspace_index"])).abs().max() < 1e-9
+    with pytest.raises(ValueError):
+        tse_2d(n, fov, etl=etl, acquired_lines=full, ordering="centric")
+
+
 @pytest.mark.parametrize("ramps", [True, False])
 def test_epi_kspace(ramps):
     n, fov = 16, 0.22
