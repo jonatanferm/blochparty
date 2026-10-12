@@ -184,6 +184,19 @@ from the cited sources and are of mixed kinds (between-subject, specimen, across
 are independent, so correlations such as T1 with MPF are absent.
 `examples/sampled_heads.py` images ten of them in three contrasts (RESULTS.md).
 
+## IXI heads and their residual layer
+
+`prepare_ixi.py` segments each IXI Hammersmith subject (3 T T1, T2 and PD: `fetch_ixi.py`) into BrainWeb's 12 classes on
+BrainWeb's 1 mm MNI grid (affine registration, EM with BrainWeb priors and a cubic bias field, partial-volume unmixing,
+rules for the head's layers, IXI's T2 water-fat shift of 1.63 mm undone), and fits a **residual layer**: per-voxel
+multipliers `t2_scale` and `pd_scale` that make the simulator's own tissue mixture reproduce the subject's dual-echo TSE
+(TE 8 / 100 ms). Water tissue only (fat's apparent T2 is the sequence's J coupling; CSF's T2 is too long to measure over
+92 ms); a cubic trend fitted over pure white matter is removed (the two-point fit's absolute level and its B1+ pattern
+belong to IXI's scanner; the tissue database keeps absolute values); clipped to x0.61-1.65. `load_ixi(residual=True)` /
+`sample_head(source="ixi", residual=True)` carry the maps through the pose and `to_phantom` multiplies every non-fat
+tissue's T2 and PD by them. Checked on a synthetic head with known multipliers (`tests/test_realism_helpers.py`) and on
+IXI012 against its own T2 (the scanner trend removed from both: brain |log(real / predicted)| median 0.064 -> 0.032).
+
 ## AHEAD 7 T templates
 
 `load_ahead(root)` reads the four pinned AHEAD v3 maps fetched by `fetch_ahead.py`: one

@@ -53,3 +53,36 @@ def test_soft_references_follow_the_tissue_table():
     assert skin == pytest.approx(s["skin"] / s["wm"])
     assert muscle == pytest.approx(s["muscle"] / s["wm"])
     assert 0 < muscle < 0.5 < skin < 1
+
+
+def test_residual_maps_recover_known_multipliers():
+    """A synthetic head (white matter, a CSF block for the echo-ratio scale, a grey-matter block) whose two echoes are
+    made with grey matter's T2 x1.2 and PD x0.9 against the tissue table (and an arbitrary scale on the PD echo): the
+    fitted t2_scale / pd_scale are ~1.2 / ~0.9 in the grey matter and 1 in the white matter."""
+    from blochparty import tissuedb
+    table = tissuedb.tissue_table(3.0)
+    n = (24, 24, 24)
+    frac = np.zeros((len(P.CLASSES),) + n, np.float32)
+    k = {c: P.CLASSES.index(c) for c in P.CLASSES}
+    frac[k["wm"]] = 1
+    csf = (slice(2, 12),) * 3
+    gm = (slice(13, 22), slice(13, 22), slice(13, 22))
+    frac[k["wm"]][csf] = 0; frac[k["csf"]][csf] = 1
+    frac[k["wm"]][gm] = 0; frac[k["gm"]][gm] = 1
+    tr = P.IXI_T2["tr"]
+
+    def echo(te, t2_gm, pd_gm):
+        out = np.zeros(n, np.float32)
+        for c, t2f, pdf in (("wm", 1, 1), ("csf", 1, 1), ("gm", t2_gm, pd_gm)):
+            p = table[c]
+            out += frac[k[c]] * p.pd.mean * pdf * (1 - np.exp(-tr / p.t1.mean)) * np.exp(-te / (p.t2.mean * t2f))
+        return out
+    t2w = echo(P.IXI_T2["te"], 1.2, .9)
+    pdw = 3.7 * echo(P.IXI_PD_TE, 1.2, .9)
+    origin = (0.05, 0.05, 0.05)  # far from MNI's deep grey regions and midline
+    t2s, pds, diag = P.residual_maps(frac, t2w, pdw, np.ones(n, bool), origin, (1e-3,) * 3)
+    inner = (slice(15, 20),) * 3
+    assert np.median(t2s[inner]) == pytest.approx(1.2, rel=0.03)
+    assert np.median(pds[inner]) == pytest.approx(0.9, rel=0.03)
+    assert np.median(t2s[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
+    assert np.median(pds[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
