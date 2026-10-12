@@ -1863,3 +1863,14 @@ The parts of M5 that need no outside access, done while the user was away.
   central overflip is stronger at the low slices, which match). The within-tissue texture (5 % T1/T2 at a 10 mm
   correlation length, an M4 assumption) sits at the scale of the coarse excess; ablations (--no-texture, --b1 uniform;
   01c39ba, 858bbf4) queued after r24. Proxy fit of the pitch at the 12.5 mm offset keeps -10 deg (area rms 0.017).
+- **Same-person residual (step 1 of a fitted residual layer)**: IXI012's real T2 (bias-corrected, over its white-matter
+  median, on the phantom's 1 mm grid) against the T2 its phantom predicts (each class's spin-echo signal at IXI's TR
+  5.726 s / TE 100 ms with our 3 T tissue values, deep grey and falx as simulated; scratch same_person.py). IXI's
+  noise: background SD 0.020 x WM. In the brain |log(real / predicted)| median 0.059, RMS 0.160, still 0.071 after
+  2 mm smoothing: structure, not noise. Pure white matter: RMS 0.077 raw, 0.046 / 0.023 after 2 / 8 mm smoothing,
+  its centre 1-5 % brighter than its periphery at MNI z 25-45 (periventricular and central white matter), the direction
+  our high slices lack (centre / ring 0.86-0.90 vs fastMRI 0.93). By class (fraction > 0.9, real / predicted): GM 1.01,
+  WM 1.00, CSF 0.92, putamen 1.27, thalamus 1.15, caudate 1.07, dura 1.59, skin 1.15, muscle 0.89, fat 0.67. Outside
+  the skull |log ratio| median 0.14 (layer boundaries). Caveat for fitting: some of this is sequence physics, not
+  tissue (fat 0.67: IXI's echo spacing does not J-suppress fat as our CPMG T2 assumes), so fat needs its own model and
+  T2 / PD need IXI's PD echo to separate.
