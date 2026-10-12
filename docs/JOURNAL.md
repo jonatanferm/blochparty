@@ -1798,3 +1798,27 @@ The parts of M5 that need no outside access, done while the user was away.
   forehead short of fat.
 - The v6 preparation (median fat only) was stopped half-way; 24 heads re-prepared as v7 (both changes) for r21:
   orientation, coil, own scalp fat, soft tissue by T2.
+- **r21 (16 IXI v7 heads, the same 16 subjects as r20; orientation fixed, head on the coil's posterior elements,
+  own scalp fat with the median reference, soft tissue by T2)**: intensity W1 0.017 (r20 0.042), quartiles 0.222 /
+  0.314 / 0.506 vs real 0.216 / 0.299 / 0.491 (r20 0.230 / 0.339 / 0.573), histogram AUC 0.735 [0.59, 0.87] (r20
+  0.927), but CNN AUC 1.0 at every slice; controls 0.44 / 0.40. Scalp signal over WM per head inside the real
+  range in every sector (back 10-20 vs real 9-23, side 8.5-10.4 vs 7-17, front 7.4-9.4 vs 6-17). By band: the
+  outer 6 px CNN 0.944 / histogram 0.89 (r20 0.998 / 0.984), 6-14 px 0.84 / 0.55, interior 0.74 / 0.70: no
+  single region carries the cue any more.
+- **Phase-encode ordering.** Real AXT2 k-space is symmetric in ky (+ky / -ky 0.95-1.01 from 10 to 190 lines out);
+  ours was lopsided (0.6-0.8 at the edges): 128 lines over all 16 echoes (TE 13-200 ms), where the real scans
+  encode 396 lines (all 21 headers) and the central 128 come from ~5 echoes. Low-passing both sets across the
+  phase axis dropped r21's CNN to 0.92 (across the readout: 0.99). Signal beside the head (phase direction) was
+  1.22 x the noise floor against the real 1.09. Two options in tse_2d (6a1a1bf, 88c4c20): reverse-centric
+  (symmetric bands, edges first) and acquired_lines (the n lines on the echoes they have in the full linear scan;
+  simulate_heads --ordering linear_full, 25 shots, ~2.5x the time). Reverse-centric on IXI012/013: beside the
+  head 1.08 (real 1.09), but no more phase-axis detail.
+- **Where the remaining fine-detail gap is**: real/sim spectral power along the phase axis rose to 4.6 at
+  Nyquist in a central patch but only ~2-2.8 (both axes alike) in patches inside the hemispheres; the central
+  excess is the interhemispheric fissure, which in ours is brighter and wider (peak 4.71 x WM, +-1 px 3.59, vs
+  real 3.89, 2.68): solid CSF, because neither BrainWeb nor the IXI heads have a falx. White-matter texture
+  matches (relative SD 0.087 vs 0.088, same band powers); ventricle walls are ~10 % softer than real (0.418 vs
+  0.459 per px: the anatomy's resampling chain). add_falx (0a96dc7): the falx as a 0.91 mm dural sheet in the
+  fissure (Walsh 2021), above the callosum's free edge (Kayalioglu 2004), 4-5 mL per head.
+- Dead ends here: a GRAPPA hypothesis for the real phase-axis detail (the real k-space noise is flat across
+  lines, even / odd 1.00) and physiological ghosting (beside the head the real images carry less, not more).
