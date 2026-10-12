@@ -393,6 +393,9 @@ def main():
                     help="ixi: heads segmented from IXI 3 T subjects (validation/anatomy/prepare_ixi.py); with the "
                          "preset: their own size, sulci and ventricles, no rim calibration")
     ap.add_argument("--quality", choices=tuple(QUALITY), default="full")
+    ap.add_argument("--serial", action="store_true",
+                    help="build each slice's phantom after the last one is simulated, not during it: one 10-15 M-spin "
+                         "phantom and its coil maps in memory instead of two (the 16 GB mini swapped 6.7 GB in r24)")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
     if args.preset == "realistic":
@@ -492,17 +495,18 @@ def main():
             return seq, ph, bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius)
 
         slices = list(span(args.slices))
-        with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap
-            pending = pool.submit(prepare, slices[0])
+        with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap (not with --serial)
+            pending = None if args.serial else pool.submit(prepare, slices[0])
             for n, i in enumerate(slices):
                 t = time.perf_counter()
-                seq, ph, coils = pending.result()
-                if n + 1 < len(slices):
+                seq, ph, coils = prepare(i) if args.serial else pending.result()
+                if n + 1 < len(slices) and not args.serial:
                     pending = pool.submit(prepare, slices[n + 1])
                 signal, engine = simulate(ph, seq.merge_free(), coils)  # exact for static spins (PERFORMANCE 2.4)
                 kspace[f"slice{i:02d}"] = kspace_on_fov(signal, seq).astype(np.complex64)
                 timing.append(time.perf_counter() - t)
                 print(f"seed {seed} slice {i}: {len(ph):,} spins, {timing[-1]:.1f} s ({engine})", flush=True)
+                del seq, ph, coils, signal
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
