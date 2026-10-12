@@ -574,3 +574,33 @@ def test_ventricle_displacement_grows_each_ventricle_and_keeps_the_septum():
     assert float(out.fractions["csf"].sum()) == pytest.approx(float(csf.sum()) * (8 / 6) ** 3, rel=.12)
     assert float(out.fractions["wm"][40, 40, 40]) == pytest.approx(1., abs=1e-6)  # the septum at x = 0
     assert float(out.fractions["wm"].sum()) < float(an.fractions["wm"].sum())
+
+
+def test_add_falx_splits_the_fissure_above_the_callosum():
+    """Two grey-matter hemispheres around a 3 mm CSF fissure at x = 0, a callosum (midline white matter) at z = 0..3 mm
+    with CSF under it (a ventricle): the falx (dura) goes into the fissure only more than FALX_ABOVE_CALLOSUM above
+    the callosum, FALX_THICKNESS per row, taken from the CSF; none under the callosum."""
+    h = 0.5e-3
+    n = (80, 8, 41)  # z, y, x
+    x = (np.arange(n[2]) - 20) * h
+    z = (np.arange(n[0]) - 20) * h
+    csf = np.zeros(n, np.float32); gm = np.zeros(n, np.float32); wm = np.zeros(n, np.float32)
+    fissure = np.abs(x) <= 1.5e-3
+    csf[:, :, fissure] = 1
+    gm[:, :, ~fissure] = 1
+    cc = (z >= 0) & (z < 3e-3)
+    csf[cc] = 0; gm[cc] = 0; wm[cc] = 1
+    an = bp.Anatomy({"csf": torch.from_numpy(csf), "gm": torch.from_numpy(gm), "wm": torch.from_numpy(wm),
+                     "dura": torch.zeros(n)}, voxel=(h,) * 3, origin=(x[0], 0.0, z[0]))
+    out = bp.add_falx(an)
+    dura = out.fractions["dura"].numpy()
+    total = out.fractions["csf"].numpy() + dura
+    assert np.allclose(total, csf)
+    per_row = dura.sum(-1) * h  # (z, y) [m]
+    top = z[cc].max()
+    high = z > top + bp.anatomy.FALX_ABOVE_CALLOSUM + h
+    assert np.allclose(per_row[high], bp.anatomy.FALX_THICKNESS, rtol=1e-5)
+    assert per_row[(z > top) & (z <= top + bp.anatomy.FALX_ABOVE_CALLOSUM)].max() == 0
+    assert per_row[z < 0].max() == 0
+    # centred on the fissure
+    assert abs((dura[high] * x).sum() / dura[high].sum()) < 1e-6

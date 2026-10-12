@@ -1224,6 +1224,72 @@ def label_deep_grey(anatomy: Anatomy) -> Anatomy:
     return replace(anatomy, fractions=out)
 
 
+# The falx cerebri, the dural sheet in the interhemispheric fissure: 0.91 +- 0.05 (SE) mm thick (Walsh et al. 2021,
+# Acta Biomater 134:388, doi:10.1016/j.actbio.2021.07.043); its free edge above the corpus callosum by 0.6-14 mm with
+# the falx's type and position (front / middle / back, 52 cadavers: type I 14 / 12 / 2 mm, II 6 / 7 / 1, III 2 / 2 / 0.6;
+# Kayalioglu et al. 2004, Neurosciences 9:257, doi:10.17712/1658-3183.1287): 6 mm, type II.
+FALX_THICKNESS = 0.91e-3
+FALX_ABOVE_CALLOSUM = 6e-3
+
+
+def add_falx(anatomy: Anatomy, thickness: float = FALX_THICKNESS, above_callosum: float = FALX_ABOVE_CALLOSUM,
+             half_width: float = 8e-3) -> Anatomy:
+    """The falx cerebri as dura in the interhemispheric fissure. BrainWeb's and IXI-segmented heads have none (dura
+    0 at the midline), so their fissure is solid CSF: simulated T2w, its peak 4.7 x white matter against fastMRI's
+    3.9. On an MNI-frame anatomy the subject's midsagittal plane x = a + b y + c z is fitted to the CSF-weighted
+    centres of the rows (z, y) whose CSF within ``half_width`` of x = 0 lies between grey matter on both sides (and
+    refitted within half that of the first plane); then per row a sheet ``thickness`` thick at the CSF-weighted centre
+    within 2.5 mm of the plane turns CSF into dura (no more than the CSF present: CSF and dura together are
+    conserved), where grey matter (cortex) lies on both sides within 6 mm, the row holds at least a sheet's width of
+    CSF there, and no corpus callosum (white matter bridging the plane: at it and 3 mm to either side) lies above, or
+    within ``above_callosum`` below: so not in the third or lateral ventricles, nor between the cingulate gyri under
+    the free edge."""
+    fr = anatomy.fractions
+    if not {"csf", "gm", "wm", "dura"} <= set(fr):
+        raise ValueError("add_falx needs the csf, gm, wm and dura classes (BrainWeb, IXI)")
+    vz, vy, vx = anatomy.voxel
+    nz, ny, nx = anatomy.shape
+    x = anatomy.origin[0] + np.arange(nx) * vx
+    yy, zz = np.meshgrid(anatomy.origin[1] + np.arange(ny) * vy, anatomy.origin[2] + np.arange(nz) * vz)  # (z, y)
+    csf_all, gm_all, wm_all = (fr[k].numpy() for k in ("csf", "gm", "wm"))
+
+    def rows(centre, width):
+        """per row: CSF amount and centre within ``width`` of ``centre`` (z, y), cortex on both sides"""
+        off = x[None, None, :] - centre[..., None]
+        win = np.abs(off) <= width
+        csf = csf_all * win
+        amount = csf.sum(-1)
+        cx = (csf * off).sum(-1) / np.maximum(amount, 1e-9)
+        d = off - cx[..., None]
+        cortex = (((gm_all * ((d < -vx / 2) & (d >= -6e-3))).max(-1) >= .3)
+                  & ((gm_all * ((d > vx / 2) & (d <= 6e-3))).max(-1) >= .3))
+        return amount, centre + cx, cortex
+
+    plane = np.zeros((nz, ny))
+    for width in (half_width, half_width / 2):
+        amount, cx, cortex = rows(plane, width)
+        fit = cortex & (amount * vx >= thickness)
+        if fit.sum() >= 3:
+            A = np.stack([np.ones(fit.sum()), yy[fit], zz[fit]], 1)
+            coef = np.linalg.lstsq(A * amount[fit, None], cx[fit] * amount[fit], rcond=None)[0]
+            plane = coef[0] + coef[1] * yy + coef[2] * zz
+    amount, cx, cortex = rows(plane, 2.5e-3)
+
+    def wm_at(shift):  # white matter at the voxel nearest the plane + shift, per row
+        i = np.clip(np.round((plane + shift - x[0]) / vx).astype(int), 0, nx - 1)
+        return np.take_along_axis(wm_all, i[..., None], -1)[..., 0]
+    callosum = (wm_at(0.) > .5) & (wm_at(-3e-3) > .5) & (wm_at(3e-3) > .5)  # (z, y)
+    above = np.flip(np.cumsum(np.flip(callosum, 0), 0), 0) - callosum > 0  # callosum somewhere higher
+    below = np.zeros_like(callosum)
+    for k in range(1, int(round(above_callosum / vz)) + 1):
+        below[k:] |= callosum[:-k]
+    ok = cortex & ~above & ~below & (amount * vx >= thickness)
+    lo, hi = cx - thickness / 2, cx + thickness / 2
+    cover = np.clip(np.minimum(hi[..., None], x + vx / 2) - np.maximum(lo[..., None], x - vx / 2), 0, None) / vx
+    move = torch.from_numpy(np.minimum(cover * ok[..., None], csf_all).astype(np.float32)).to(fr["csf"].dtype)
+    return replace(anatomy, fractions=fr | {"csf": fr["csf"] - move, "dura": fr["dura"] + move})
+
+
 # Lateral-ventricle volume [mL] by age: Yamada et al. 2023 (Eur Radiol 33:7099, doi:10.1007/s00330-023-09632-x,
 # Table 3; 133 healthy Japanese adults, AI segmentation of 3D T1): < 40 y 17.3 +- 7.2 (n 47), 40-59 y
 # 19.4 +- 7.5 (n 49), >= 60 y 33.4 +- 13.4 (n 37); placed at 30, 50 and 70 y, linear between, flat beyond.
@@ -1592,7 +1658,7 @@ DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation
 def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
                 magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
                 scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
-                age: float | tuple[float, float] | None = None, deep_grey: bool = False,
+                age: float | tuple[float, float] | None = None, deep_grey: bool = False, falx: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
                 source: str = "brainweb") -> DigitalPhantom:
@@ -1621,7 +1687,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     more bright CSF than the real images show. ``deep_grey``: the
     caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
-    the other classes' draws do not change. ``ventricle_age`` [years] (a number, (low, high) to
+    the other classes' draws do not change. ``falx``: the falx cerebri as dura in the interhemispheric
+    fissure (``add_falx``, in MNI space before the deformation). ``ventricle_age`` [years] (a number, (low, high) to
     draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
@@ -1689,6 +1756,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
     if deep_grey:
         anatomy = label_deep_grey(anatomy)  # in MNI space, before the deformation
+    if falx:
+        anatomy = add_falx(anatomy)  # in MNI space (x = 0 is the midline), before the deformation
     vent_draw = None
     if ventricle_age is not None:
         vrng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(9)[8])
