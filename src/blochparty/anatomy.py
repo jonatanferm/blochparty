@@ -1104,14 +1104,34 @@ def deformation_jacobian(displacement: Tensor, voxel) -> Tensor:
             + g[0][2] * (g[1][0] * g[2][1] - g[1][1] * g[2][0]))
 
 
-def deform(anatomy: Anatomy, displacement: Tensor) -> Anatomy:
+def deform(anatomy: Anatomy, displacement: Tensor, order: int = 1) -> Anatomy:
     """Pull the anatomy back through x -> x + d(x): every volume's new value at x is its old value
-    at x + d(x) (trilinear; outside the grid, air and ``chi_background``). Fractions stay a convex
-    combination of fractions, so they still sum to at most one; volumes change by the Jacobian."""
+    at x + d(x) (``order`` 1: trilinear; outside the grid, air and ``chi_background``). Fractions stay a convex
+    combination of fractions, so they still sum to at most one; volumes change by the Jacobian. ``order`` 3: cubic
+    B-spline (scipy.ndimage.map_coordinates), which keeps more of the fine structure (at a random sub-voxel
+    offset, trilinear keeps ~0.76 of the amplitude at 0.29 cycles per voxel, the cubic spline ~0.95); its
+    overshoot is clamped and the fractions renormalised."""
     shape = anatomy.shape
     if tuple(displacement.shape) != (3, *shape):
         raise ValueError("displacement must be (3, z, y, x) on the anatomy grid [m]")
+    if order not in (1, 3):
+        raise ValueError("order must be 1 (trilinear) or 3 (cubic B-spline)")
     ref = next(iter(anatomy.fractions.values()))
+    if order == 3:
+        from scipy import ndimage
+        coords = np.stack([np.arange(n, dtype=np.float32).reshape([-1 if i == k else 1 for i in range(3)])
+                           + (displacement[k] / h).numpy().astype(np.float32)
+                           for k, (n, h) in enumerate(zip(shape, anatomy.voxel))])
+
+        def warp3(volume, fill=0.):
+            out = ndimage.map_coordinates((volume - fill).numpy().astype(np.float32), coords, order=3, mode="constant",
+                                          cval=0.0, prefilter=True)
+            return torch.from_numpy(out).to(volume.dtype) + fill
+
+        fractions = _renormalize({k: warp3(v).clamp(0, 1) for k, v in anatomy.fractions.items()})
+        chi = None if anatomy.chi is None else warp3(anatomy.chi, anatomy.chi_background)
+        return Anatomy(fractions, anatomy.voxel, anatomy.origin, chi, {k: warp3(v) for k, v in anatomy.maps.items()},
+                       anatomy.chi_background, anatomy.map_field_T)
     axes = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) for n in shape), indexing="ij")
     # grid_sample, align_corners=True: index i of n sits at -1 + 2 i / (n - 1); its last axis is (x, y, z)
     grid = torch.stack([2 * (a + displacement[k] / h) / max(n - 1, 1) - 1
@@ -1661,7 +1681,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False, falx: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
-                source: str = "brainweb") -> DigitalPhantom:
+                source: str = "brainweb", interpolation: int = 1) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1688,7 +1708,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     caudate, putamen, pallidum and thalamus as their own classes (``label_deep_grey``), which
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
     the other classes' draws do not change. ``falx``: the falx cerebri as dura in the interhemispheric
-    fissure (``add_falx``, in MNI space before the deformation). ``ventricle_age`` [years] (a number, (low, high) to
+    fissure (``add_falx``, in MNI space before the deformation). ``interpolation``: the order of the final pull-back
+    (``deform``: 1 trilinear, 3 cubic B-spline, which keeps more fine structure). ``ventricle_age`` [years] (a number, (low, high) to
     draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
@@ -1853,7 +1874,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     k = int(((src - mni.view(3, 1, 1, 1)) ** 2).sum(0).argmin())
     meta["ventricle_landmark"] = [float(anatomy.origin[2] + (k // (anatomy.shape[1] * anatomy.shape[2])) * anatomy.voxel[0])]
     del src
-    anatomy = deform(anatomy, field)
+    anatomy = deform(anatomy, field, order=interpolation)
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones
         anatomy = layer_scalp(anatomy)
     elif scalp == "layered_drawn":  # this head's thicknesses: normal draws with the measured between-subject SDs

@@ -604,3 +604,22 @@ def test_add_falx_splits_the_fissure_above_the_callosum():
     assert per_row[z < 0].max() == 0
     # centred on the fissure
     assert abs((dura[high] * x).sum() / dura[high].sum()) < 1e-6
+
+
+def test_deform_cubic_keeps_fine_structure():
+    """A 3-voxel-period pattern shifted by half a voxel: the cubic B-spline pull-back (order 3) reproduces it far better
+    than trilinear; with no displacement it returns the fractions unchanged; fractions still sum to at most one."""
+    n = (4, 6, 48)
+    xi = np.arange(n[2])
+    wave = (0.5 + 0.4 * np.sin(2 * np.pi * xi / 3.0)).astype(np.float32)
+    a = torch.from_numpy(np.broadcast_to(wave, n).copy())
+    an = bp.Anatomy({"gm": a, "wm": 1 - a}, voxel=(1e-3,) * 3, origin=(0.0, 0.0, 0.0))
+    still = bp.deform(an, torch.zeros((3, *n)), order=3)
+    assert torch.allclose(still.fractions["gm"], a, atol=1e-5)
+    shift = torch.zeros((3, *n)); shift[2] = 0.5e-3
+    truth = 0.5 + 0.4 * np.sin(2 * np.pi * (xi + 0.5) / 3.0)
+    inner = slice(6, -6)
+    err = {o: np.abs(bp.deform(an, shift, order=o).fractions["gm"].numpy()[1, 2, inner] - truth[inner]).max() for o in (1, 3)}
+    assert err[3] < 0.35 * err[1]
+    out = bp.deform(an, shift, order=3)
+    assert float((out.fractions["gm"] + out.fractions["wm"]).max()) <= 1 + 1e-6

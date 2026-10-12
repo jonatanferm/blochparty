@@ -353,6 +353,8 @@ def main():
     ap.add_argument("--pitch", default=None, help="mean,sd [deg], nose down positive (sample_head(pitch=))")
     ap.add_argument("--age", default=None, help="years, or lo,hi drawn uniformly per head: closed sulci opened to that age's width (sample_head(age=), Jin 2018)")
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
+    ap.add_argument("--interp-order", type=int, choices=(1, 3), default=1,
+                    help="order of the head's final pull-back (sample_head(interpolation=)): 3 = cubic B-spline")
     ap.add_argument("--falx", action="store_true", help="the falx cerebri as dura in the interhemispheric fissure "
                     "(sample_head(falx=True), anatomy.add_falx)")
     ap.add_argument("--deep-grey", action="store_true",
@@ -382,7 +384,7 @@ def main():
                     help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 "
-                         "--coil-radius 0.14 --coil-gap-mm 25 --falx; with --source ixi: --size native, no ventricle age, no "
+                         "--coil-radius 0.14 --coil-gap-mm 25 --falx --interp-order 3; with --source ixi: --size native, no ventricle age, no "
                          "rim calibration, the subject's own scalp (--scalp brainweb)")
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
@@ -402,6 +404,7 @@ def main():
         args.readout_os = 2
         args.b1 = "birdcage"
         args.deep_grey = args.flow_void = args.falx = True
+        args.interp_order = 3
         args.refocus = "protocol"
         args.ventricle_age = args.ventricle_age or "20,80"  # fastMRI ships no ages: adults, uniform (an assumption)
         args.sas_mm = args.sas_mm or 1.5  # a calibration (thin_convexity_csf)
@@ -451,7 +454,8 @@ def main():
         proto = protocols[seed % len(protocols)]
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
-                              ventricle_age=vage, pitch=pitch, source=args.source, falx=args.falx)
+                              ventricle_age=vage, pitch=pitch, source=args.source, falx=args.falx,
+                              interpolation=args.interp_order)
         drop_detached(head)
         if args.flow_void:
             flow_void(head)
@@ -496,7 +500,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

@@ -107,13 +107,19 @@ def register(fixed, aff_f, moving, aff_m, levels=(4., 2.), iters=(150, 100)):
     return M, -float(loss)
 
 
-def onto(vol, aff_vol, M, shape_zyx, origin_mm):
-    """vol sampled on BrainWeb's 1 mm grid (z, y, x) through M"""
+def onto(vol, aff_vol, M, shape_zyx, origin_mm, order=1):
+    """vol sampled on BrainWeb's 1 mm grid (z, y, x) through M; ``order`` 1 trilinear, 3 cubic B-spline (keeps the
+    fine structure: trilinear keeps ~0.6 of the power at the realism images' Nyquist, the spline ~0.9)"""
     nz, ny, nx = shape_zyx
     g = np.stack(np.meshgrid(np.arange(nx), np.arange(ny), np.arange(nz), indexing="ij"), -1) + np.asarray(origin_mm)
     pts = torch.tensor(g, dtype=torch.float32).permute(2, 1, 0, 3) @ torch.tensor(M[:3, :3], dtype=torch.float32).T \
         + torch.tensor(M[:3, 3], dtype=torch.float32)
-    return sample(vol, torch.tensor(aff_vol, dtype=torch.float32), pts).numpy()
+    if order == 1:
+        return sample(vol, torch.tensor(aff_vol, dtype=torch.float32), pts).numpy()
+    inv = np.linalg.inv(np.asarray(aff_vol, dtype=np.float64))
+    vox = pts.numpy().astype(np.float64) @ inv[:3, :3].T + inv[:3, 3]  # (z, y, x, 3): indices into vol's (x, y, z)
+    return ndimage.map_coordinates(np.asarray(vol, dtype=np.float32), np.moveaxis(vox, -1, 0).astype(np.float32),
+                                   order=order, mode="constant", cval=0.0).astype(np.float32)
 
 
 def _rot(angles):
@@ -263,10 +269,10 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     t2, a2 = load_ras(t2p)
     M, score = register(*fixed2, t1, a1)
     shape, origin = atlas.shape, np.array(atlas.origin) * 1e3
-    c1 = onto(t1, a1, M, shape, origin)
+    c1 = onto(t1, a1, M, shape, origin, order=3)
     R2, t2score = align_t2(c1, t2, a2, M, shape, origin)
     M2 = R2 @ M
-    chans = [c1, onto(t2, a2, M2, shape, origin)]
+    chans = [c1, onto(t2, a2, M2, shape, origin, order=3)]
     valid = (onto(np.ones_like(t1), a1, M, shape, origin) > 0.99) & (onto(np.ones_like(t2), a2, M2, shape, origin) > 0.99)
     fr = {k: atlas.fractions[k].numpy().astype(np.float32) for k in CLASSES}
     intra = ndimage.gaussian_filter(sum(fr[k] for k in BRAIN), 2.0)
