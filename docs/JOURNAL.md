@@ -1851,3 +1851,15 @@ The parts of M5 that need no outside access, done while the user was away.
 - **r24 running** (v8 heads with cubic resampling and pull-back, falx, slice 0 12.5 mm below the ventricle bodies,
   396-line linear ordering; r21's subjects and seeds, ages 20-82, median 52): 14.7 M spins per slice; the mini held
   14 GB and swapped, so simulate_heads --serial (14716ce) builds one slice's phantom at a time (6 GB); ~135 s per slice.
+- **r24's first two heads against r21's**: hemisphere texture in the top bands 1.10 / 1.01 of real power (r21 0.65 /
+  0.49), ventricle walls 0.453 per px (real 0.459; r21 0.417), the fissure 3.91 / 2.68 at its centre / +-1 px (real
+  3.89 / 2.68), phase-axis detail in the central patch ~1.0 of real (r21 up to 3.4). By eye the slices are now hard to
+  tell apart; the white matter at the upper slices looks a little mottled.
+- **What is left** (two heads): coarse texture 1.4 x real power at 0.3-0.45 of Nyquist; the background beside the head
+  1.18 x the floor (real 1.09); the outer band dark at its q25-q50; and at slices 5-7 less of the interior near the
+  white-matter mode (0.35 vs 0.44), with the central white matter darker than the peripheral (0.865 vs real 0.93).
+  Not the receive coil (3D element rings move the ratio by < 0.01), not the slice geometry (proxy images: 0.39-0.42),
+  not IXI's anatomy (its own T2 at those levels: share 0.49-0.59, centre / ring 1.03-1.08), not B1+ alone (the map's
+  central overflip is stronger at the low slices, which match). The within-tissue texture (5 % T1/T2 at a 10 mm
+  correlation length, an M4 assumption) sits at the scale of the coarse excess; ablations (--no-texture, --b1 uniform;
+  01c39ba, 858bbf4) queued after r24. Proxy fit of the pitch at the 12.5 mm offset keeps -10 deg (area rms 0.017).
