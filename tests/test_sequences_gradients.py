@@ -205,6 +205,7 @@ def test_bssfp_balanced_and_kspace(kw):
 
 
 @pytest.mark.parametrize("kw", [dict(etl=4), dict(etl=8, ordering="centric", slice_thickness=5e-3),
+                                dict(etl=4, ordering="reverse_centric"),
                                 dict(etl=16, ramps=False, refocus_flip_deg=140.0)])
 def test_tse_kspace_and_echo_times(kw):
     n, fov = 16, 0.22
@@ -222,6 +223,12 @@ def test_tse_kspace_and_echo_times(kw):
     # centric ordering puts ky = 0 in the first echo
     if kw.get("ordering") == "centric":
         assert seq.meta["line_echo"][n // 2] == 0 and seq.meta["te"] == seq.meta["esp"]
+    # reverse centric: ky = 0 in the last echo, each echo's lines on both sides of the centre (within a line)
+    if kw.get("ordering") == "reverse_centric":
+        le = seq.meta["line_echo"]
+        assert le[n // 2] == etl - 1 and seq.meta["te"] == pytest.approx(etl * seq.meta["esp"])
+        assert all(abs(le[n // 2 + j] - le[n // 2 - j - 1]) <= 1 for j in range(n // 2))
+        assert all(le[n // 2 + j] >= le[n // 2 + j + 1] for j in range(n // 2 - 1))
 
 
 @pytest.mark.parametrize("ramps", [True, False])

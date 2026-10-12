@@ -288,15 +288,17 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 
 
 def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1,
-             refocus_deg=180.) -> bp.Sequence:
+             refocus_deg=180., ordering="linear") -> bp.Sequence:
     """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
     the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
     oversampling (the real scans: 2). ``refocus_deg``: the refocusing flip angle (the headers'
-    ``flipAngle_deg``: 180 in 11 of the 21 3 T scans, 140-179 in the rest)."""
+    ``flipAngle_deg``: 180 in 11 of the 21 3 T scans, 140-179 in the rest). ``ordering``: "linear" (ky = 0 in
+    echo 9 of 16) or "reverse_centric" (in echo 16; echo spacing te / 16)."""
     multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
     if readout_os != 1:
         multi["readout_oversampling"] = readout_os
-    return bp.tse_2d(n, FOV, etl=16, esp=round(te / 9, 5), tr=tr, n_dummy=1, slice_thickness=THICKNESS,
+    esp = round(te / (16 if ordering == "reverse_centric" else 9), 5)
+    return bp.tse_2d(n, FOV, etl=16, esp=esp, ordering=ordering, tr=tr, n_dummy=1, slice_thickness=THICKNESS,
                      refocus_flip_deg=refocus_deg, spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
                      **multi)
 
@@ -359,6 +361,8 @@ def main():
     ap.add_argument("--coil-gap-mm", type=float, default=None,
                     help="the head rests on the coil's posterior side: the receive ring's back this far behind the "
                          "head's back (coil_offset); default: the ring centred on the head")
+    ap.add_argument("--ordering", choices=("linear", "reverse_centric"), default="linear",
+                    help="TSE phase-encode ordering (sequence()); the real k-space is symmetric in ky")
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
                     help="protocol: each paired scan's refocusing angle from its header")
     ap.add_argument("--ventricle-age", default=None,
@@ -459,7 +463,7 @@ def main():
             """Slice i's phantom, coils and merged sequence (CPU), built while the GPU runs slice i - 1."""
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os,
-                           proto["refocus_deg"] if args.refocus == "protocol" else 180.)
+                           proto["refocus_deg"] if args.refocus == "protocol" else 180., args.ordering)
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
@@ -486,7 +490,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1),
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

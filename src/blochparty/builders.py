@@ -346,8 +346,9 @@ def tse_2d(
 
     ``refocus_flip_deg``: a scalar or ``etl`` values (e.g. a variable-flip train); may be
     tensors that require grad. ``ordering``: "linear" (echo e covers the e-th band of
-    k-space; effective TE at the echo holding ky = 0) or "centric" (lines sorted by |ky|,
-    so the first echo holds the centre). Needs n % etl == 0; n / etl shots, each lasting
+    k-space; effective TE at the echo holding ky = 0), "centric" (lines sorted by |ky|,
+    so the first echo holds the centre) or "reverse_centric" (sorted by descending |ky|: the
+    edges first, the centre in the last echo, every echo's band of lines symmetric about ky = 0). Needs n % etl == 0; n / etl shots, each lasting
     ``tr``, after ``n_dummy`` dummy shots. Every refocusing pulse sits between two crusher
     lobes on z of ``crusher_cycles`` across a voxel (``slice_thickness``, or fov / n).
     The read prephaser comes before the first refocusing pulse, so each echo interval is
@@ -401,8 +402,10 @@ def tse_2d(
     order = list(range(n))
     if ordering == "centric":
         order = sorted(order, key=lambda i: (abs(i - n // 2), i < n // 2))
+    elif ordering == "reverse_centric":
+        order = sorted(order, key=lambda i: (-abs(i - n // 2), i < n // 2))
     elif ordering != "linear":
-        raise ValueError(f"ordering must be 'linear' or 'centric', not {ordering!r}")
+        raise ValueError(f"ordering must be 'linear', 'centric' or 'reverse_centric', not {ordering!r}")
     lines = [[order[e * n_shots + s] for e in range(etl)] for s in range(n_shots)]  # [shot][echo] -> ky index
 
     args = (rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps)
