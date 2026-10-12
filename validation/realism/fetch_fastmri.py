@@ -53,7 +53,7 @@ def describe(path: Path) -> dict:
     return {"kspace_shape": shape, "field_T": sys.systemFieldStrength_T, "model": sys.systemModel,
             "vendor": sys.systemVendor, "protocol": h.measurementInformation.protocolName
             if h.measurementInformation else None, "TR_ms": first(seq.TR), "TE_ms": first(seq.TE),
-            "TI_ms": first(seq.TI), "flip_deg": first(seq.flipAngle_deg),
+            "TI_ms": first(seq.TI), "flip_deg": first(seq.flipAngle_deg), "echo_spacing_ms": first(seq.echo_spacing),
             "encoded": [enc.encodedSpace.matrixSize.x, enc.encodedSpace.matrixSize.y],
             "recon": [enc.reconSpace.matrixSize.x, enc.reconSpace.matrixSize.y],
             "fov_mm": [enc.encodedSpace.fieldOfView_mm.x, enc.encodedSpace.fieldOfView_mm.y,

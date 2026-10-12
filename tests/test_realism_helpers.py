@@ -90,3 +90,15 @@ def test_residual_maps_recover_known_multipliers():
     assert np.median(t2s[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
     assert np.median(pds[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
     assert np.all(t2s[skin] == 1) and np.all(pds[skin] == 1)
+
+
+def test_header_train_matches_the_real_echo_blocks():
+    """The real AXT2 k-space energy steps between the echoes' blocks of 19 lines at ky -161, -142, ..., -47, -28, -9 and
+    +10 (validation/realism/echo_train.py over 21 scans): 396 lines over 21 echoes, ky = 0 in echo 11. The header train
+    (REAL_ETL at the header's 10.26 ms) puts the 128 central lines' block boundaries there and TE at 11 echo spacings."""
+    seq = SH.sequence(128, 6.19, 0.113, ordering="linear_full", etl=SH.REAL_ETL, esp=0.01026)
+    echo = np.asarray(seq.meta["line_echo"])
+    ky = np.arange(128) - 64
+    assert echo[ky == 0][0] == 10  # 0-based: echo 11
+    assert set(ky[1:][np.diff(echo) != 0].tolist()) == {-47, -28, -9, 10, 29, 48}
+    assert seq.meta["te"] == pytest.approx(11 * 0.01026)

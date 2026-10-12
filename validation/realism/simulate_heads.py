@@ -59,12 +59,17 @@ from blochparty.sequence import System
 ROOT = Path(__file__).resolve().parents[2] / "validation" / "anatomy" / "data"
 FOV, THICKNESS, SLICES = 0.22, 5e-3, 16
 ACQUIRED_LINES = 396  # phase-encode lines of the real AXT2 scans (encodedSpace y in all 21 headers)
+# the real AXT2 echo trains (validation/realism/echo_train.py): their k-space energy steps every 19 lines (ky -161,
+# -142, ..., -28, -9.5 | +9.5): 396 lines over 21 echoes in linear order, ky = 0 in echo 11 = TE / the header's echo
+# spacing (113 / 10.26 ms and 105 / 9.56 ms)
+REAL_ETL = 21
 
 
 def real_protocols(manifest: Path) -> list[dict]:
     m = json.loads(manifest.read_text())
     return [{"file": k, "TR": v["TR_ms"] * 1e-3, "TE": v["TE_ms"] * 1e-3, "coils": v["kspace_shape"][1],
-             "refocus_deg": v.get("flip_deg") or 180.}
+             "refocus_deg": v.get("flip_deg") or 180.,
+             "esp": None if v.get("echo_spacing_ms") is None else v["echo_spacing_ms"] * 1e-3}
             for k, v in sorted(m.items()) if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2]
 
 
@@ -289,20 +294,22 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 
 
 def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1,
-             refocus_deg=180., ordering="linear") -> bp.Sequence:
+             refocus_deg=180., ordering="linear", etl=16, esp=None) -> bp.Sequence:
     """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
     the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
     oversampling (the real scans: 2). ``refocus_deg``: the refocusing flip angle (the headers'
     ``flipAngle_deg``: 180 in 11 of the 21 3 T scans, 140-179 in the rest). ``ordering``: "linear" (ky = 0 in
     echo 9 of 16), "linear_full" (the n lines take the echoes they have in the real scans' 396-line linear
     acquisition, ``ACQUIRED_LINES``: echoes 6-11, 25 shots) or "reverse_centric" (ky = 0 in echo 16; echo
-    spacing te / 16)."""
+    spacing te / 16). ``etl`` / ``esp`` (default 16 / None: te / 9, te / 16 reverse-centric): the echo train, e.g.
+    the real scans' (``REAL_ETL`` at the header's echo spacing: 19 shots of "linear_full")."""
     multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
     if readout_os != 1:
         multi["readout_oversampling"] = readout_os
-    esp = round(te / (16 if ordering == "reverse_centric" else 9), 5)
+    if esp is None:
+        esp = round(te / (16 if ordering == "reverse_centric" else 9), 5)
     full = dict(acquired_lines=ACQUIRED_LINES) if ordering == "linear_full" else {}
-    return bp.tse_2d(n, FOV, etl=16, esp=esp, ordering="linear" if full else ordering, tr=tr, n_dummy=1, slice_thickness=THICKNESS,
+    return bp.tse_2d(n, FOV, etl=etl, esp=esp, ordering="linear" if full else ordering, tr=tr, n_dummy=1, slice_thickness=THICKNESS,
                      refocus_flip_deg=refocus_deg, spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
                      **multi, **full)
 
@@ -374,6 +381,10 @@ def main():
     ap.add_argument("--coil-gap-mm", type=float, default=None,
                     help="the head rests on the coil's posterior side: the receive ring's back this far behind the "
                          "head's back (coil_offset); default: the ring centred on the head")
+    ap.add_argument("--train", choices=("fitted", "header"), default="fitted",
+                    help="echo train: 'fitted' ETL 16, echo spacing TE / 9 (TE / 16 reverse-centric); 'header' the real "
+                         "scans' (REAL_ETL echoes at the header's echo spacing, ky = 0 in echo 11; needs --ordering "
+                         "linear_full)")
     ap.add_argument("--ordering", choices=("linear", "linear_full", "reverse_centric"), default="linear",
                     help="TSE phase-encode ordering (sequence()); the real k-space is symmetric in ky")
     ap.add_argument("--refocus", choices=("180", "protocol"), default="180",
@@ -403,6 +414,8 @@ def main():
                          "phantom and its coil maps in memory instead of two (the 16 GB mini swapped 6.7 GB in r24)")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
+    if args.train == "header" and args.ordering != "linear_full":
+        ap.error("--train header needs --ordering linear_full (the real scans' 396-line linear order)")
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
         args.table, args.size, args.stack, args.yaw_sd = "tissuedb", "anthropometric_shell", "protocol", 3.8
@@ -489,7 +502,8 @@ def main():
             """Slice i's phantom, coils and merged sequence (CPU), built while the GPU runs slice i - 1."""
             order = [float(zs[j] - zs[i]) for j in interleaved()] if args.multislice else None
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os,
-                           proto["refocus_deg"] if args.refocus == "protocol" else 180., args.ordering)
+                           proto["refocus_deg"] if args.refocus == "protocol" else 180., args.ordering,
+                           **(dict(etl=REAL_ETL, esp=proto["esp"]) if args.train == "header" else {}))
             k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
@@ -517,7 +531,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,
