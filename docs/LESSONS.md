@@ -646,6 +646,14 @@ says where it came from so it can be re-checked.
 - **An atlas can miss a structure that every real image shows**: neither BrainWeb nor the IXI segmentation has a
   falx (dura 0 at the midline), so the interhemispheric fissure was solid CSF, 20 % brighter at its centre than
   real (2026-10-12; anatomy.add_falx).
+- **A segmentation inherits its source scan's artefacts** (2026-10-12): IXI's T2 displaces fat 1.63 mm posterior of the
+  water tissue (a water-fat shift along its readout), so our IXI heads had fat at the skin and soft tissue against the
+  skull at the back, the reverse of the real layering, and the realism CNN read it there. Check a segmented layer's
+  order by direction around the head (fat's depth minus soft tissue's was -2.6 mm at the back, +0.8 at the front,
+  -1.6 at the sides): an asymmetry along one axis is the scanner, not anatomy.
+- **Measure the thing, not a proxy that mixes two layers** (2026-10-12): "skin to the darkest point of the skull"
+  said our posterior scalp was 1.2 mm too thick and led to a compression model; skin to the skull's outer surface said
+  the scalp was 1.6 mm too thin and the skull's dark band too wide.
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
