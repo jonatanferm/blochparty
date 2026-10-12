@@ -1931,3 +1931,15 @@ The parts of M5 that need no outside access, done while the user was away.
   give a 384 x 396 encoding, echo spacing 10.26 ms, no readout bandwidth.
 - The v11 preparation thrashed the laptop (18 GB swap with the pitch fits running); the last 17 heads moved to the mini
   (~250 s each, two jobs).
+- **The real echo train, from the k-space** (f3de52e): the AXT2 line energy (summed over coils and readout, log minus
+  a 15-line running median, 21 volumes x slices 1-7) steps every 18.9 lines, at ky -161, -142, ..., -28, -9 and +10:
+  each echo fills a block of 19 lines with ky = 0 in the middle of one, so 396 lines over 21 echoes (19 shots) and
+  ky = 0 in echo 11; the headers' echo spacing (10.26 ms at TE 113, 9.56 at TE 105) gives TE / spacing = 11.0 for
+  both. Ours was a fitted 16-echo train at TE / 9 = 12.6 ms (25 shots): 23 % longer spacing and 30 % fewer refocusing
+  pulses per slice (the neighbours' trains drive MT). `simulate_heads --train header` plays the real one (opt-in,
+  with --ordering linear_full); validation/realism/echo_train.py records the analysis; the manifests now carry
+  echo_spacing_ms. The background beside the head along the phase axis still reads 1.19 x the noise floor on the v10
+  IXI012 head (real 1.09), the readout direction 1.00 (real 1.02).
+- **r26** = r24's 16 subjects and seeds on v11 heads with the residual (no assumed texture) and the real echo train;
+  the laptop first simulates IXI012 (seed 200, slices 3-7) with the real train and no residual against the fitted
+  train's run, to separate the two changes.
