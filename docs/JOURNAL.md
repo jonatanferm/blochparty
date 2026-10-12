@@ -1897,3 +1897,13 @@ The parts of M5 that need no outside access, done while the user was away.
   (real 0.83). The B1+ map explains about half of the central darkening; the rest matches the same-person residual
   (IXI's central white matter 1-5 % brighter than one white-matter class allows), a tissue property.
 - IXI's PD volumes fetched (c55897f; 185 Hammersmith subjects, 1.3 GB) for the fitted residual layer.
+- **A residual layer fitted to each subject's own scans** (28991d4). prepare_ixi resamples IXI's PD (the dual-echo
+  TSE's TE 8 ms echo) with the T2's transform and fits per voxel the T2 and PD multipliers that make the simulator's own
+  tissue mixture (deep grey, falx as simulated) reproduce both echoes: T2 from the echo ratio (scale from ventricular
+  CSF), PD from the first echo over white matter; water tissue only (not fat, not CSF's unmeasurable T2); 0.7 mm
+  smoothing; a cubic trend fitted over pure white matter removed, which also removes the two-point fit's absolute level
+  (IXI012's white matter reads 1.18 x our 72 ms: stimulated echoes) and its B1+ pattern (+-15 % base to top; a 20 mm
+  high-pass instead left halos around the nuclei); clipped to x0.61-1.65. IXI012: deep grey PD x1.08-1.13, T2
+  x0.98-1.09, grey matter PD x1.06, scalp soft tissue T2 x1.52 / PD x0.68. Same-person check (scanner trend removed
+  from both): brain |log ratio| median 0.064 -> 0.032, 2 mm-smoothed RMS 0.080 -> 0.072. 24 heads re-prepared as v10
+  (fat shift undone + residual maps) for r25.
