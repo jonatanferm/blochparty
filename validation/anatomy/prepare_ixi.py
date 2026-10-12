@@ -279,7 +279,9 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     white matter (the residual is the spatial pattern; the database keeps absolute T2s), pd_scale = the measured
     TE-8 signal over the predicted one (both over white matter) after that T2 change; elsewhere (fat, bone, air, CSF for
     T2) 1. The prediction uses the simulator's own tissue values on the anatomy as it simulates it (deep grey nuclei,
-    falx). Log-scales smoothed 0.7 mm within their masks (noise), less a cubic trend fitted over pure white matter (the
+    falx). Inside the skull only. Log-scales smoothed 1.5 mm within their masks and within each voxel's largest tissue
+    (the echo ratio amplifies the images' noise: 0.7 mm left ~4 % per voxel and r25's first heads 1.4-1.7 x the real
+    fine texture), less a cubic trend fitted over pure white matter (the
     scanner's B1+ and bias; this also puts white matter at 1), clipped to +-0.5. t2w, pdw: bias-corrected echoes."""
     from blochparty import tissuedb
     table = tissuedb.tissue_table(3.0)
@@ -304,17 +306,29 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     water = sum(f[k] for k in names if not (table[k].fat_fraction and table[k].fat_fraction.mean > .5) and k not in ("skull", "marrow", "dura"))
     csf = f["csf"]
     deep_csf = ndimage.binary_erosion(csf > .95, iterations=2) & valid
+    # inside the skull only: the scalp's layers are thin, their fat still shifted in the subject's images (the
+    # phantom's is not), so a scalp residual compares misaligned tissue (r25's first heads: posterior scalp peak 0.43
+    # of p99 against r24's 0.65 and the real 0.83)
+    intracranial = sum(f[c] for c in f if c in ("csf", "gm", "wm", "caudate", "putamen", "pallidum", "thalamus")) > .5
     ok = valid & (t2w > 1e-3) & (pdw > 1e-3)
     lr = np.zeros_like(t2w); lr[ok] = np.log(pdw[ok] / t2w[ok])
     k = np.log(np.exp((tes[1] - tes[0]) / table["csf"].t2.mean)) - np.median(lr[deep_csf]) if deep_csf.sum() > 50 else 0.0
     L = lr + k
     Lp = np.log(np.maximum(s8p, 1e-9) / np.maximum(s100p, 1e-9))
-    t2mask = ok & (water > .7) & (L > .2) & (csf < .3)
+    t2mask = ok & (water > .7) & (L > .2) & (csf < .3) & intracranial
     log_t2 = np.zeros_like(L); log_t2[t2mask] = np.log(Lp[t2mask] / L[t2mask])
 
-    def smooth(v, m, sigma=0.7):
-        num = ndimage.gaussian_filter(v * m, sigma); den = ndimage.gaussian_filter(m.astype(np.float32), sigma)
-        return np.where(m, num / np.maximum(den, 1e-6), 0.0)
+    # each voxel to its largest tissue, smoothed among voxels of the same tissue: the noise falls, the boundaries
+    # between tissues (a nucleus's edge, the cortex) stay where the anatomy puts them
+    dominant = np.argmax(np.stack([f[k] for k in names]), 0)
+
+    def smooth(v, m, sigma=1.5):
+        out = np.zeros_like(v)
+        for i in np.unique(dominant[m]):
+            mi = m & (dominant == i)
+            num = ndimage.gaussian_filter(v * mi, sigma); den = ndimage.gaussian_filter(mi.astype(np.float32), sigma)
+            out[mi] = num[mi] / np.maximum(den[mi], 1e-6)
+        return out
 
     zz, yy, xx = np.meshgrid(*(np.linspace(-1, 1, n, dtype=np.float32) for n in frac.shape[1:]), indexing="ij")
     terms = [(i, j, l) for i in range(4) for j in range(4 - i) for l in range(4 - i - j)]
@@ -335,7 +349,7 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     t2_scale = np.exp(log_t2)
     s8q, _ = predicted(t2_scale)
     wm = f["wm"] > .9
-    pdmask = ok & (water > .7)
+    pdmask = ok & (water > .7) & intracranial
     ratio = np.zeros_like(L)
     ratio[pdmask] = (pdw[pdmask] / np.median(pdw[wm & ok])) / (s8q[pdmask] / np.median(s8q[wm & ok]))
     log_pd = np.clip(local(smooth(np.log(np.maximum(ratio, 1e-6)) * pdmask, pdmask), pdmask), -.5, .5)

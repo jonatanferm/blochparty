@@ -56,9 +56,10 @@ def test_soft_references_follow_the_tissue_table():
 
 
 def test_residual_maps_recover_known_multipliers():
-    """A synthetic head (white matter, a CSF block for the echo-ratio scale, a grey-matter block) whose two echoes are
-    made with grey matter's T2 x1.2 and PD x0.9 against the tissue table (and an arbitrary scale on the PD echo): the
-    fitted t2_scale / pd_scale are ~1.2 / ~0.9 in the grey matter and 1 in the white matter."""
+    """A synthetic head (white matter, a CSF block for the echo-ratio scale, a grey-matter block, a skin slab) whose
+    two echoes are made with grey matter's T2 x1.2 and PD x0.9 and skin's T2 x1.3 against the tissue table (and an
+    arbitrary scale on the PD echo): the fitted t2_scale / pd_scale are ~1.2 / ~0.9 in the grey matter, 1 in the white
+    matter and 1 in the skin (outside the skull the residual is not fitted)."""
     from blochparty import tissuedb
     table = tissuedb.tissue_table(3.0)
     n = (24, 24, 24)
@@ -69,11 +70,13 @@ def test_residual_maps_recover_known_multipliers():
     gm = (slice(13, 22), slice(13, 22), slice(13, 22))
     frac[k["wm"]][csf] = 0; frac[k["csf"]][csf] = 1
     frac[k["wm"]][gm] = 0; frac[k["gm"]][gm] = 1
+    skin = (slice(None), slice(None), slice(22, 24))
+    frac[k["wm"]][skin] = 0; frac[k["skin"]][skin] = 1
     tr = P.IXI_T2["tr"]
 
     def echo(te, t2_gm, pd_gm):
         out = np.zeros(n, np.float32)
-        for c, t2f, pdf in (("wm", 1, 1), ("csf", 1, 1), ("gm", t2_gm, pd_gm)):
+        for c, t2f, pdf in (("wm", 1, 1), ("csf", 1, 1), ("gm", t2_gm, pd_gm), ("skin", 1.3, 1)):
             p = table[c]
             out += frac[k[c]] * p.pd.mean * pdf * (1 - np.exp(-tr / p.t1.mean)) * np.exp(-te / (p.t2.mean * t2f))
         return out
@@ -86,3 +89,4 @@ def test_residual_maps_recover_known_multipliers():
     assert np.median(pds[inner]) == pytest.approx(0.9, rel=0.03)
     assert np.median(t2s[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
     assert np.median(pds[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
+    assert np.all(t2s[skin] == 1) and np.all(pds[skin] == 1)
