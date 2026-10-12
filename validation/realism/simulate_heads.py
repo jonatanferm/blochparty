@@ -385,7 +385,7 @@ def main():
                          "--centre --stack protocol --yaw-sd 3.8 --quality real --readout-os 2 --b1 birdcage --deep-grey "
                          "--flow-void --refocus protocol --ventricle-age 20,80 --sas-mm 1.5 --pitch -10,5 "
                          "--coil-radius 0.14 --coil-gap-mm 25 --falx --interp-order 3; with --source ixi: --size native, no ventricle age, no "
-                         "rim calibration, the subject's own scalp (--scalp brainweb)")
+                         "rim calibration, the subject's own scalp (--scalp brainweb), slice 0 12.5 mm below the ventricle bodies")
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
                          f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
@@ -416,6 +416,12 @@ def main():
         if args.source == "ixi":  # real anatomy: no sulcal, ventricle, rim or scalp edits; the subject's own size
             args.size, args.ventricle_age, args.age = "native", None, None
             args.sas_mm = 0.0
+            # slice 0 12.5 mm below the ventricle bodies: on proxy images of r22's 16 heads (each class's spin-echo
+            # signal, 5 mm slabs, 1.72 mm pixels) the lateral-ventricle cross-section over slices 0-3 is 211 / 240 /
+            # 250 / 223 px against the real 181 / 220 / 272 / 218 (10 mm: falls to 138 at slice 3; 15 mm: peaks a
+            # slice late) and the head-area profile stays within 0.02 of the real one
+            if args.stack_offset_mm is None:
+                args.stack_offset_mm = 12.5
 
     args.scalp = args.scalp or "brainweb"
     args.coil_radius = args.coil_radius or 0.18
