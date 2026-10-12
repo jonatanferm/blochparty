@@ -1950,3 +1950,11 @@ The parts of M5 that need no outside access, done while the user was away.
   fitted train's 25-line blocks with bigger steps (12.6 ms spacing) put replicas of the head along the phase axis.
   Scalp profiles and the GM / WM mode ratio unchanged (1.17, real 1.17); the white-matter mode over the interior
   median 0.70 (fitted 0.72, real 0.83) — the slice 5-7 composition gap the residual addresses in r26.
+- **r26 stopped after two heads** (seeds 200-201 against r24's): the phase-axis halo gone (beside the head 1.03 x the
+  floor, r24 1.18, real 1.09), the front / back ring gradient 0.70 (r24 0.45, real 0.71), the front scalp over WM 8.83
+  (7.85, real 9.79); but CSF too bright against the brain (interior p95 / p99 3.97 / 5.22 x the median, r24 3.14 /
+  4.09, real 3.23 / 4.04; fissure peak 4.36, real 3.89), the outer band dimmer under the higher p99 (q75 / q90 0.518 /
+  0.717, real 0.616 / 0.859) and hemisphere texture 1.3-2.0 x real. The train alone (IXI012 A/B, no residual) raised
+  CSF's p99 by 7 % and texture by ~6 %; the rest was the PD residual: CSF x1.21-1.28 and grey matter x1.05-1.09 in all
+  subjects, IXI's own MT read as PD (1d90f18: PD multipliers re-centred per tissue; T2's kept). 24 heads re-prepared
+  as v12 (mini 18, laptop 6) for r27 = r26 on v12.

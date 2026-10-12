@@ -678,6 +678,12 @@ says where it came from so it can be re-checked.
   whose replicas of the head along the phase axis left a plateau of ~1 noise floor beside it (0.87 at 9 px; real
   train 0.28): the background there read 1.19-1.22 x the floor in every run since r21 against the real 1.09, and
   1.03 with the real train. The header had the spacing all along.
+- **A residual absorbs whatever its forward model leaves out** (2026-10-12): the PD residual predicted IXI's TE 8 ms
+  echo without magnetization transfer, so the subject's own multi-slice MT (white matter darkened most, CSF not at
+  all) came out as "PD": CSF x1.21-1.28 and grey matter x1.05-1.09 in every subject, and the simulator added its own MT
+  on top (r26: CSF p99 1.28 x r24's). A multiplier that is the same in every subject is the model's gap, not anatomy:
+  keep only the within-tissue pattern of a quantity whose forward model is incomplete (re-centred per tissue), or model
+  the missing mechanism. T2 from an echo ratio cancels MT and kept its tissue offsets.
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
