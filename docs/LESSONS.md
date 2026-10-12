@@ -634,6 +634,18 @@ says where it came from so it can be re-checked.
   "muscle", and the simulator gave it muscle's T2 (30 ms, black in a T2 TSE), though the subject's own T2 read
   it at 0.5-0.8 x WM. Check what each label's tissue values predict for the source scan against the source
   scan itself (here: soft tissue unmixed between skin and muscle by its T2).
+- **A cropped scan's k-space remembers its echo ordering** (2026-10-12): the realism score keeps the central 128 of
+  the real scans' 396 phase-encode lines, so in a linear 16-echo TSE those lines come from ~5 echoes around the
+  effective one; our 128-line simulation spread them over all 16 (TE 13-200 ms). Its k-space was lopsided (+ky / -ky
+  0.6-0.8 at the edges, the real 0.95-1.01), the point spread complex along the phase axis, and the CNN lost most of
+  its edge when both sets were low-passed across that axis. Simulate the acquired matrix's echo-to-line mapping
+  (tse_2d(acquired_lines=)), and check a simulated k-space's symmetry against the real one's.
+- **Count the resamplings**: an anatomy segmented from a scan resampled onto an atlas grid and then pulled back
+  through the pose is interpolated twice; trilinear keeps ~0.6 of the power at an image's Nyquist each time (cubic
+  B-spline ~0.9). Our heads had ~half the real fine-structure power and 10 % softer ventricle walls (2026-10-12).
+- **An atlas can miss a structure that every real image shows**: neither BrainWeb nor the IXI segmentation has a
+  falx (dura 0 at the midline), so the interhemispheric fissure was solid CSF, 20 % brighter at its centre than
+  real (2026-10-12; anatomy.add_falx).
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
