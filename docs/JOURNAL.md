@@ -1880,3 +1880,20 @@ The parts of M5 that need no outside access, done while the user was away.
   rescored with the same noise: 0.971); controls 0.44 / 0.42. The targeted measures all moved toward the real ones
   and the classifier still separates the sets: it finds whatever systematic difference remains, so it says where to
   look next rather than how close we are.
+- **Where the CNN looks (r24, occlusion of 16 px patches in held-out images per person-wise fold)**: for the simulated
+  images the evidence sits at the back of the head (outer 0-6 px: logit drop 300 / 1000 per px with the patch mean,
+  366 with only a 2 px blur, against 79-192 at the sides and front; rim 294; interior 144). The fine structure of the
+  occipital scalp and skull gives them away.
+- **IXI's fat was shifted** (966d8a0). At 0.57 mm the real posterior scalp has a dark dermis outside, fat 5 mm in, fat
+  running onto a ~3 mm dark skull line (soft tissue 6.6 mm [5.6-7.6], skull outer surface to its darkest point ~2.0
+  mm); ours had fat at the skin and soft tissue against the skull (soft tissue 5.0 mm, then ~4.8 mm to the darkest
+  point). Fat's depth below the skin minus skin and muscle's in the prepared heads: -2.6 mm at the back, +0.8 at the
+  front, -1.6 at the sides: IXI's T2 displaces fat 1.63 mm posterior (all 24 subjects, IQR 1.1-2.1), a water-fat
+  shift along a front-back readout. Undone in prepare_ixi before fat, marrow and soft tissue are assigned. 24 heads
+  re-prepared as v9. Dead end on the way: pressing the occipital scalp against the pad (compress_occiput), from an
+  edge-to-darkest-bone measure that mixed scalp and skull; the soft tissue alone is thinner than real, not thicker.
+- **Ablations at full quality** (IXI012, seed 200, slices 5-7): without texture the central / peripheral white matter
+  stays 0.871 (with 0.869; real 0.931), with uniform B1+ 0.900; white-matter mode over the median 0.69 / 0.72 / 0.75
+  (real 0.83). The B1+ map explains about half of the central darkening; the rest matches the same-person residual
+  (IXI's central white matter 1-5 % brighter than one white-matter class allows), a tissue property.
+- IXI's PD volumes fetched (c55897f; 185 Hammersmith subjects, 1.3 GB) for the fitted residual layer.
