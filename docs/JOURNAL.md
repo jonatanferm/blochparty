@@ -1874,3 +1874,9 @@ The parts of M5 that need no outside access, done while the user was away.
   the skull |log ratio| median 0.14 (layer boundaries). Caveat for fitting: some of this is sequence physics, not
   tissue (fat 0.67: IXI's echo spacing does not J-suppress fat as our CPMG T2 assumes), so fat needs its own model and
   T2 / PD need IXI's PD echo to separate.
+- **r24 (v8 heads with cubic resampling, cubic pull-back, falx, slice 0 12.5 mm below the ventricle bodies, 396-line
+  linear ordering, coloured coil noise; r21's subjects and seeds)**: intensity W1 0.0155 (the closest yet), quartiles
+  0.221 / 0.313 / 0.501 vs real 0.216 / 0.299 / 0.491, histogram AUC 0.826 [0.69, 0.93], but CNN AUC 0.9996 (r21
+  rescored with the same noise: 0.971); controls 0.44 / 0.42. The targeted measures all moved toward the real ones
+  and the classifier still separates the sets: it finds whatever systematic difference remains, so it says where to
+  look next rather than how close we are.
