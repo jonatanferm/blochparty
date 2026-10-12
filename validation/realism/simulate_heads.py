@@ -380,7 +380,7 @@ def main():
     ap.add_argument("--trace-sulci", action="store_true", help="experimental: open sulci along BrainWeb's faint CSF trace")
     ap.add_argument("--sas-mm", type=float, default=0.0,
                     help="calibration: the outer mm of convexity CSF become inner table (thin_convexity_csf)")
-    ap.add_argument("--b1", choices=("uniform", "birdcage"), default="uniform",
+    ap.add_argument("--b1", choices=("uniform", "birdcage"), default=None,
                     help="birdcage: B1+ of the full-wave 3 T body coil map (b1_plus)")
     ap.add_argument("--preset", choices=("realistic",), default=None,
                     help="realistic: --multislice --mt --table tissuedb --scalp layered_drawn --size anthropometric_shell "
@@ -407,7 +407,7 @@ def main():
         args.scalp = args.scalp or ("brainweb" if args.source == "ixi" else "layered_drawn")
         args.quality = "real" if args.quality == "full" else args.quality
         args.readout_os = 2
-        args.b1 = "birdcage"
+        args.b1 = args.b1 or "birdcage"
         args.deep_grey = args.flow_void = args.falx = True
         args.interp_order = 3
         args.refocus = "protocol"
@@ -430,6 +430,7 @@ def main():
 
     args.scalp = args.scalp or "brainweb"
     args.coil_radius = args.coil_radius or 0.18
+    args.b1 = args.b1 or "uniform"
 
     def span(s):  # "a-b" or "a-b:step"
         rng, _, step = s.partition(":")
