@@ -355,6 +355,8 @@ def main():
     ap.add_argument("--readout-os", type=int, default=1, help="readout oversampling (the real scans: 2)")
     ap.add_argument("--interp-order", type=int, choices=(1, 3), default=1,
                     help="order of the head's final pull-back (sample_head(interpolation=)): 3 = cubic B-spline")
+    ap.add_argument("--residual", action="store_true",
+                    help="IXI heads carry their fitted T2 / PD multipliers (sample_head(residual=True))")
     ap.add_argument("--no-texture", action="store_true",
                     help="no within-tissue texture (sample_head(texture={}); default: anatomy.DEFAULT_TEXTURE)")
     ap.add_argument("--falx", action="store_true", help="the falx cerebri as dura in the interhemispheric fissure "
@@ -467,7 +469,7 @@ def main():
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
                               ventricle_age=vage, pitch=pitch, source=args.source, falx=args.falx,
-                              interpolation=args.interp_order,
+                              interpolation=args.interp_order, residual=args.residual,
                               **({"texture": {}} if args.no_texture else {}))
         drop_detached(head)
         if args.flow_void:
@@ -514,7 +516,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not args.no_texture, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not args.no_texture, "residual": args.residual, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

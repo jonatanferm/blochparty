@@ -268,6 +268,88 @@ def soft_references():
     return signal["skin"] / signal["wm"], signal["muscle"] / signal["wm"]
 
 
+IXI_PD_TE = 0.008  # the dual-echo TSE's first echo (brain-development.org/scanner-philips-medical-systems-intera-3t)
+
+
+def residual_maps(frac, t2w, pdw, valid, origin, voxel):
+    """Per-voxel multipliers on the simulator's T2 and PD that make its tissue mixture reproduce this subject's own
+    dual-echo TSE (TE 8 / 100 ms, TR 5.726 s): the echo ratio's log L = ln(S_8 / S_100) ~ (100 - 8) ms / T2; L is put
+    on its absolute scale by deep ventricular CSF (predicted 0.048 with T2 1.91 s), t2_scale = L_predicted / L_measured
+    where water tissue fills the voxel and L > 0.2 (CSF's T2 is too long for 92 ms to measure), over its median in pure
+    white matter (the residual is the spatial pattern; the database keeps absolute T2s), pd_scale = the measured
+    TE-8 signal over the predicted one (both over white matter) after that T2 change; elsewhere (fat, bone, air, CSF for
+    T2) 1. The prediction uses the simulator's own tissue values on the anatomy as it simulates it (deep grey nuclei,
+    falx). Log-scales smoothed 0.7 mm within their masks (noise), less a cubic trend fitted over pure white matter (the
+    scanner's B1+ and bias; this also puts white matter at 1), clipped to +-0.5. t2w, pdw: bias-corrected echoes."""
+    from blochparty import tissuedb
+    table = tissuedb.tissue_table(3.0)
+    an = bp.Anatomy({c: torch.from_numpy(frac[k]) for k, c in enumerate(CLASSES)}, voxel, origin)
+    an = bp.add_falx(bp.label_deep_grey(an))
+    tr, tes = IXI_T2["tr"], (IXI_PD_TE, IXI_T2["te"])
+    names = [k for k in an.fractions if k != "background" and k in table and k != "vessels"]
+    f = {k: an.fractions[k].numpy() for k in names}
+
+    def predicted(t2_scale=1.0):
+        out = []
+        for te in tes:
+            s = 0
+            for k in names:
+                p = table[k]
+                fat = p.fat_fraction is not None and p.fat_fraction.mean > .5
+                t2 = p.t2.mean * (1.0 if fat else t2_scale)
+                s = s + f[k] * p.pd.mean * (1 - np.exp(-tr / p.t1.mean)) * np.exp(-te / t2)
+            out.append(s)
+        return out
+    s8p, s100p = predicted()
+    water = sum(f[k] for k in names if not (table[k].fat_fraction and table[k].fat_fraction.mean > .5) and k not in ("skull", "marrow", "dura"))
+    csf = f["csf"]
+    deep_csf = ndimage.binary_erosion(csf > .95, iterations=2) & valid
+    ok = valid & (t2w > 1e-3) & (pdw > 1e-3)
+    lr = np.zeros_like(t2w); lr[ok] = np.log(pdw[ok] / t2w[ok])
+    k = np.log(np.exp((tes[1] - tes[0]) / table["csf"].t2.mean)) - np.median(lr[deep_csf]) if deep_csf.sum() > 50 else 0.0
+    L = lr + k
+    Lp = np.log(np.maximum(s8p, 1e-9) / np.maximum(s100p, 1e-9))
+    t2mask = ok & (water > .7) & (L > .2) & (csf < .3)
+    log_t2 = np.zeros_like(L); log_t2[t2mask] = np.log(Lp[t2mask] / L[t2mask])
+
+    def smooth(v, m, sigma=0.7):
+        num = ndimage.gaussian_filter(v * m, sigma); den = ndimage.gaussian_filter(m.astype(np.float32), sigma)
+        return np.where(m, num / np.maximum(den, 1e-6), 0.0)
+
+    zz, yy, xx = np.meshgrid(*(np.linspace(-1, 1, n, dtype=np.float32) for n in frac.shape[1:]), indexing="ij")
+    terms = [(i, j, l) for i in range(4) for j in range(4 - i) for l in range(4 - i - j)]
+    wm_pure = f["wm"] > .9
+
+    def local(v, m):  # minus a cubic trend fitted over pure white matter (uniform tissue): the scanner's B1+ / bias
+        fit = wm_pure & m
+        A = np.stack([zz[fit] ** i * yy[fit] ** j * xx[fit] ** l for i, j, l in terms], 1)
+        coef = np.linalg.lstsq(A, v[fit], rcond=None)[0]
+        trend = sum(c * zz ** i * yy ** j * xx ** l for c, (i, j, l) in zip(coef, terms))
+        return np.where(m, v - trend, 0.0)
+    log_t2 = smooth(log_t2, t2mask)
+    # relative to white matter: the absolute level of a two-point TSE T2 is the sequence's (stimulated echoes lengthen
+    # it: IXI012's white matter reads 1.18 x our 72 ms), the tissue database keeps the absolute values; and local: a
+    # cubic trend fitted over pure white matter (+-15 % from the base of the brain to the top in IXI012: B1+) is removed
+    wm_offset = float(np.median(log_t2[wm_pure & t2mask]))
+    log_t2 = np.where(t2mask, np.clip(local(log_t2, t2mask), -.5, .5), 0.0)
+    t2_scale = np.exp(log_t2)
+    s8q, _ = predicted(t2_scale)
+    wm = f["wm"] > .9
+    pdmask = ok & (water > .7)
+    ratio = np.zeros_like(L)
+    ratio[pdmask] = (pdw[pdmask] / np.median(pdw[wm & ok])) / (s8q[pdmask] / np.median(s8q[wm & ok]))
+    log_pd = np.clip(local(smooth(np.log(np.maximum(ratio, 1e-6)) * pdmask, pdmask), pdmask), -.5, .5)
+    diag = {"csf_offset": round(float(k), 4), "wm_t2_apparent_over_table": round(float(np.exp(wm_offset)), 3),
+            "t2_scale_median": {}, "pd_scale_median": {}}
+    for c in ("wm", "gm", "skin", "muscle", "caudate", "putamen", "thalamus"):
+        if c in f:
+            m = (f[c] > .9) & t2mask
+            if m.sum() > 100:
+                diag["t2_scale_median"][c] = round(float(np.exp(np.median(log_t2[m]))), 3)
+                diag["pd_scale_median"][c] = round(float(np.exp(np.median(log_pd[m & pdmask]))), 3)
+    return t2_scale.astype(np.float32), np.exp(log_pd).astype(np.float32), diag
+
+
 def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     t0 = time.time()
     t1p = next((root / "T1").glob(f"IXI{ixi_id:03d}-HH-*-T1.nii.gz"))
@@ -280,6 +362,11 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     R2, t2score = align_t2(c1, t2, a2, M, shape, origin)
     M2 = R2 @ M
     chans = [c1, onto(t2, a2, M2, shape, origin, order=3)]
+    pdp = next((root / "PD").glob(t2p.name.replace("-T2.nii.gz", "-PD.nii.gz")), None) if (root / "PD").exists() else None
+    pd_onto = None
+    if pdp is not None:
+        pdv, apd = load_ras(pdp)
+        pd_onto = onto(pdv, apd, M2, shape, origin, order=3)  # the T2's acquisition: same geometry, same motion
     valid = (onto(np.ones_like(t1), a1, M, shape, origin) > 0.99) & (onto(np.ones_like(t2), a2, M2, shape, origin) > 0.99)
     fr = {k: atlas.fractions[k].numpy().astype(np.float32) for k in CLASSES}
     intra = ndimage.gaussian_filter(sum(fr[k] for k in BRAIN), 2.0)
@@ -360,11 +447,18 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
         if c != "background":
             frac[i[c]][~head] = 0
     frac /= frac.sum(0, keepdims=True)
+    maps, diag = {}, None
+    if pd_onto is not None:  # both echoes corrected by the T2's bias field (one coil, one acquisition)
+        t2w = np.zeros(shape, np.float32); t2w[idx] = np.exp(y[1] - bias[1])
+        pdw = np.zeros(shape, np.float32); pdw[idx] = np.maximum(pd_onto[idx], 1e-6) * np.exp(-bias[1])
+        t2s, pds, diag = residual_maps(frac, t2w, pdw, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
+        maps = {"t2_scale": t2s, "pd_scale": pds}
     scale = abs(np.linalg.det(M[:3, :3])) * 1e-3  # mL per MNI voxel in the subject's own size
     vol = {c: round(float(frac[i].sum()) * scale, 1) for i, c in enumerate(CLASSES) if c != "background"}
     t2_motion = {"shift_mm": np.round(R2[:3, 3], 2).tolist(), "rotation_deg": round(float(np.degrees(np.arccos(np.clip((np.trace(R2[:3, :3]) - 1) / 2, -1, 1)))), 2),
                  "gradient_r": round(t2score, 3)}
-    return frac, M, score, vol, {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion}, round(time.time() - t0)
+    files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion} | ({"pd": pdp.name, "residual": diag} if diag else {})
+    return frac, M, score, vol, files, round(time.time() - t0), maps
 
 
 if __name__ == "__main__":
@@ -394,10 +488,11 @@ if __name__ == "__main__":
         dest = out / f"IXI{i:03d}.npz"
         if dest.exists():
             continue
-        frac, M, score, vol, files, secs = prepare(i, args.root, atlas, (img, aff), not args.posteriors)
+        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors)
         meta = {"ixi_id": i, **demo[i], "atlas": f"brainweb{ATLAS:02d}", "classes": CLASSES, "affine_mm": M.tolist(),
                 "lncc": round(score, 3), "volumes_ml": vol, "files": files, "origin": list(atlas.origin),
                 "voxel": list(atlas.voxel), "shape": list(atlas.shape)}
-        np.savez_compressed(dest, fractions=np.round(frac * 255).astype(np.uint8), meta=json.dumps(meta))
+        np.savez_compressed(dest, fractions=np.round(frac * 255).astype(np.uint8), meta=json.dumps(meta),
+                            **{k: v.astype(np.float16) for k, v in maps.items()})
         print(f"IXI{i:03d} age {demo[i]['age']:.0f} {demo[i]['sex']}: GM {vol['gm']:.0f} WM {vol['wm']:.0f} CSF {vol['csf']:.0f} mL,"
               f" lncc {score:.3f}, {secs} s", flush=True)

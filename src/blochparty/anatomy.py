@@ -651,18 +651,22 @@ def ixi_subjects(root) -> list[int]:
     return out
 
 
-def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32) -> tuple[Anatomy, dict]:
+def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32, residual: bool = False) -> tuple[Anatomy, dict]:
     """An IXI 3 T head (Hammersmith, IXI dataset, CC BY-SA 3.0) prepared by validation/anatomy/prepare_ixi.py:
     BrainWeb's 12 classes on BrainWeb's 1 mm MNI grid, segmented from the subject's own T1 and T2 (EM with
     BrainWeb priors, affine registration), so the MNI-based steps (deep grey regions, ventricle prior, slice
     stack) apply. Returns the anatomy (resampled to ``voxel`` if given) and the preparation's meta: age,
-    sex, the affine (MNI mm -> the subject's world mm; its scale is the subject's size), volumes."""
+    sex, the affine (MNI mm -> the subject's world mm; its scale is the subject's size), volumes. ``residual``: also
+    the per-voxel T2 / PD multipliers fitted to the subject's own dual-echo TSE (``t2_scale``, ``pd_scale`` maps, if
+    prepared; ``to_phantom`` applies them)."""
     path = Path(root) / "prepared" / f"IXI{int(subject):03d}.npz"
     data = np.load(path)
     meta = json.loads(str(data["meta"]))
     raw = data["fractions"]
     fractions = {k: torch.from_numpy(raw[i].astype(np.float32) / 255).to(dtype) for i, k in enumerate(meta["classes"])}
-    anatomy = Anatomy(_renormalize(fractions), tuple(meta["voxel"]), tuple(meta["origin"]))
+    maps = {} if not residual else {k: torch.from_numpy(data[k].astype(np.float32)).to(dtype)
+                                    for k in ("t1_scale", "t2_scale", "pd_scale") if k in data.files}
+    anatomy = Anatomy(_renormalize(fractions), tuple(meta["voxel"]), tuple(meta["origin"]), maps=maps)
     if voxel is not None and _triple(voxel, "voxel", True) != anatomy.voxel:
         anatomy = anatomy.resample(voxel)
     return anatomy, meta
@@ -857,6 +861,9 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
     peak RSS 3.64 GB, MPS driver allocation 1.08 GB. This benchmark excludes B0,
     T2', MT and diffusion; it is not full k-space imaging speed. Reproduction
     and memory-accounting limits: validation/anatomy/RESULTS.md.
+    Maps ``t1_scale``, ``t2_scale``, ``pd_scale`` (if the anatomy holds them) multiply every non-fat tissue's T1, T2 and
+    PD in each voxel: a residual fitted to a subject's own scans (validation/anatomy/prepare_ixi.py); fat is left out
+    (its apparent T2 depends on the sequence through J coupling).
     ``variability`` (default None: none) = {"t1": sd, "t2": sd, "pd": sd, "length": L [m],
     "seed": 0}: each tissue's T1, T2 and PD are multiplied by its own mean-1 log-normal field
     of relative SD ``sd`` and Gaussian correlation exp(-r^2 / 2L^2) (``gaussian_random_field``),
@@ -973,6 +980,13 @@ def to_phantom(anatomy: Anatomy, table=DEFAULT_TISSUES, field_T=3., *, fov_regio
             r2 = r2 / factors[name, "t2"][mask]
         if (name, "pd") in factors:
             density = density * factors[name, "pd"][mask]
+        if not (p.fat_fraction and p.fat_fraction.mean > .5):  # per-voxel residual multipliers (maps), not on fat
+            if "t1_scale" in anatomy.maps:
+                r1 = r1 / anatomy.maps["t1_scale"][mask]
+            if "t2_scale" in anatomy.maps:
+                r2 = r2 / anatomy.maps["t2_scale"][mask]
+            if "pd_scale" in anatomy.maps:
+                density = density * anatomy.maps["pd_scale"][mask]
         if (density < 0).any() or (r1 <= 0).any() or (r2 <= 0).any():
             raise ValueError("M0 must be nonnegative; R1 and R2 positive")
         pd = expand(density) / k
@@ -1681,7 +1695,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False, falx: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
-                source: str = "brainweb", interpolation: int = 1) -> DigitalPhantom:
+                source: str = "brainweb", interpolation: int = 1, residual: bool = False) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1709,7 +1723,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     ``table`` must hold (``tissuedb.tissue_table``); they are drawn from their own random stream, so
     the other classes' draws do not change. ``falx``: the falx cerebri as dura in the interhemispheric
     fissure (``add_falx``, in MNI space before the deformation). ``interpolation``: the order of the final pull-back
-    (``deform``: 1 trilinear, 3 cubic B-spline, which keeps more fine structure). ``ventricle_age`` [years] (a number, (low, high) to
+    (``deform``: 1 trilinear, 3 cubic B-spline, which keeps more fine structure). ``residual`` (``source="ixi"``): the
+    subject's fitted T2 / PD multipliers (``load_ixi``), carried through the pose. ``ventricle_age`` [years] (a number, (low, high) to
     draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
@@ -1747,7 +1762,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     age_draw = None
     if source == "ixi":
-        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype)
+        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype, residual=residual)
     elif age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
         years = float(age) if np.isscalar(age) else float(np.random.default_rng(
             np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))

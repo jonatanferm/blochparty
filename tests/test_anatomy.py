@@ -623,3 +623,27 @@ def test_deform_cubic_keeps_fine_structure():
     assert err[3] < 0.35 * err[1]
     out = bp.deform(an, shift, order=3)
     assert float((out.fractions["gm"] + out.fractions["wm"]).max()) <= 1 + 1e-6
+
+
+def test_residual_scale_maps_multiply_non_fat_tissues():
+    """t2_scale / pd_scale / t1_scale maps multiply each non-fat tissue's T2, PD, T1 per voxel; fat keeps its values;
+    without the maps nothing changes."""
+    from blochparty.anatomy import DEFAULT_TISSUES
+    fr = {"wm": torch.tensor([[[.6, 1.]]], dtype=torch.float64), "fat": torch.tensor([[[.4, 0.]]], dtype=torch.float64)}
+    base = Anatomy(fr, (.001,) * 3, (0, 0, 0))
+    scales = {"t2_scale": torch.tensor([[[1.3, .8]]], dtype=torch.float64),
+              "pd_scale": torch.tensor([[[1.1, .9]]], dtype=torch.float64),
+              "t1_scale": torch.tensor([[[1.2, 1.]]], dtype=torch.float64)}
+    a = Anatomy(fr, (.001,) * 3, (0, 0, 0), maps=scales)
+    kw = dict(chi_to_b0=False, spins_per_voxel=1, jitter=None, t2star="off")
+    p0, p1 = to_phantom(base, **kw), to_phantom(a, **kw)
+    wm = DEFAULT_TISSUES[3.]["wm"]
+    x0 = p0.pos[:, 2] < .0005  # the first voxel's spins (x index 0)
+    is_wm0 = x0 & torch.isclose(p0.t2, torch.tensor(wm.t2.mean, dtype=p0.t2.dtype))
+    assert is_wm0.any()
+    i = is_wm0.nonzero()[0, 0]
+    assert float(p1.t2[i]) == pytest.approx(1.3 * wm.t2.mean)
+    assert float(p1.t1[i]) == pytest.approx(1.2 * wm.t1.mean)
+    assert float(p1.pd[i]) == pytest.approx(1.1 * float(p0.pd[i]))
+    fat0 = x0 & ~torch.isclose(p0.t2, torch.tensor(wm.t2.mean, dtype=p0.t2.dtype))
+    assert torch.allclose(p1.t2[fat0], p0.t2[fat0]) and torch.allclose(p1.pd[fat0], p0.pd[fat0])
