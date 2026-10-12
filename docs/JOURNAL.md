@@ -1822,3 +1822,19 @@ The parts of M5 that need no outside access, done while the user was away.
   fissure (Walsh 2021), above the callosum's free edge (Kayalioglu 2004), 4-5 mL per head.
 - Dead ends here: a GRAPPA hypothesis for the real phase-axis detail (the real k-space noise is flat across
   lines, even / odd 1.00) and physiological ghosting (beside the head the real images carry less, not more).
+- **r22 (r21's 16 subjects and seeds + the falx + reverse-centric ordering)**: CNN AUC 0.9996, histogram 0.749, W1
+  0.023, quartiles 0.225 / 0.328 / 0.521 (real 0.216 / 0.299 / 0.491); controls 0.44 / 0.41. The fissure now peaks at
+  3.92 x WM (real 3.89; r21 4.71), the background beside the head 1.10 x the noise floor (real 1.09; r21 1.22), the outer
+  band's quantiles 0.119 / 0.187 / 0.332 / 0.613 / 0.851 (real 0.136 / 0.214 / 0.375 / 0.616 / 0.859). By band, the
+  outer 6 px dropped to CNN 0.83 (r21 0.94) but the interior rose to 0.87 (0.74), and low-passing across the phase
+  axis no longer helped the classifier (0.998): reverse-centric's early echoes at the k-space edges brighten
+  tissue texture and lift the median. Not the scanner's ordering either; r23 (the 396-line linear ordering) runs.
+- **The stack climbs too fast** (801752f): at slices 5-7 our heads narrowed faster than the real ones (slice 7 area
+  6064 vs 6730 px) and their interior held less white matter (share 0.32-0.37 vs 0.44-0.47; the grey / white
+  mode ratio itself matches, 1.17), so the high slices showed extra cortex. Proxy images (each class's spin-echo
+  signal, 5 mm slabs, 1.72 mm pixels; at 10 mm they reproduce r22's ventricle drop) put the best stack offset at
+  12.5 mm: ventricle cross-section over slices 0-3 211 / 240 / 250 / 223 px against the real 181 / 220 / 272 / 218.
+  The 15 mm offset rejected yesterday had been judged by eye on upside-down heads. At slices 4-5 the real ventricles
+  stay larger (an older clinical population).
+- **Cubic resampling** (82a79cb): deform(order=3) and prepare_ixi onto(order=3); 24 heads re-prepared as v8 (GM / WM /
+  CSF volumes within 1 % of v7, skull +10 %, all pass QC); 47 more subjects being prepared as v8 for a larger pool.
