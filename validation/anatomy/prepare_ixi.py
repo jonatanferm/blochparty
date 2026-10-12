@@ -277,7 +277,8 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     on its absolute scale by deep ventricular CSF (predicted 0.048 with T2 1.91 s), t2_scale = L_predicted / L_measured
     where water tissue fills the voxel and L > 0.2 (CSF's T2 is too long for 92 ms to measure), over its median in pure
     white matter (the residual is the spatial pattern; the database keeps absolute T2s), pd_scale = the measured
-    TE-8 signal over the predicted one (both over white matter) after that T2 change; elsewhere (fat, bone, air, CSF for
+    TE-8 signal over the predicted one (both over white matter) after that T2 change, re-centred on each tissue's median
+    (the echo carries the subject's sequence's MT, which the simulator models itself); elsewhere (fat, bone, air, CSF for
     T2) 1. The prediction uses the simulator's own tissue values on the anatomy as it simulates it (deep grey nuclei,
     falx). Inside the skull only. Log-scales smoothed 1.5 mm within their masks and within each voxel's largest tissue
     (the echo ratio amplifies the images' noise: 0.7 mm left ~4 % per voxel and r25's first heads 1.4-1.7 x the real
@@ -353,7 +354,19 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     ratio = np.zeros_like(L)
     ratio[pdmask] = (pdw[pdmask] / np.median(pdw[wm & ok])) / (s8q[pdmask] / np.median(s8q[wm & ok]))
     log_pd = np.clip(local(smooth(np.log(np.maximum(ratio, 1e-6)) * pdmask, pdmask), pdmask), -.5, .5)
+    # each tissue's median PD multiplier 1, only the pattern within a tissue kept: the subject's short-TE echo carries its
+    # own multi-slice sequence's magnetization transfer (white matter darkest, grey matter less, CSF none), which a
+    # prediction without MT reads as PD (v11: CSF x1.21-1.28, grey matter x1.05-1.09 in every subject) and the simulator
+    # then applies its own MT on top. T2 from the echo ratio is MT-free (both echoes scale alike): its tissue offsets stay
+    pd_offset = {}
+    for i in np.unique(dominant[pdmask]):
+        mi = pdmask & (dominant == i)
+        pure = mi & (f[names[i]] > .9)
+        pd_offset[names[i]] = float(np.median(log_pd[pure if pure.sum() > 100 else mi]))
+        log_pd[mi] -= pd_offset[names[i]]
     diag = {"csf_offset": round(float(k), 4), "wm_t2_apparent_over_table": round(float(np.exp(wm_offset)), 3),
+            "pd_tissue_offset_removed": {c: round(float(np.exp(v)), 3) for c, v in pd_offset.items() if c in
+                                         ("csf", "gm", "wm", "caudate", "putamen", "pallidum", "thalamus")},
             "t2_scale_median": {}, "pd_scale_median": {}}
     for c in ("wm", "gm", "skin", "muscle", "caudate", "putamen", "thalamus"):
         if c in f:

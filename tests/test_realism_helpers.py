@@ -57,9 +57,10 @@ def test_soft_references_follow_the_tissue_table():
 
 def test_residual_maps_recover_known_multipliers():
     """A synthetic head (white matter, a CSF block for the echo-ratio scale, a grey-matter block, a skin slab) whose
-    two echoes are made with grey matter's T2 x1.2 and PD x0.9 and skin's T2 x1.3 against the tissue table (and an
-    arbitrary scale on the PD echo): the fitted t2_scale / pd_scale are ~1.2 / ~0.9 in the grey matter, 1 in the white
-    matter and 1 in the skin (outside the skull the residual is not fitted)."""
+    two echoes are made with grey matter's T2 x1.2 and PD x0.9, a sub-block of it at PD x0.85 more, and skin's T2 x1.3
+    against the tissue table (and an arbitrary scale on the PD echo). t2_scale: ~1.2 in the grey matter, 1 in the white
+    matter. pd_scale: re-centred per tissue (a tissue-wide PD offset is the subject's sequence's MT, not anatomy), so
+    ~1 in the grey matter's bulk and below it in the sub-block. Both 1 in the skin (not fitted outside the skull)."""
     from blochparty import tissuedb
     table = tissuedb.tissue_table(3.0)
     n = (24, 24, 24)
@@ -74,19 +75,24 @@ def test_residual_maps_recover_known_multipliers():
     frac[k["wm"]][skin] = 0; frac[k["skin"]][skin] = 1
     tr = P.IXI_T2["tr"]
 
+    sub = (slice(13, 18),) * 3  # a corner of the grey-matter block
+    pd_gm_map = np.full(n, .9, np.float32); pd_gm_map[sub] *= .85
+
     def echo(te, t2_gm, pd_gm):
         out = np.zeros(n, np.float32)
         for c, t2f, pdf in (("wm", 1, 1), ("csf", 1, 1), ("gm", t2_gm, pd_gm), ("skin", 1.3, 1)):
             p = table[c]
             out += frac[k[c]] * p.pd.mean * pdf * (1 - np.exp(-tr / p.t1.mean)) * np.exp(-te / (p.t2.mean * t2f))
         return out
-    t2w = echo(P.IXI_T2["te"], 1.2, .9)
-    pdw = 3.7 * echo(P.IXI_PD_TE, 1.2, .9)
+    t2w = echo(P.IXI_T2["te"], 1.2, pd_gm_map)
+    pdw = 3.7 * echo(P.IXI_PD_TE, 1.2, pd_gm_map)
     origin = (0.05, 0.05, 0.05)  # far from MNI's deep grey regions and midline
     t2s, pds, diag = P.residual_maps(frac, t2w, pdw, np.ones(n, bool), origin, (1e-3,) * 3)
     inner = (slice(15, 20),) * 3
     assert np.median(t2s[inner]) == pytest.approx(1.2, rel=0.03)
-    assert np.median(pds[inner]) == pytest.approx(0.9, rel=0.03)
+    gm = frac[k["gm"]] > .9
+    assert np.median(pds[gm]) == pytest.approx(1.0, abs=0.01)
+    assert np.median(pds[(slice(14, 16),) * 3]) < 0.9 * np.median(pds[(slice(19, 21),) * 3])
     assert np.median(t2s[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
     assert np.median(pds[frac[k["wm"]] > .9]) == pytest.approx(1.0, abs=0.01)
     assert np.all(t2s[skin] == 1) and np.all(pds[skin] == 1)
