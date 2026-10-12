@@ -1943,3 +1943,10 @@ The parts of M5 that need no outside access, done while the user was away.
 - **r26** = r24's 16 subjects and seeds on v11 heads with the residual (no assumed texture) and the real echo train;
   the laptop first simulates IXI012 (seed 200, slices 3-7) with the real train and no residual against the fitted
   train's run, to separate the two changes.
+- **The real echo train removes the phase-axis halo** (IXI012, seed 200, slices 3-7, v10 fractions, no residual; only
+  the train differs): noise-free signal beside the head along the phase axis 2.06 / 0.62 / 0.42 / 0.28 x the paired
+  noise floor at 1 / 2 / 5 / 9 px (fitted train 2.34 / 1.40 / 1.09 / 0.87; the readout direction 0.46-0.11 for both);
+  the noisy background beside the head 1.03 x the floor (fitted 1.19, every run since r21 1.18-1.22; real 1.09). The
+  fitted train's 25-line blocks with bigger steps (12.6 ms spacing) put replicas of the head along the phase axis.
+  Scalp profiles and the GM / WM mode ratio unchanged (1.17, real 1.17); the white-matter mode over the interior
+  median 0.70 (fitted 0.72, real 0.83) — the slice 5-7 composition gap the residual addresses in r26.

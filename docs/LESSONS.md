@@ -671,6 +671,13 @@ says where it came from so it can be re-checked.
   the proxies v10 (shift undone); their 1.5 px posterior / anterior disagreement looked like a simulation effect.
   Simulating the v10 head with and without fat's chemical shift moved the edges by ~0.5 px (the expected 0.56 px:
   434 Hz over 128 samples at 10 us); v8 -> v10 moved the posterior dark minimum 5.0 -> 4.5 px (real 4.5).
+- **Read the echo train off the real k-space before fitting one** (2026-10-12): in a linear-ordered TSE each echo fills
+  a block of adjacent lines (one per shot) and the line energy steps between blocks, so the real AXT2 k-space shows its
+  train directly: steps every 19 lines, 21 echoes, ky = 0 in echo 11, at the header's own echo spacing (10.26 ms;
+  validation/realism/echo_train.py). Our fitted 16-echo train at TE / 9 = 12.6 ms had bigger steps every 25 lines,
+  whose replicas of the head along the phase axis left a plateau of ~1 noise floor beside it (0.87 at 9 px; real
+  train 0.28): the background there read 1.19-1.22 x the floor in every run since r21 against the real 1.09, and
+  1.03 with the real train. The header had the spacing all along.
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 
