@@ -272,14 +272,18 @@ def soft_references():
 IXI_PD_TE = 0.008  # the dual-echo TSE's first echo (brain-development.org/scanner-philips-medical-systems-intera-3t)
 
 
-def refine_csf(frac, t2w, valid):
+def refine_csf(frac, t2w, valid, origin=None, voxel=None):
     """Each voxel's CSF fraction from the subject's own T2 (TE 100 ms, where CSF is ~4 x white matter): the observed
     signal (over the white-matter median) between the subject's pure CSF (deep ventricles, eroded twice) and the
     voxel's other tissues at the simulator's IXI-T2 values (their mix renormalised; grey matter where they are under
     5 %), clipped to [0, 1]; the other tissues keep their proportions. Only voxels the segmentation gave CSF. The
     unmixing calibrates CSF on the ventricles' T2, but the 1 mm convexity voxels it calls pure are not: IXI012's
     labels predicted 30-50 % more CSF-like voxels (> 2.5 x WM) than its T2 shows at MNI z 30-70, its "pure" CSF there
-    read 0.86-0.88 of the prediction against 1.04 low down (2026-10-13). Returns the fractions and a summary."""
+    read 0.86-0.88 of the prediction against 1.04 low down (2026-10-13). With ``origin`` / ``voxel`` [m] the falx that
+    ``sample_head`` will add (``add_falx``: CSF -> dura in the fissure) is part of the model: the subject's T2 already
+    shows its own falx, so the CSF left beside it is solved for and the falx's share added back to the stored CSF (v13
+    without this: IXI012's midline fissure 1.26 x too dark once the falx was added). Returns the fractions and a
+    summary."""
     from blochparty import tissuedb
     table = tissuedb.tissue_table(3.0)
     tr, te = IXI_T2["tr"], IXI_T2["te"]
@@ -296,14 +300,26 @@ def refine_csf(frac, t2w, valid):
     rest = f.copy(); rest[i["csf"]] = 0; rest[i["background"]] = 0
     rs = rest.sum(0)
     s_rest = np.where(rs > .05, (rest * sig[:, None]).sum(0) / np.maximum(rs, 1e-6), sig[i["gm"]])
-    csf_new = np.clip((s[sel] - s_rest) / np.maximum(s_csf - s_rest, 1e-3), 0, 1) * total
-    scale = np.where(rs > .05, (total - csf_new) / np.maximum(rs, 1e-6), 0.)
-    out = f * np.where(np.arange(len(CLASSES))[:, None] == i["background"], 1., scale[None])
-    out[i["csf"]] = csf_new
-    out[i["gm"]] += np.where(rs > .05, 0., total - csf_new)
     before = float(frac[i["csf"]].sum())
-    frac = frac.copy(); frac[:, sel] = out
-    return frac, {"csf_over_wm_deep": round(s_csf, 3), "csf_table_over_wm": round(float(sig[i["csf"]]), 3),
+    out_frac = frac.copy()
+    falx = np.zeros(frac.shape[1:], np.float32)
+    # the falx depends on the CSF it is drawn from: three rounds of (falx on the current fractions, refine the
+    # original ones beside it) settle it (IXI012: 4.08 mL from the unrefined CSF, 4.90 after one round)
+    for _ in range(3 if origin is not None else 1):
+        if origin is not None:
+            an = bp.Anatomy({c: torch.from_numpy(out_frac[k]) for k, c in enumerate(CLASSES)}, voxel, origin)
+            falx = np.clip(bp.add_falx(an).fractions["dura"].numpy() - out_frac[i["dura"]], 0, None)
+        d = np.minimum(falx[sel], total)
+        # s = c s_csf + d s_dura + (total - c - d) s_rest: the CSF c beside the falx's dura d; stored c + d
+        c = np.clip((s[sel] - d * sig[i["dura"]] - (total - d) * s_rest) / np.maximum(s_csf - s_rest, 1e-3), 0, total - d)
+        csf_new = c + d
+        scale = np.where(rs > .05, (total - csf_new) / np.maximum(rs, 1e-6), 0.)
+        out = f * np.where(np.arange(len(CLASSES))[:, None] == i["background"], 1., scale[None])
+        out[i["csf"]] = csf_new
+        out[i["gm"]] += np.where(rs > .05, 0., total - csf_new)
+        out_frac = frac.copy(); out_frac[:, sel] = out
+    frac = out_frac
+    return frac, {"csf_over_wm_deep": round(s_csf, 3), "falx_ml": round(float(falx.sum()) * 1e-3, 2), "csf_table_over_wm": round(float(sig[i["csf"]]), 3),
                   "csf_voxels_refined": int(sel.sum()), "csf_ratio_after_before": round(float(frac[i["csf"]].sum()) / before, 3)}
 
 
@@ -512,7 +528,7 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     frac /= frac.sum(0, keepdims=True)
     maps, diag = {}, None
     t2w = np.zeros(shape, np.float32); t2w[idx] = np.exp(y[1] - bias[1])  # bias-corrected T2
-    frac, csf_diag = refine_csf(frac, t2w, valid)
+    frac, csf_diag = refine_csf(frac, t2w, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
     if pd_onto is not None:  # both echoes corrected by the T2's bias field (one coil, one acquisition)
         pdw = np.zeros(shape, np.float32); pdw[idx] = np.maximum(pd_onto[idx], 1e-6) * np.exp(-bias[1])
         t2s, pds, diag = residual_maps(frac, t2w, pdw, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
