@@ -1987,3 +1987,7 @@ The parts of M5 that need no outside access, done while the user was away.
 - **Blinded reader on r27**: the quiz page (12 real + 12 simulated slices, scoring noise, seed 7; local only) scored
   7 / 24 by the user: below chance (12), P(<= 7) = 0.032 for guessing, two-sided 0.064. A reader cannot pick the
   simulations out, and whatever cue they used points the wrong way more often than not.
+  The reader's cue, in both quizzes: the simulations looked smoother and blurrier, the real scans sharper with more
+  fine structure. It picked the simulations out earlier (when our heads had half the real fine-structure power) and
+  points the wrong way now: r27's hemisphere structure power is 1.2-1.7 x real at 0.15-0.75 of Nyquist (r24 0.95-1.6),
+  ~1.0 at the top band, so the sharper-looking tiles were more often ours.
