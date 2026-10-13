@@ -2246,3 +2246,12 @@ controls).
   model's 1 / d falloff a tighter ring brightens the front interior before it lifts the posterior scalp. A loop's
   own near field, a^2 / (a^2 + d^2)^(3/2), is steeper within a few radii of the element (`element_radius`, next,
   q48); r32 (the 64 v16 heads) is chained behind r31 with q45's receive.
+- **q49 / q48 on the v16 heads** (q45's elliptical normalised receive; q48 the same with 4 cm loop elements instead
+  of 1 / d): q49 levels 1.26 / 1.98 / 4.78 / 4.52 over WM (real 1.24 / 1.89 / 5.27 / 4.40), histogram AUC 0.432 (the
+  first at chance with the scalp right), W1 0.031, CNN 0.847; with the bone rule the anterior scalp is now 0.44
+  against the real 0.45 (AUC 0.44; it was 0.32-0.36), the posterior 0.56 vs 0.47 stays. q48: scalp 5.72 (+30 %),
+  histogram 0.862; at 384 px its posterior peak lands (4.30 vs 4.47) but the brain beyond it reads 2.3-3.1 (real
+  2.0-2.3) and the anterior interior 3.0-4.4 (2.9-3.1): the loop near field boosts the outer brain with the scalp,
+  the 1 / d ring under-boosts the scalp alone. The anterior scalp peak stays short in both (2.0 vs 2.78): the
+  frontal scalp's composition, not the coil. r32 runs with q45's receive (1 / d ellipse); the element model needs
+  the real array's geometry (element size and spacing) rather than another guess.
