@@ -2232,3 +2232,11 @@ controls).
   around a 18 x 15 cm head cannot do: an elliptical ring next (q45 / q46), then the geometry fitted on the three
   0.57 mm profiles. The sides also show our temporalis region too dark (0.62-0.76 vs 0.93-1.0 x WM at 8-12 mm:
   muscle at T2 30 ms is near black at TE 113; the real temporalis reads ~1 x WM, partial volume with fat and bone).
+- **Elliptical normalised receive (q45: semi-axes 0.11 m AP x 0.095 LR, 10 mm behind the occiput, RSS smoothed 30 mm;
+  q46 the same smoothed 20 mm)**: q45 levels 1.31 / 1.99 / 4.84 / 4.10 over WM (real 1.24 / 1.89 / 5.27 / 4.40), W1
+  0.0240 (the best so far; the ring 0.0245, flat 0.040), histogram AUC 0.545 (the lowest so far), CNN 0.793; q46
+  3.77 at the scalp (a shorter smoothing follows the rise and removes it: the excess kept grows with the smoothing
+  length). At 384 px with q45's receive: posterior peak 3.24 (flat 2.05, real 4.47), valley 0.69 (1.05), the brain
+  beyond 1.95-2.45 (2.1-2.3); sides 2.17 (2.98); front 2.01 (2.78): the outer 2 cm uniformly 0.72 x real now, the
+  interior right. q47 (0.105 x 0.09 m, 8 mm, smoothed 45 mm) next; the seven missing v16 heads are prepared (IXI598
+  skipped: a non-finite map), r31 runs on the 57.
