@@ -443,6 +443,15 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       *2026-10-12 / 13:* IXI-segmented heads (`load_ixi`) bring each subject's own scalp layers
       (fat unmixed from its T1 / T2 with IXI's water-fat shift undone, soft tissue split skin /
       muscle by T2), a falx (`add_falx`), and coloured coil noise in the realism score.
+      *2026-10-13, what the rest needs:* (1) skin: measured dermis T2 is ~10-12 ms (Richard 1991 / 1993, Song
+      1997), ours 50 ms (muscle's), but in IXI heads "skin" stands for the scalp's non-fat, non-muscle soft tissue,
+      unmixed to reproduce each subject's T2; dermis values there would darken the whole scalp, so the dermis wants
+      its own thin surface class with the cited values; (2) eyes: tissuedb has lens / aqueous / retina but no
+      vitreous (T1 4.3-4.5 s at 3 T, Simpson 2024; T2 546 +- 157 ms only at 1.5 T), and the IXI segmentation labels the
+      vitreous "skin" (CSF-like intensities outside the brain), which an orbit-restricted eye class would fix; no
+      effect on the realism score (fastMRI's stack starts above the orbits); (3) dura and connective tissue: no
+      in-vivo measurements found. The verify list below is covered (tests/test_head_sampler.py: draws over 100
+      subjects, Jacobian; tests/test_io.py: round trip; examples/sampled_heads.py: the ten-head triplet).
 - [x] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
       noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
       trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group
