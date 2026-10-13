@@ -2025,3 +2025,7 @@ same reconstruction, normalisation and coloured coil noise for both sides):
   8 spins per voxel, score --quick) against ~5.5 h for a full run; its CNN is noisy (+-0.15), its intensity and
   targeted measures are not. Calibration: q27 (r27's heads) 0.774, q29 (v14 heads) 0.809, q29r12 (12 cm coil ring)
   0.769, q29f200 (fat T2 200 ms, a test, not a database change) 0.851 with W1 0.0236 -> 0.0127.
+- **Age-matched subjects, quick test (q30)**: the 11 prepared v14 subjects aged 50-82 instead of the 20-82 spread:
+  CNN 0.894 [0.77, 0.98] (q29 0.809), W1 0.0207; quartiles 0.200 / 0.280 / 0.492 (real 0.199 / 0.280 / 0.460; the
+  median now exact), but hemisphere texture back to 1.1-1.7 x real (older brains' sulcal CSF) and the posterior brain
+  at 10 px (real 7, q29 8.5). The real population is not simply IXI's older half; age matching alone is not a win.
