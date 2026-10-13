@@ -479,6 +479,15 @@ core) or raises, and the engine matrix says which.
    `phantom_from_maps` when `j_coupling=True`. Verify: the density-matrix model against
    published SE/TSE fat ratios and the Stables et al. echo-spacing curves; the tabulated
    shortcut against the model; `test_phantom_fat.py` defaults unchanged.
+   *2026-10-13, model built, shortcut not shipped:* `blochparty.jcoupling` evolves the density matrix of coupled
+   fragments (strong-coupling Hamiltonian, hard pulses; tested against the analytic limits) and a triglyceride
+   fragment model consistent with the six-peak spectrum. With one intrinsic T2 calibrated to CPMG at 8 ms (145 ms,
+   Keene 2020), it predicts single-echo fat T2 222 ms against the 48-68 ms measured at 3 T, and a TSE / SE fat ratio of
+   1.13 against Henkelman's ~2 (`validation/jcoupling_fat.py`): the coupled chain ends are only part of the story, the
+   bulk methylene (half the signal, unmodulated here) and other mechanisms that fast refocusing suppresses carry the
+   rest. Next: measured fat T2 against echo spacing at 3 T (intermediate spacings), or a methylene-chain model; until
+   then the CPMG fat T2 stays (tissuedb LIPIDS), and at fastMRI's 10.26 ms the J part alone predicts fat ~3.5 % dimmer
+   than at 8 ms.
 2. **Deformable and physiological motion.** `Motion` today: velocity, displacement × waveform,
    rigid. Add a displacement *field* over time: per-spin trajectories as a sum of basis motions
    (respiratory: a smooth field with a breathing waveform; cardiac: later, with M5's heart).

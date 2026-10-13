@@ -1293,6 +1293,12 @@ says where it came from so it can be re-checked.
   the peak in place (1.26 at fat T2 68 ms), and the J-suppressed fat T2 lifted it to 1.86. Measure
   where a contrast lives (an edge-depth profile, tissue composition per depth band) before tuning a
   parameter. Still off: the calvarial diploe (fatty marrow) is 0.8 vs 1.6 in the real profile.
+- **J coupling of the chain ends does not explain bright fat by itself** (2026-10-13, validation/jcoupling_fat.py): a
+  density-matrix model of the coupled triglyceride fragments (methyl, carboxyl, allylic, diallylic, glycerol; J 7 Hz),
+  calibrated to CPMG fat T2 145 ms at 8 ms spacing, predicts single-echo fat T2 222 ms where 48-68 ms is measured at
+  3 T. Half the fat signal is bulk methylene whose neighbours share its shift (no observable J), and the coupled groups'
+  modulation oscillates and partly recovers. Check a mechanism against both limits (here SE and CPMG) before turning it
+  into a parameter.
 - **A Bloch simulator's lipid T2 is the J-suppressed one** (Henkelman 1992; Keene 2020): single-echo
   SE and STEAM read fat T2 40-75 ms at 3 T because J coupling modulates the echo; a train of
   refocusing pulses spaced well below 1/(chemical-shift difference of the coupled groups) suppresses
