@@ -647,3 +647,22 @@ def test_residual_scale_maps_multiply_non_fat_tissues():
     assert float(p1.pd[i]) == pytest.approx(1.1 * float(p0.pd[i]))
     fat0 = x0 & ~torch.isclose(p0.t2, torch.tensor(wm.t2.mean, dtype=p0.t2.dtype))
     assert torch.allclose(p1.t2[fat0], p0.t2[fat0]) and torch.allclose(p1.pd[fat0], p0.pd[fat0])
+
+
+def test_add_dermis_is_a_conserved_surface_shell():
+    """A sphere of skin (R 40 mm, 0.5 mm voxels): the dermis takes the outer shell (volume ~ 4 pi R^2 t for
+    t = 1.61 mm, within a voxel's rounding), nothing deeper than t + a voxel, every voxel's total unchanged."""
+    from blochparty.anatomy import SCALP_LAYERS
+    h, n = 0.5e-3, 180
+    c = (np.arange(n) - n / 2 + .5) * h
+    zz, yy, xx = np.meshgrid(c, c, c, indexing="ij")
+    r = np.sqrt(zz ** 2 + yy ** 2 + xx ** 2)
+    skin = torch.from_numpy(np.clip((40e-3 - r) / h + .5, 0, 1).astype(np.float64))
+    a = bp.Anatomy({"skin": skin, "background": 1 - skin}, (h,) * 3, (0, 0, 0))
+    d = bp.add_dermis(a)
+    t = SCALP_LAYERS[0]
+    vol = float(d.fractions["dermis"].sum()) * h ** 3
+    assert vol == pytest.approx(4 * math.pi * 40e-3 ** 2 * t, rel=0.05)
+    total = d.fractions["skin"] + d.fractions["dermis"] + d.fractions["background"]
+    assert torch.allclose(total, torch.ones_like(total))
+    assert float(d.fractions["dermis"][torch.from_numpy(r < 40e-3 - t - 2 * h)].max()) == 0

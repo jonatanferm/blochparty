@@ -46,6 +46,7 @@ cartilage,articular (hyaline) cartilage,,,
 colon,large intestine,,,
 connective,connective tissue,,connective,
 csf,cerebrospinal fluid,,csf,
+dermis,dermis,,dermis,"the skin below the epidermis (anatomy.add_dermis); not a child of skin, whose class pools from its descendants"
 ductus_deferens,ductus deferens,,,
 dura,dura mater,,dura,
 epididymis,epididymis,,,
@@ -62,7 +63,7 @@ eye.iris,iris,eye,,
 eye.lens,lens,eye,,
 eye.retina,retina,eye,,
 eye.sclera,sclera,eye,,
-eye.vitreous,vitreous humour,eye,,
+eye.vitreous,vitreous humour,eye,eye,
 fat,adipose tissue,,,adipose tissue (generic)
 fat.brown,brown adipose tissue,fat,,"brown (or supraclavicular presumed-brown) adipose tissue: multilocular adipocytes, higher water fraction than white fat"
 fat.orbital,orbital fat,fat,,

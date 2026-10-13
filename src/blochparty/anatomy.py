@@ -103,6 +103,15 @@ _SH = ("Shin et al. 2025, Table 3 average across 4 subjects (mean +- between-sub
 _DB = "de Bazelaire et al. 2004, doi:10.1148/radiol.2303021331: subcutaneous fat at 3 T, abdomen"
 _IT = ("IT'IS Foundation tissue database, relaxation times, SAT (subcutaneous fat) 1.5 T: mean of 2 studies "
        "(T1 288-343 ms, T2 58-165 ms); itis.swiss, checked 2026-10-07")
+_SO = ("Song, Wehrli and Ma 1997, doi:10.1002/mrm.1910370207: in vivo skin MR microscopy at 1.5 T; the dermis's "
+       "major transverse component (91 %) T2* ~10 ms")
+_RI = ("Richard et al. 1991 / 1993, doi:10.1111/1523-1747.ep12478540 / 10.1111/1523-1747.ep12472356: skin layers at "
+       "1.5 T have shorter T2 than other soft tissues (fibrous protein), T1 in the range of other tissues; the "
+       "epidermis's mobile water is at least twice the dermis's")
+_ET = ("Ettl et al. 1994, doi:10.1159/000310486: vitreous of 8 normal eyes at 1.5 T, T1 3257 +- 307 ms, T2 546 +- "
+       "157 ms")
+_SM24 = ("Simpson et al. 2024, doi:10.1002/mrm.29849: vitreous T1 at 3 T by inversion-recovery TrueFISP, healthy "
+         "control eyes of 8 patients, 4.518 s")
 
 
 def _assumed(value, reason):
@@ -163,6 +172,20 @@ def _tables():
             default[strength][name] = replace(proxy,
                 t1=_assumed(proxy.t1.mean, _ST + f"; muscle used for {name}"),
                 t2=_assumed(proxy.t2.mean, _ST + f"; muscle used for {name}"))
+        # the dermis as its own class (anatomy.add_dermis): short T2 from its collagen, low mobile water
+        muscle = default[strength]["muscle"]
+        default[strength]["dermis"] = replace(muscle,
+            pd=_assumed(.6, _RI + "; relative mobile-water PD 0.6 assumed (below soft tissue's)"),
+            t1=_assumed(muscle.t1.mean, _RI + f"; muscle's {strength} T T1 used"),
+            t2=_assumed(.012, _SO + "; T2 >= T2*: 12 ms assumed at 1.5 and 3 T"),
+            t2star=_assumed(.010, _SO + (f"; 1.5 T value used at {strength} T" if strength != 1.5 else "")))
+        # the vitreous (class eye): nearly pure water in a dilute collagen / hyaluronan network
+        eye_t1 = (Distribution(3.257, .307, _ET) if strength == 1.5 else Distribution(4.518, None, _SM24)
+                  if strength == 3. else _assumed(4.518, _SM24 + f"; used at {strength} T"))
+        eye_t2 = Distribution(.546, .157, _ET) if strength == 1.5 else _assumed(.546, _ET + f"; 1.5 T T2 used at {strength} T")
+        default[strength]["eye"] = replace(default[strength]["csf"], t1=eye_t1, t2=eye_t2,
+            pd=_assumed(1., "vitreous ~99 % water: PD of CSF"),
+            t2star=_assumed(eye_t2.mean, "vitreous T2* = T2: no intrinsic broadening assumed"))
         # CSF and subcutaneous fat: measured values replace the legacy 1.5 T simulator priors,
         # whose CSF (T1 2.57 s, T2 0.33 s) was the largest error in T2-weighted contrast.
         csf, fat = default[strength]["csf"], default[strength]["fat"]
@@ -239,6 +262,10 @@ def _mt_and_diffusion(strength):
                      for key, d in out["muscle"].items()}
     out["marrow"] = {key: _assumed(d.mean, d.citation + "; fat used for marrow, a lipid class here")
                      for key, d in out["fat"].items()}
+    out["dermis"] = {key: _assumed(d.mean, d.citation.removeprefix("Assumption: ") + "; muscle used for the dermis "
+                                   "(collagen-rich: likely more MT, no in-vivo value found)") for key, d in out["muscle"].items()}
+    out["eye"] = dict(bound_fraction=_assumed(0., "vitreous: dilute macromolecules, no semi-solid pool"),
+                      diffusivity=_assumed(3.04e-9, _HO + "; free water used for the vitreous"))
     return out
 
 
@@ -1223,6 +1250,32 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
 
 
+GENERATED = ("dermis", "eye")  # classes the head generator adds (add_dermis; prepare_ixi's orbit eye class)
+
+
+def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
+    """The skin's dermis as its own class (``dermis``): T2-weighted 0.57 mm fastMRI images show a thin dark line at the
+    surface of the scalp, the dermis's collagen-bound water (T2 ~10 ms: ``DEFAULT_TISSUES``), which a single bright
+    soft-tissue class lacks. The outer ``thickness`` [m] below the head's boundary (1 - background > 0.5; default the
+    scalp's epidermis + dermis, ``SCALP_LAYERS``) takes, in each voxel, its overlap with that layer of every tissue there
+    (they keep their proportions, so every voxel's total is conserved); voxels outside the boundary that hold tissue
+    are surface, all of it dermis. Depth as in ``layer_scalp``."""
+    from scipy import ndimage
+
+    fr = anatomy.fractions
+    if "background" not in fr or "dermis" in fr:
+        raise ValueError("add_dermis needs a background class and no dermis yet")
+    tissue = 1 - fr["background"]
+    inside = (tissue > .5).numpy()
+    h = float(np.mean(anatomy.voxel))
+    depth = ndimage.distance_transform_edt(inside, sampling=anatomy.voxel) - h / 2
+    w = np.clip((np.minimum(depth + h / 2, thickness) - np.maximum(depth + h / 2 - h, 0)) / h, 0, 1)
+    w = torch.from_numpy(np.where(inside, w, 1.)).to(tissue.dtype)
+    out = {k: (v if k == "background" else v * (1 - w)) for k, v in fr.items()}
+    out["dermis"] = tissue * w
+    return replace(anatomy, fractions=out)
+
+
 # Deep grey nuclei in BrainWeb's models, which lie in MNI (ICBM) space and label them grey matter:
 # ellipsoids (centre |x|, y, z; semi-axes) [mm], drawn around the nuclei in the models' grey-matter
 # maps (subjects 4, 38, 44 and 54 by eye) and centred near their usual MNI centroids. They hold no
@@ -1695,7 +1748,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 age: float | tuple[float, float] | None = None, deep_grey: bool = False, falx: bool = False,
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
-                source: str = "brainweb", interpolation: int = 1, residual: bool = False) -> DigitalPhantom:
+                source: str = "brainweb", interpolation: int = 1, residual: bool = False,
+                dermis: bool = False) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1728,7 +1782,10 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
-    draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level)."""
+    draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level). ``dermis``: the
+    skin's dermis as its own class (``add_dermis``, on the final head; with "layered_drawn", this head's dermis
+    thickness), which ``table`` must hold. Classes the generator adds (``GENERATED``) draw from their own stream, so
+    adding them to a table leaves the other classes' draws unchanged."""
     if source not in ("brainweb", "ixi"):
         raise ValueError(f"source must be 'brainweb' or 'ixi', not {source!r}")
     if source == "ixi" and (age is not None or ventricle_age is not None):
@@ -1858,8 +1915,13 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     scale = 1.
     while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
         scale /= 2
-    tissues, draws = draw_tissues({k: v for k, v in table[field_T].items() if k not in DEEP_GREY},
+    tissues, draws = draw_tissues({k: v for k, v in table[field_T].items() if k not in DEEP_GREY and k not in GENERATED},
                                   torch.Generator().manual_seed(streams[2]))
+    generated = {k: table[field_T][k] for k in GENERATED if k in table[field_T]}
+    if generated:
+        stream = int(np.random.SeedSequence(int(seed)).spawn(14)[13].generate_state(1)[0])
+        more, more_draws = draw_tissues(generated, torch.Generator().manual_seed(stream))
+        tissues, draws = tissues | more, draws | more_draws
     if deep_grey:
         stream = int(np.random.SeedSequence(int(seed)).spawn(8)[7].generate_state(1)[0])
         more, more_draws = draw_tissues({k: table[field_T][k] for k in DEEP_GREY}, torch.Generator().manual_seed(stream))
@@ -1897,6 +1959,9 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         layers = tuple(max(m + sd * float(v), 0.25 * m) for m, sd, v in zip(SCALP_LAYERS, SCALP_LAYERS_SD, z))
         meta["scalp_layers"] = list(layers)
         anatomy = layer_scalp(anatomy, *layers)
+    if dermis:
+        anatomy = add_dermis(anatomy, meta["scalp_layers"][0] if "scalp_layers" in meta else SCALP_LAYERS[0])
+        meta["dermis"] = True
     if age_draw is not None:
         meta["age"] = age_draw
     if ixi_meta is not None:

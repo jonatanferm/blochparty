@@ -295,3 +295,18 @@ def test_layered_drawn_scalp():
         assert all(0.25 * m <= v < m + 5e-3 for v, m in zip(h.meta["scalp_layers"], SCALP_LAYERS))
     assert float(a.anatomy.fractions["fat"].sum()) > float(plain.anatomy.fractions["fat"].sum())
     assert a.meta["draws"] == plain.meta["draws"]
+
+
+@pytest.mark.parametrize("field", [1.5, 3.0])
+def test_generated_classes_leave_the_other_draws_unchanged(field):
+    """Adding the generator's classes (dermis, eye) to a table does not change any other class's draw: they come
+    from their own stream (at 1.5 T the vitreous T1 / T2 carry SDs and are drawn)."""
+    from blochparty.anatomy import GENERATED
+    if not (DATA / "subject04.json").exists():
+        pytest.skip("BrainWeb subject 04 not fetched")
+    tab = {field: DEFAULT_TISSUES[field]}
+    bare = {field: {k: v for k, v in DEFAULT_TISSUES[field].items() if k not in GENERATED}}
+    a = sample_head(7, subject=4, root=DATA, voxel=(4e-3,) * 3, table=tab, field_T=field)
+    b = sample_head(7, subject=4, root=DATA, voxel=(4e-3,) * 3, table=bare, field_T=field)
+    for k, v in b.meta["draws"].items():
+        assert a.meta["draws"][k] == v

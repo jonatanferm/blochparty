@@ -18,6 +18,7 @@ from blochparty.tissuedb import FIELD_DEPENDENT, FRACTIONS, PROPERTIES, load, po
 
 DB = load()
 CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+GENERATED = ("dermis", "eye")  # classes the head generator adds (anatomy.add_dermis, prepare_ixi's eye)
 HEADER = ["tissue", "region", "property", "field_T", "value", "sd", "sd_kind", "n", "unit", "species", "state",
           "temperature_C", "method", "source", "location", "note"]
 
@@ -32,7 +33,7 @@ def test_schema():
     for t in DB.tissues.values():
         assert not t.parent or t.parent in DB.tissues, t.id
     classes = [t.brainweb_class for t in DB.tissues.values() if t.brainweb_class]
-    assert sorted(classes) == sorted(CLASSES + tuple(DEEP_GREY))  # one tissue per BrainWeb / anatomy class
+    assert sorted(classes) == sorted(CLASSES + tuple(DEEP_GREY) + GENERATED)  # one tissue per anatomy class
     seen = set()
     for m in DB.measurements:
         where = f"{m.source} {m.tissue} {m.property} {m.field_T} {m.region}"
@@ -300,13 +301,13 @@ def test_default_tissues_unchanged_by_import():
 @pytest.mark.parametrize("strength", (1.5, 3.))
 def test_tissue_table_assembles_a_phantom(strength):
     table = tissue_table(strength)
-    assert set(table) == set(CLASSES) | set(DEEP_GREY)
+    assert set(table) == set(CLASSES) | set(DEEP_GREY) | set(GENERATED)
     for name, p in table.items():
         assert isinstance(p, TissueProperties)
         for f in fields(p):
             d = getattr(p, f.name)
             assert d is None or d.citation
-    a = Anatomy({k: torch.full((2, 2, 2), 1 / 16, dtype=torch.float64) for k in table}, (.001,) * 3, (0, 0, 0))
+    a = Anatomy({k: torch.full((2, 2, 2), 1 / len(table), dtype=torch.float64) for k in table}, (.001,) * 3, (0, 0, 0))
     ph = to_phantom(a, {strength: table}, strength, mt=True, diffusion=True, chi_to_b0=False, t2star="off")
     assert ph.bound is not None and (ph.diffusion >= 0).all() and len(ph) > 0
     assert torch.isfinite(ph.t1).all() and (ph.t2 <= ph.t1).all()
