@@ -2181,3 +2181,8 @@ controls).
   and the subjects), the fine bands 15 % short (the reader's "smoother" cue; q36 tests the residual's smoothing, and
   the 8-spin quality adds grain, not smoothness). 105 of the 168 simulated images still score > 0.8 with no feature
   here separating them from the 61 that pass: the cue left is finer than these measures.
+- **q36, the residual smoothed 0.75 mm instead of 1.5** (the same 8 heads as q35, re-prepared as v15s): structure by
+  band 1.02 / 1.10 / 1.10 / 0.99 / 0.89 / 0.92 x real against q35's 1.02 / 1.08 / 1.05 / 0.92 / 0.82 / 0.86: the fine
+  bands up 8 %, the coarse unchanged; CNN 0.792 [0.59, 0.95] (q35 0.872; noise), W1 0.0253 (0.0245). Half the fine
+  deficit; a 0.5 mm variant (q40) follows, with the v10 lesson in mind (the unsmoothed residual carried IXI's noise at
+  1.4-2.4 x real fine texture). The 64-head v16 preparation keeps 1.5 mm; the default moves with the next preparation.
