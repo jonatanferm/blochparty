@@ -547,16 +547,16 @@ def main():
         # semi-axes scaled, its gap behind the occiput and the normalisation length drawn (2026-10-13: across 34 real
         # scans the scalp's bright decile over white matter spans 2.1-6.0, SD 0.8, one run of ours 4.5 +- 0.4)
         draw = {}
+        coil_radius, coil_radius_lr, gap_mm, norm_mm = args.coil_radius, args.coil_radius_lr, args.coil_gap_mm, args.receive_normalise_mm
         if args.receive_draw:
             rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(15)[14])
             draw = {"radius_scale": float(rng.uniform(1.0, 1.25)), "gap_mm": float(rng.uniform(5., 30.)),
                     "normalise_mm": float(rng.uniform(20., 60.))}
-            args.coil_radius = args.coil_radius * draw["radius_scale"]
-            args.coil_radius_lr = None if args.coil_radius_lr is None else args.coil_radius_lr * draw["radius_scale"]
-            args.coil_gap_mm = draw["gap_mm"]
-            if args.receive_normalise_mm:
-                args.receive_normalise_mm = draw["normalise_mm"]
-        ring = 0.0 if args.coil_gap_mm is None else coil_offset(head.anatomy, zs, cy, args.coil_radius, args.coil_gap_mm * 1e-3)
+            coil_radius = coil_radius * draw["radius_scale"]
+            coil_radius_lr = None if coil_radius_lr is None else coil_radius_lr * draw["radius_scale"]
+            gap_mm = draw["gap_mm"]
+            norm_mm = draw["normalise_mm"] if norm_mm else norm_mm
+        ring = 0.0 if gap_mm is None else coil_offset(head.anatomy, zs, cy, coil_radius, gap_mm * 1e-3)
         kspace, timing = {}, []
 
         def prepare(i):
@@ -574,10 +574,10 @@ def main():
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP
-            sens = bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius, radius_y=args.coil_radius_lr,
+            sens = bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=coil_radius, radius_y=coil_radius_lr,
                                              element_radius=args.coil_element_radius)
-            if args.receive_normalise_mm:
-                sens = normalised_sensitivities(sens, ph.pos, args.receive_normalise_mm)
+            if norm_mm:
+                sens = normalised_sensitivities(sens, ph.pos, norm_mm)
             return seq, ph, sens
 
         slices = list(span(args.slices))
@@ -596,7 +596,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "prepared": None if args.prepared is None else str(args.prepared), "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_radius_lr": args.coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "receive_draw": draw or None, "ordering": args.ordering, "train": args.train,
+                "age": head.meta.get("age"), "source": args.source, "prepared": None if args.prepared is None else str(args.prepared), "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": coil_radius, "coil_radius_lr": coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": norm_mm, "receive_draw": draw or None, "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,
