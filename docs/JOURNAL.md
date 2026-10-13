@@ -1991,3 +1991,12 @@ The parts of M5 that need no outside access, done while the user was away.
   fine structure. It picked the simulations out earlier (when our heads had half the real fine-structure power) and
   points the wrong way now: r27's hemisphere structure power is 1.2-1.7 x real at 0.15-0.75 of Nyquist (r24 0.95-1.6),
   ~1.0 at the top band, so the sharper-looking tiles were more often ours.
+- **r28 (v13: CSF from the subject's T2) stopped after two heads** (seeds 200-201 against r27's): hemisphere
+  structure power 0.81 / 1.18 / 1.01 / 0.97 / 1.13 / 0.99 x real by band (r27 1.04 / 1.56 / 1.37 / 1.34 / 1.48 / 1.28):
+  the excess coarse texture, and the reader's inverted sharpness cue, came mostly from the extra sulcal CSF; slice
+  5-7 interior p95 / p99 2.83 / 4.00 (real 2.90 / 3.86; r27 3.24 / 4.76), white-matter share at slices 6-7 0.39 / 0.42
+  (0.37 / 0.40, real 0.44). But the fissure fell to 3.34 at its centre (real 3.89): the falx counted twice (the subject's
+  T2 shows its own; add_falx then drew another). 447eee9: refine_csf models the falx sample_head will add (three
+  rounds to settle it; IXI012's fissure 1.06 x its T2 at its own CSF level, v12 0.94, v13 ~1.16). The laptop was
+  overloaded for a while by a simulation on top of the IXI preparation; at the user's request everything heavy now
+  runs on the mini (r29: v14 preparation, 16 heads and the score in one detached script).
