@@ -65,6 +65,10 @@ def features(img):
         "wm_mode": wm, "csf_share": float((vals > 2.5 * wm).mean()),
         "scalp_0_6": img[m & (d <= 6)].mean(), "band_min_3_9": np.quantile(img[m & (d > 3) & (d <= 9)], 0.1),
         "post_scalp": img[top:top + 5][m[top:top + 5]].mean(), "ant_scalp": img[bot - 4:bot + 1][m[bot - 4:bot + 1]].mean(),
+        # tissue levels over the white-matter mode (free of the p99 normalisation): interior quartiles, the CSF level
+        # (interior p99.5), the scalp's bright decile (outer 6 px, p90)
+        "q50/wm": np.quantile(vals, .5) / wm, "q75/wm": np.quantile(vals, .75) / wm, "csf/wm": np.quantile(vals, .995) / wm,
+        "scalp90/wm": np.quantile(img[m & (d <= 6)], .9) / wm,
     }
 
 

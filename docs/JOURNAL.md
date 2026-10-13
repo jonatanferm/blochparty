@@ -2156,3 +2156,13 @@ controls).
   high (0.215 / 0.275 / 0.420 vs 0.197 / 0.239 / 0.365) with the scalp as the p99 scale.
 - **v16** (the 64 selected subjects, the bone rule, prepared on the mini): IXI012's anterior rays now 3.4 mm of bone (2.2
   before) and 5.4 mm of soft tissue (6.2), posterior 4.8 (4.2); 64 mL of bone under displaced fat with the 3 mm guard.
+- **Levels over the white-matter mode** (gap.py features, new: free of the p99 normalisation): real q50 / q75 / CSF
+  (interior p99.5) / scalp (outer 6 px p90) = 1.24 / 1.89 / 5.27 / 4.40. With the ring (q35): 1.32 / 2.03 / 4.93 /
+  4.07 (the brain +7 %, CSF -6 %, scalp -8 %); with the flat receive (q33): 1.25 / 1.92 / 4.78 / 3.49 (the brain
+  right, CSF -9 %, scalp -21 %). So the real images are flat-receive images and the 14 cm ring has been buying the
+  scalp's brightness with a brighter periphery of the brain. What is left under a flat receive: the scalp 21 % and
+  CSF 9 % dim against white matter. A stronger incidental MT (ours 31 %; 37-40 % would put CSF / WM right and the
+  scalp at -13 %) and the fat's own brightness are the candidates; the test that separates a residual peripheral
+  receive gain from fat is the non-fat scalp tissue and the bone minimum at the scalp's radius (the real skin edge
+  0.82-1.09 x WM at 0.57 mm). Next quick runs: flat receive with the bound-pool fraction scaled 1.3 (`--override`),
+  and with fat's T2 at 170 ms, each against these four levels.

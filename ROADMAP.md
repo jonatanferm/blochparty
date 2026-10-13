@@ -506,7 +506,10 @@ Items in the order of measured effect over cost; each has its own number to move
    of real under a flat receive, p99 inside below the scalp's, centroid row 60 +- 3.
    *2026-10-13:* the placement is done (q35: row 60.1, AUC 0.48; 7a53466); the frontal bone was
    labelled skin under the T2's displaced fat and is bone again (a29d685: IXI012 2.2 -> 3.4 mm),
-   in the v16 heads; the scalp / brain level and the posterior / anterior ratio remain.
+   in the v16 heads; the scalp / brain level and the posterior / anterior ratio remain. Over the
+   white-matter mode (gap.py, journal): with a flat receive the brain's quartiles match real and
+   CSF is 9 %, the scalp 21 % dim; the ring had been masking that. Next: flat receive in the
+   preset, then MT (31 % here, 30-45 % reported) and fat against the four levels.
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
