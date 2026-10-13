@@ -277,6 +277,8 @@ def main():
     ap.add_argument("--out", type=Path, default=Path("outputs/realism"))
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--slices", default="0-12", help="slice indices used on both sides, a-b or a-b:step")
+    ap.add_argument("--quick", action="store_true",
+                    help="real vs simulated only (no real-vs-real / simulated-vs-simulated null checks): for fast iteration")
     ap.add_argument("--white-noise", action="store_true",
                     help="simulated noise white and equal across coils (before 2026-10-12) instead of each paired "
                          "scan's coil covariance (noise_covariances)")
@@ -295,7 +297,7 @@ def main():
     results.append(res)
     # null checks: the same test on two halves of one kind must give ~0.5
     rng = np.random.default_rng(1)
-    for kind, items in (("real vs real", real), ("simulated vs simulated", sim)):
+    for kind, items in () if args.quick else (("real vs real", real), ("simulated vs simulated", sim)):
         people = sorted({i[0] for i in items})
         rng.shuffle(people)
         half = set(people[: len(people) // 2])
