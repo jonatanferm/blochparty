@@ -317,6 +317,7 @@ def refine_csf(frac, t2w, valid, origin=None, voxel=None):
         out = f * np.where(np.arange(len(CLASSES))[:, None] == i["background"], 1., scale[None])
         out[i["csf"]] = csf_new
         out[i["gm"]] += np.where(rs > .05, 0., total - csf_new)
+        out = np.clip(out, 0, 1); out /= out.sum(0, keepdims=True)  # float rounding (e.g. -1e-8 where all is CSF)
         out_frac = frac.copy(); out_frac[:, sel] = out
     frac = out_frac
     return frac, {"csf_over_wm_deep": round(s_csf, 3), "falx_ml": round(float(falx.sum()) * 1e-3, 2), "csf_table_over_wm": round(float(sig[i["csf"]]), 3),
