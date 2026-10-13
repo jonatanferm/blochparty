@@ -2171,3 +2171,13 @@ controls).
   files already kept, the AXT2 cap raised 15 -> 27 GB: ~40-60 more 3 T AXT2 volumes, 8 GB of disk kept free). The
   queued runs (r30, q36-q39) keep the frozen 21-scan set; r31 (64 v16 heads x 7 slices) scores against the larger one
   and r30 will be re-scored against it for the comparison. score.py's noise-covariance cache now grows with the set.
+- **r30: CNN AUC 0.748 [0.594, 0.883]** (24 v15 heads x slices 1-7 at quick quality, 8 spins per voxel, the FOV offset;
+  168 simulated against the 147 real slices; r27: 0.875 on 16 v12 heads at 64 spins), histogram 0.549 [chance], W1
+  0.0181; controls real-vs-real 0.440, sim-vs-sim 0.527; by slice 0.72-0.77. gap.py on it: the placement (row AUC
+  0.54) and every level over the white-matter mode are within noise of real (q50 1.24 vs 1.25, q75 1.93 vs 1.92, CSF
+  5.24 vs 5.29, scalp 4.21 vs 4.37; the ring is still in, so the brain's +7 % periphery stays); the head area 0.94 x
+  real (0.40); posterior / anterior scalp 0.54 / 0.38 vs 0.47 / 0.45 (0.67 / 0.34: the frontal bone rule is in v16,
+  not here); structure by band 1.03 / 1.05 / 0.99 / 0.91 / 0.84 / 0.86 x real: the coarse excess is gone (refine_csf
+  and the subjects), the fine bands 15 % short (the reader's "smoother" cue; q36 tests the residual's smoothing, and
+  the 8-spin quality adds grain, not smoothness). 105 of the 168 simulated images still score > 0.8 with no feature
+  here separating them from the 61 that pass: the cue left is finer than these measures.
