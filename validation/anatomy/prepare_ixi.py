@@ -457,7 +457,7 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel, smooth_mm=None):
     return t2_scale.astype(np.float32), np.exp(log_pd).astype(np.float32), diag
 
 
-def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm=None):
+def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm=None, save_intensities=False):
     t0 = time.time()
     t1p = next((root / "T1").glob(f"IXI{ixi_id:03d}-HH-*-T1.nii.gz"))
     t2p = next((root / "T2").glob(f"IXI{ixi_id:03d}-HH-*-T2.nii.gz"))
@@ -570,6 +570,8 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm
     t2_motion = {"shift_mm": np.round(R2[:3, 3], 2).tolist(), "rotation_deg": round(float(np.degrees(np.arccos(np.clip((np.trace(R2[:3, :3]) - 1) / 2, -1, 1)))), 2),
                  "gradient_r": round(t2score, 3)}
     files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion, "csf_refined": csf_diag} | ({"pd": pdp.name, "residual": diag} if diag else {})
+    if save_intensities:  # for developing label rules offline: the bias-corrected T1 and T2 over white matter
+        maps = maps | {"r1": r1.astype(np.float16), "r2": r2.astype(np.float16)}
     return frac, M, score, vol, files, round(time.time() - t0), maps
 
 
@@ -580,6 +582,8 @@ if __name__ == "__main__":
     ap.add_argument("--count", type=int, default=None, help="this many subjects spread over the ages")
     ap.add_argument("--posteriors", action="store_true", help="keep the EM posteriors as fractions (no partial-volume unmixing)")
     ap.add_argument("--out", type=Path, default=None, help="output folder (default root/prepared)")
+    ap.add_argument("--save-intensities", action="store_true",
+                    help="also store the bias-corrected T1 / T2 over white matter (r1, r2) in the npz (diagnostics)")
     ap.add_argument("--residual-smooth-mm", type=float, default=None,
                     help=f"the residual maps' within-tissue smoothing [mm] (default {RESIDUAL_SMOOTH_MM})")
     args = ap.parse_args()
@@ -602,7 +606,7 @@ if __name__ == "__main__":
         dest = out / f"IXI{i:03d}.npz"
         if dest.exists():
             continue
-        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors, args.residual_smooth_mm)
+        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors, args.residual_smooth_mm, args.save_intensities)
         meta = {"ixi_id": i, **demo[i], "atlas": f"brainweb{ATLAS:02d}", "classes": CLASSES, "affine_mm": M.tolist(),
                 "lncc": round(score, 3), "volumes_ml": vol, "files": files, "origin": list(atlas.origin),
                 "voxel": list(atlas.voxel), "shape": list(atlas.shape)}

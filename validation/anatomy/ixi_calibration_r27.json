@@ -1,0 +1,69 @@
+{
+ "source": "r27 simulated slices 1-7, gap.py features (area px x 1.72 mm^2, CSF-bright share)",
+ "subjects": {
+  "12": {
+   "area_cm2": 226.7,
+   "csf_share": 0.155
+  },
+  "13": {
+   "area_cm2": 227.0,
+   "csf_share": 0.13
+  },
+  "130": {
+   "area_cm2": 231.0,
+   "csf_share": 0.163
+  },
+  "146": {
+   "area_cm2": 235.7,
+   "csf_share": 0.099
+  },
+  "150": {
+   "area_cm2": 160.8,
+   "csf_share": 0.111
+  },
+  "167": {
+   "area_cm2": 190.4,
+   "csf_share": 0.21
+  },
+  "202": {
+   "area_cm2": 177.5,
+   "csf_share": 0.14
+  },
+  "205": {
+   "area_cm2": 209.2,
+   "csf_share": 0.176
+  },
+  "216": {
+   "area_cm2": 214.2,
+   "csf_share": 0.219
+  },
+  "253": {
+   "area_cm2": 200.7,
+   "csf_share": 0.114
+  },
+  "255": {
+   "area_cm2": 180.9,
+   "csf_share": 0.199
+  },
+  "277": {
+   "area_cm2": 188.7,
+   "csf_share": 0.116
+  },
+  "334": {
+   "area_cm2": 197.2,
+   "csf_share": 0.18
+  },
+  "445": {
+   "area_cm2": 227.1,
+   "csf_share": 0.076
+  },
+  "511": {
+   "area_cm2": 179.6,
+   "csf_share": 0.227
+  },
+  "538": {
+   "area_cm2": 158.2,
+   "csf_share": 0.268
+  }
+ }
+}

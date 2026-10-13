@@ -2130,3 +2130,12 @@ controls).
   multi-slice MTR reported at 3 T (REALISM.md, [21]); the brain's 20 % excess over the scalp under a flat receive is the
   scalp fat's dimness against brain (the J-coupling route was negative; what is left: adipose water and PD, the
   diploe below), not missing MT. (CNN 0.897, histogram 0.993, W1 0.088: the ablation, not a candidate.)
+- **The real calvarium at 0.57 mm** (scratch calv_real.py: 12 scans, slices 2-5, rays +-30 deg, in units of each
+  slice's white-matter mode): posterior, from the edge: 0.82 at the skin, the scalp peak 5.0 at 5.7 mm, the bone
+  valley 0.81 at 10.3 mm (one valley ~2 mm wide, no separate diploe maximum in the median), then 1.1 / 1.4 / 1.7 / 2.0
+  at 11.5-15 mm (cortex and CSF); anterior: 1.09 at the skin, the scalp peak 3.1 at 2.3 mm, the valley only 1.19 at
+  5.7 mm, then a slow rise 1.4-2.0 over 7-12 mm: the 5 mm slab cuts the sloping forehead obliquely and smears
+  scalp, bone and brain together. Our classes at this protocol (spin-echo signal over WM): fat 3.21, marrow 0.73, skin /
+  dura / connective 0.71, muscle 0.16, dermis / skull 0. Relabelling the frontal diploe skin -> marrow would change
+  nothing (0.71 -> 0.73): the anterior excess at 0.80-0.90 of the radius is the band's composition and the slab
+  geometry, to be tested on the simulated slices against these profiles (item 4 of M5b), not a one-line rule.
