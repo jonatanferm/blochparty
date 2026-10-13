@@ -2139,3 +2139,13 @@ controls).
   dura / connective 0.71, muscle 0.16, dermis / skull 0. Relabelling the frontal diploe skin -> marrow would change
   nothing (0.71 -> 0.73): the anterior excess at 0.80-0.90 of the radius is the band's composition and the slab
   geometry, to be tested on the simulated slices against these profiles (item 4 of M5b), not a one-line rule.
+- **Found: the frontal bone was labelled skin under displaced fat** (prepare_ixi `--save-intensities`, IXI012's r1 / r2
+  on the MNI grid, viewed): in IXI's T2 the scalp's fat is displaced 1.63 mm inward at the forehead and vertex (the
+  water-fat shift along the front-back readout), so a 3-voxel band inside the frontal bone reads T1-dark (r1
+  0.06-0.21: bone) and T2-bright (r2 1.4-1.8: the fat's ghost). The rule "bone = dark in both" called it skin, which
+  the simulator renders at 0.71 x WM: the 7 mm of "skin" on the anterior rays, the 2.4 mm of frontal bone, and the
+  anterior band's 1.08-1.14 x real. Fat is T1-bright, so a T1-dark, T2-bright voxel next to bone (within 3 mm; not
+  in the eyes) is bone under displaced fat: the T2 factor is waived there. IXI012 (from the saved maps): frontal
+  bone 2.4 -> 3.6 mm, occipital 4.5 -> 5.2 mm along the rays; 96 mL of such voxels in the head outside the brain, 58
+  of them below MNI z 0 (face, sinuses). The 64-head v16 preparation was stopped (7 heads in) and restarts with the
+  rule; the orbit's vitreous is found before the rule so it stays an eye.

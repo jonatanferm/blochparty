@@ -519,6 +519,16 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm
             opened = ndimage.binary_opening(head[kz], structure=disc)
             head[kz] = ndimage.binary_fill_holes(ndimage.binary_dilation(opened, iterations=2) & head[kz])
     p_bone = sig((.35 - r1) / .06) * sig((.45 - r2) / .08)
+    p_eye = orbit_vitreous(r1, r2, p_bone, head, intra, origin, atlas.voxel)
+    # 2026-10-13: the T2's water-fat shift (IXI_FAT_SHIFT_MM, below) lays the scalp's fat over the bone's T2, so the
+    # skull reads T1-dark but T2-bright and the rule above called it soft tissue (a 3-voxel "skin" band inside the
+    # frontal bone, bone 2.4 mm thick at the forehead against ~6 in life; the simulated anterior band 1.08-1.14 x
+    # real). Fat is T1-bright, so a T1-dark, T2-bright voxel next to bone is bone under displaced fat: the T2 factor
+    # is waived there (not in the eyes, which are T1-dark and T2-bright too). IXI012: frontal bone 2.4 -> 3.6 mm.
+    ghost = (sig((.30 - r1) / .05) * sig((r2 - .9) / .1) * ndimage.binary_dilation(p_bone > .5, iterations=3)
+             * (1 - np.clip(p_eye / max(p_eye.max(), 1e-6), 0, 1)))
+    p_bone = sig((.35 - r1) / .06) * np.clip(sig((.45 - r2) / .08) + ghost, 0, 1)
+    ghost_ml = float(((ghost > .5) & head & ~intra).sum()) * np.prod(atlas.voxel) * 1e6
     # fat by unmixing T2 between soft tissue (~0.9 x WM, temporalis) and the subject's own pure fat: the median T2
     # of head tissue brighter than WM in T1 (fat, marrow). The 98th percentile of T2 among T1-bright tissue (to
     # 2026-10-12; IXI012 3.09 x WM against a median of 1.41) unmixed subcutaneous fat to about a third: its own fat
@@ -528,7 +538,6 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm
     p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
     # undo the T2's water-fat shift: its fat sits IXI_FAT_SHIFT_MM posterior of the water tissue (front-back readout)
     p_fat = np.clip(ndimage.shift(p_fat, (0, IXI_FAT_SHIFT_MM / (atlas.voxel[1] * 1e3), 0), order=1, mode="nearest"), 0, 1) * (1 - p_bone)
-    p_eye = orbit_vitreous(r1, r2, p_bone, head, intra, origin, atlas.voxel)
     p_fat = p_fat * (1 - p_eye)
     p_soft = np.clip(1 - p_fat - p_bone - p_eye, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra
@@ -569,7 +578,7 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm
     vol = {c: round(float(frac[i].sum()) * scale, 1) for i, c in enumerate(CLASSES) if c != "background"}
     t2_motion = {"shift_mm": np.round(R2[:3, 3], 2).tolist(), "rotation_deg": round(float(np.degrees(np.arccos(np.clip((np.trace(R2[:3, :3]) - 1) / 2, -1, 1)))), 2),
                  "gradient_r": round(t2score, 3)}
-    files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion, "csf_refined": csf_diag} | ({"pd": pdp.name, "residual": diag} if diag else {})
+    files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion, "csf_refined": csf_diag, "bone_under_shifted_fat_ml": round(ghost_ml, 1)} | ({"pd": pdp.name, "residual": diag} if diag else {})
     if save_intensities:  # for developing label rules offline: the bias-corrected T1 and T2 over white matter
         maps = maps | {"r1": r1.astype(np.float16), "r2": r2.astype(np.float16)}
     return frac, M, score, vol, files, round(time.time() - t0), maps
