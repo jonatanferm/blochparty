@@ -430,7 +430,7 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       40 mm apart (displacement SD ~1 mm, Jacobian 0.83-1.21 on subject 04), per-subject
       log-normal draws of every property with a reported SD (`draw_tissues`; 1800
       standardised draws: mean -0.03, SD 1.00), texture and spin seeds from one SeedSequence.
-- [ ] **Outside the brain.** PHANTOMS §6 says what gives synthetic brains away: scalp fat with
+- [x] **Outside the brain.** PHANTOMS §6 says what gives synthetic brains away: scalp fat with
       chemical shift, skull and dura, sinuses, eyes. BrainWeb's fuzzy classes cover fat, skull,
       skin, dura, marrow, vessels and CSF; make sure each gets a cited property set and that fat
       classes get `fat_fraction` so the 6-peak model acts on them.
@@ -452,6 +452,10 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       effect on the realism score (fastMRI's stack starts above the orbits); (3) dura and connective tissue: no
       in-vivo measurements found. The verify list below is covered (tests/test_head_sampler.py: draws over 100
       subjects, Jacobian; tests/test_io.py: round trip; examples/sampled_heads.py: the ten-head triplet).
+      *Done 2026-10-13* (3f4cf1b, b8b9106): a dermis class (`add_dermis`, `sample_head(dermis=True)`: the outer
+      1.61 mm, T2 12 ms from its 10 ms T2*, flagged) and an eye class (vitreous, T1 4.518 s at 3 T measured, T2 from
+      1.5 T flagged; prepare_ixi's `orbit_vitreous` finds the globes, IXI012 9.0 mL). Left: dura and connective
+      tissue keep muscle's relaxation (no in-vivo values found); vessels with flow.
 - [x] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
       noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
       trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group
