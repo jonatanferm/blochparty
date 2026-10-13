@@ -227,6 +227,29 @@ B1_MAP = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "em" / "body
 _B1 = {}
 
 
+def normalised_sensitivities(sens: torch.Tensor, pos: torch.Tensor, smooth_mm: float, bin_mm: float = 4.0) -> torch.Tensor:
+    """The receive array as the scanner shows it after its intensity normalisation (Siemens "Prescan Normalize" and
+    its kin divide the image by a smooth estimate of the array's sensitivity): ``sens`` (N, C) divided by the
+    root-sum-of-squares sensitivity smoothed over ``smooth_mm`` (Gaussian sigma) in the slice plane. The estimate is
+    built from the spins themselves (binned at ``bin_mm``, normalised convolution over the head, bilinear back), so
+    where the sensitivity rises faster than the estimate can follow (the last centimetre or two under the elements)
+    the normalised image keeps the excess, as the real scans do (journal 2026-10-13: the outer 2 cm 1.3-2.7 x brighter
+    than a flat receive gives while the interior matches one). ``pos`` in the turned frame (x anterior-posterior, y
+    left-right)."""
+    from scipy import ndimage
+    rss = sens.abs().pow(2).sum(1).sqrt().cpu().numpy()
+    xy = pos[:, :2].cpu().numpy() / (bin_mm * 1e-3)
+    lo = np.floor(xy.min(0)) - 2
+    ij = np.floor(xy - lo).astype(int)
+    shape = tuple(ij.max(0) + 3)
+    num = np.zeros(shape); den = np.zeros(shape)
+    np.add.at(num, (ij[:, 0], ij[:, 1]), rss); np.add.at(den, (ij[:, 0], ij[:, 1]), 1.0)
+    sigma = smooth_mm / bin_mm
+    smooth = ndimage.gaussian_filter(num, sigma) / np.maximum(ndimage.gaussian_filter(den, sigma), 1e-9)
+    est = ndimage.map_coordinates(smooth, (xy - lo).T, order=1, mode="nearest")
+    return sens / torch.as_tensor(est, dtype=sens.real.dtype, device=sens.device)[:, None]
+
+
 def b1_plus(head, pos: torch.Tensor) -> torch.Tensor:
     """Relative B1+ at spin positions [m, anatomy frame] of a generated head: the full-wave 3 T body
     birdcage map of BrainWeb subject 04 (validation/em/run_brainweb.py; mean 1 over its brain, 0.86-1.19
@@ -386,6 +409,10 @@ def main():
     ap.add_argument("--coil-radius", type=float, default=None,
                     help="receive ring radius [m] (birdcage_sensitivities; default 0.18, the preset 0.14); head coils' "
                          "elements sit at ~0.12-0.14 m")
+    ap.add_argument("--receive-normalise-mm", type=float, default=None,
+                    help="the scanner's intensity normalisation: receive sensitivities divided by their RSS smoothed over "
+                         "this sigma [mm] in the slice plane (normalised_sensitivities); flat inside, the excess under "
+                         "the elements kept")
     ap.add_argument("--coil-gap-mm", type=float, default=None,
                     help="the head rests on the coil's posterior side: the receive ring's back this far behind the "
                          "head's back (coil_offset); default: the ring centred on the head")
@@ -524,7 +551,10 @@ def main():
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP
-            return seq, ph, bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius)
+            sens = bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius)
+            if args.receive_normalise_mm:
+                sens = normalised_sensitivities(sens, ph.pos, args.receive_normalise_mm)
+            return seq, ph, sens
 
         slices = list(span(args.slices))
         with ThreadPoolExecutor(max_workers=1) as pool:  # PERFORMANCE 2.7: CPU and GPU overlap (not with --serial)
@@ -542,7 +572,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "ordering": args.ordering, "train": args.train,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

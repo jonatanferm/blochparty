@@ -2210,3 +2210,16 @@ controls).
   milder MT (x1.15 would put GM / WM within ~1 % and CSF / WM within ~4 %); decided after r31 (64 v16 heads, the ring)
   gives the scaled baseline, as r32 with the flat receive, MT x1.15, skin 90 ms, fat 170 ms, each value flagged as a
   calibration on fastMRI's levels.
+- **The scalp at 0.57 mm, simulated against real** (IXI012 and IXI255 of v16 at `--n 384` under a flat receive, slices
+  2-4; both sides smoothed 1.1 mm against the simulation's grain of ~2 spins per pixel, ray means from the edge in
+  units of the white-matter mode; scratch calv_sim.py): posterior peak 2.05 at 4.6 mm against the real 4.47 at 5.7,
+  valley 0.52 at 9.2 against 1.05 at 11.5, the brain beyond 1.7-1.8 against 2.1-2.3; sides 1.81 / 1.00 against 2.98
+  / 0.93 (the valley 3 mm deeper in real); anterior 1.02 / 0.64 against 2.78 / 1.18. Everything in the outer two
+  centimetres is 1.3-2.7 x brighter in the real scans while the interior's distribution matches a flat receive
+  (q39); a 2 x on fat and the soft tissue is beyond their physics (fat's T2 would have to be ~650 ms), so this is
+  the receive after all, in its normalised form: the array's sensitivity rises steeply in the last 1-2 cm and the
+  scanner's normalisation divides by a smooth estimate that cannot follow it. The 14 cm ring (q35) has the rise but
+  spread over the whole brain (+7 % at the periphery of the brain). Model it as the ring's sensitivities divided by
+  their own spatially smoothed RSS (`--receive-normalise-mm`, next), and read the hi-res profiles again. The
+  calibration rows for skin and fat are not written. Also seen: the real scalp is ~2 mm thicker (patients) and the
+  real valley never as dark as ours (0.93-1.18 vs 0.52-1.00).
