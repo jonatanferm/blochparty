@@ -32,7 +32,7 @@ FIELD_DEPENDENT = {"t1", "t2", "t2star", "permittivity_rel", "conductivity"}  # 
 FIELD_PREFERRED = {"bound_fraction", "exchange_rate", "bound_t2"}  # other field allowed, marked assumed
 SD_KINDS = {"between_subject", "within_subject", "specimen", "across_studies", "se", "unknown"}
 STATES = {"in_vivo", "ex_vivo", "in_vitro", "compilation", "physical"}
-KINDS = {"article", "abstract", "review", "database"}
+KINDS = {"article", "abstract", "review", "database", "calibration"}
 # TissueProperties field -> database property
 TABLE_PROPERTIES = {"pd": "pd", "t1": "t1", "t2": "t2", "chi": "chi", "t2star": "t2star",
                     "bound_fraction": "bound_fraction", "exchange_rate": "exchange_rate", "bound_t2": "bound_t2",
@@ -256,6 +256,10 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     # labels contradict physics and were swapped by assumption) stay in the table but do not pool
     flagged = sorted({m.source for m in rows if (m.note or "").startswith("FLAG")})
     rows = [m for m in rows if not (m.note or "").startswith("FLAG")]
+    # calibration rows (note "CALIBRATION: ...", source kind "calibration"): a value this project fitted to real
+    # scans where the literature has none or disagrees with them; it overrides the literature rows of its tier and
+    # the result is marked assumed so the flag travels with every citation (since 2026-10-13)
+    calibration = [m for m in rows if (m.note or "").startswith("CALIBRATION")]
     tiers = {}
     for m in rows:
         t = _tier(m, property, field_T)
@@ -265,7 +269,12 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
         return None
     best = min(tiers)
     use, method_note = tiers[best], ""
-    if property in _REFERENCE:
+    cal = [m for m in use if m in calibration]
+    if cal:
+        left = sorted({m.source for m in use} - {m.source for m in cal})
+        method_note = "; CALIBRATION" + (f", overrides: {', '.join(left)}" if left else "")
+        use = cal
+    elif property in _REFERENCE:
         ref = [m for m in use if reference_method(m)]
         if ref:
             left = sorted({m.source for m in use} - {m.source for m in ref})
@@ -282,7 +291,7 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
     citation = (f"tissuedb pooled {tissue} {property}" + (f" at {field_T:g} T" if field_T is not None else "")
                 + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}"
                 + (f"; flagged rows left out: {', '.join(flagged)}" if flagged else ""))
-    return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0)
+    return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0 or bool(cal))
 
 
 def _from_ancestor(t: Tissue, name: str, prop: str, field_T: float, db: Database, base_table: dict):

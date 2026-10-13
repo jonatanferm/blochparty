@@ -3,6 +3,7 @@ transcription and unit errors, the round trip to the values anatomy.DEFAULT_TISS
 candidate table that assembles a phantom. The independent checks of a literature table are these
 cross-checks; the values themselves keep their source and location per row."""
 import csv
+import dataclasses
 import math
 import re
 import statistics
@@ -279,6 +280,21 @@ def test_reference_methods_first():
     # Wansapura 1999's abstract (labels swapped by assumption) is flagged: in the table, not in the pool
     assert "flagged rows left out: wansapura1999" in gm.citation and "wansapura1999" not in gm.citation.split(";")[0]
     assert pooled("muscle.skeletal", "t2", 3.).mean == pytest.approx(.030, abs=.003)  # spin echo; MRF reads 44-74 ms
+
+
+def test_calibration_rows_override_and_are_flagged():
+    """A row whose note starts with CALIBRATION (a value fitted to real scans) overrides the literature of its tier;
+    the result is marked assumed and its citation names what it overrides."""
+    src = {k: tissuedb.Source(k, "", 0, "", "", "", "", "calibration" if k == "cal" else "article", "") for k in ("a", "b", "cal")}
+    tis = {"t": tissuedb.Tissue("t", "t", "", "t", "")}
+    lit = [row("a", .050, method="multi-echo SE", prop="t2"), row("b", .060, method="CPMG", prop="t2")]
+    cal = dataclasses.replace(row("cal", .090, method="calibration: level in fastMRI T2w", prop="t2"), note="CALIBRATION: x")
+    db = tissuedb.Database(tuple(lit), src, tis)
+    plain = pooled("t", "t2", 3., db=db)
+    assert plain.mean == pytest.approx(.055) and not plain.assumed
+    d = pooled("t", "t2", 3., db=tissuedb.Database(tuple(lit + [cal]), src, tis))
+    assert d.mean == pytest.approx(.090) and d.assumed
+    assert "CALIBRATION, overrides: a, b" in d.citation
 
 
 def test_pooled_prefers_human_in_vivo_and_flags_fallbacks():

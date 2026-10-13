@@ -78,9 +78,13 @@ protons) have their own ids (`bone.cortical.bound_water`, ...), so they are neve
 3. Rows whose note starts with "FLAG" (an unresolved problem, e.g. Wansapura 1999's abstract, whose GM/WM T2
    labels contradict physics and were swapped by assumption) stay in the table but do not pool; the citation
    names them. Since 2026-10-11 (GM T2 at 3 T 96.5 -> 83 ms, WM 75 -> 72 ms).
-4. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
+4. Rows whose note starts with "CALIBRATION" (source kind `calibration`: a value this project fitted to real
+   scans, e.g. fastMRI's 3 T T2w layer profiles, where the literature has none or disagrees with the scans)
+   override the other rows of their tier; the result is marked assumed and its citation says "CALIBRATION,
+   overrides: ...". Since 2026-10-13 (the scalp's soft tissue and fat at 3 T, JOURNAL).
+5. Within the tier, one value per source: the mean of its rows (its regions), its SD the RMS of
    their SDs (an SE becomes SD x sqrt(n)).
-5. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within
+6. Every source counts once: value = median over sources; SD = sqrt(within^2 + between^2), within
    the RMS of the known within-source SDs, between 1.4826 x the median absolute deviation (three or
    more sources) or half the difference (two); None for a single source without an SD. Studies
    differ by method, cohort and region far more than by sampling error, so their sizes are not
