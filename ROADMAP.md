@@ -440,6 +440,9 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       adipose tissue is pure lipid (real adipose tissue holds some water), and there are no eyes,
       vessels with flow or correlated coil noise. The tissue changes alter default `to_phantom`
       output, so they wait for a decision.
+      *2026-10-12 / 13:* IXI-segmented heads (`load_ixi`) bring each subject's own scalp layers
+      (fat unmixed from its T1 / T2 with IXI's water-fat shift undone, soft tissue split skin /
+      muscle by T2), a falx (`add_falx`), and coloured coil noise in the realism score.
 - [x] **Dataset writer.** `blochparty.io.write_dataset(path, result, seq, phantom_meta, coils,
       noise, seed, engine, versions)` in ISMRMRD-compatible HDF5 (k-space per coil with the
       trajectory from `seq.meta`, acquisition header fields we can fill, and a `provenance` group
@@ -448,10 +451,14 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       *Done 2026-10-09:* via ismrmrd-python (extra `io`); one acquisition per ADC run with its
       k-space (`sequence.kspace_trajectory`, equal to pypulseq's), encode indices and
       ACQ_IS_REVERSE; round trip exact (complex64 signal, sequence arrays and meta, `.seq` text).
-- [ ] **First realism number (P2 start).** A classifier two-sample test, real vs simulated,
+- [x] **First realism number (P2 start).** A classifier two-sample test, real vs simulated,
       on fastMRI brain raw k-space through the same reconstruction: a small CNN on magnitude
       images; report AUC. This is the anatomy pillar's benchmark the way `validation/real/` is
       the engine's. Expect a high AUC at first; the point is to have the number move.
+      *Done 2026-10-10 / 13* (`validation/realism/`, docs/JOURNAL.md): CNN AUC 1.0 on the first
+      heads, 0.875 on r27 (IXI heads with a fitted residual layer, the real echo train),
+      histogram test at chance, a blinded reader 7 / 24; `quick.sh` for 10-minute iterations.
+      Open: the posterior skull band, sequence-dependent fat (M6.1), population (age, pathology).
 
 Verify: PD conservation and bit-identity of `to_phantom` defaults (existing tests); tissue
 statistics within 5 % of their targets over 100 samples; deformation Jacobian > 0 everywhere;
