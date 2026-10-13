@@ -615,7 +615,11 @@ if __name__ == "__main__":
         dest = out / f"IXI{i:03d}.npz"
         if dest.exists():
             continue
-        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors, args.residual_smooth_mm, args.save_intensities)
+        try:
+            frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors, args.residual_smooth_mm, args.save_intensities)
+        except Exception as e:  # one subject's failure (2026-10-13: a non-finite map on one of 64) must not end the batch
+            print(f"IXI{i:03d} failed: {type(e).__name__}: {e}", flush=True)
+            continue
         meta = {"ixi_id": i, **demo[i], "atlas": f"brainweb{ATLAS:02d}", "classes": CLASSES, "affine_mm": M.tolist(),
                 "lncc": round(score, 3), "volumes_ml": vol, "files": files, "origin": list(atlas.origin),
                 "voxel": list(atlas.voxel), "shape": list(atlas.shape)}

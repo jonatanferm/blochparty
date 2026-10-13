@@ -2223,3 +2223,12 @@ controls).
   their own spatially smoothed RSS (`--receive-normalise-mm`, next), and read the hi-res profiles again. The
   calibration rows for skin and fat are not written. Also seen: the real scalp is ~2 mm thicker (patients) and the
   real valley never as dark as ours (0.93-1.18 vs 0.52-1.00).
+- **Normalised receive, first geometry (q43: ring 0.12 m, 15 mm behind the occiput, RSS smoothed over 30 mm)**: levels
+  q50 / q75 / CSF / scalp over WM 1.29 / 1.97 / 4.77 / 3.77 (flat 1.30 / 1.98 / 4.78 / 3.40; the ring 1.32 / 2.03 /
+  4.93 / 4.07; real 1.24 / 1.89 / 5.27 / 4.40): the interior stays flat and the scalp gains 11 %. At 384 px the
+  posterior peak goes 2.05 -> 2.72 (real 4.47), the sides 1.81 -> 1.90 (2.98), the front 1.02 -> 1.37 (2.78): the
+  right kind of change, a third of the size. A loop's field falls as (a^2 + d^2)^-3/2 (a its radius, d the distance),
+  so the real excess of ~2 x over the outer 2 cm needs elements 1-2 cm from the scalp all round, which a circle
+  around a 18 x 15 cm head cannot do: an elliptical ring next (q45 / q46), then the geometry fitted on the three
+  0.57 mm profiles. The sides also show our temporalis region too dark (0.62-0.76 vs 0.93-1.0 x WM at 8-12 mm:
+  muscle at T2 30 ms is near black at TE 113; the real temporalis reads ~1 x WM, partial volume with fat and bone).

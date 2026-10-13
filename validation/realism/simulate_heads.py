@@ -409,6 +409,8 @@ def main():
     ap.add_argument("--coil-radius", type=float, default=None,
                     help="receive ring radius [m] (birdcage_sensitivities; default 0.18, the preset 0.14); head coils' "
                          "elements sit at ~0.12-0.14 m")
+    ap.add_argument("--coil-radius-lr", type=float, default=None,
+                    help="the receive ring's left-right semi-axis [m] (an ellipse; --coil-radius is anterior-posterior)")
     ap.add_argument("--receive-normalise-mm", type=float, default=None,
                     help="the scanner's intensity normalisation: receive sensitivities divided by their RSS smoothed over "
                          "this sigma [mm] in the slice plane (normalised_sensitivities); flat inside, the excess under "
@@ -551,7 +553,7 @@ def main():
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP
-            sens = bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius)
+            sens = bp.birdcage_sensitivities(ring_pos, proto["coils"], radius=args.coil_radius, radius_y=args.coil_radius_lr)
             if args.receive_normalise_mm:
                 sens = normalised_sensitivities(sens, ph.pos, args.receive_normalise_mm)
             return seq, ph, sens
@@ -572,7 +574,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "ordering": args.ordering, "train": args.train,
+                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_radius_lr": args.coil_radius_lr, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

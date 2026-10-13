@@ -9,9 +9,10 @@ from torch import Tensor
 
 
 def birdcage_sensitivities(
-    pos: Tensor, n_coils: int = 8, radius: float = 0.18, normalize: bool = False
+    pos: Tensor, n_coils: int = 8, radius: float = 0.18, normalize: bool = False, radius_y: float | None = None
 ) -> Tensor:
-    """(N, C) complex sensitivities of ``n_coils`` elements evenly spaced on a circle.
+    """(N, C) complex sensitivities of ``n_coils`` elements evenly spaced on a circle (an ellipse with semi-axes
+    ``radius`` along x and ``radius_y`` along y when the latter is given: a head array hugging a head).
 
     A smooth analytic model, not an EM solution: magnitude falls off as
     radius / distance and the phase winds around each element. With
@@ -19,7 +20,7 @@ def birdcage_sensitivities(
     """
     theta = 2 * math.pi * torch.arange(n_coils, dtype=pos.dtype, device=pos.device) / n_coils
     dx = pos[:, :1] - radius * torch.cos(theta)
-    dy = pos[:, 1:2] - radius * torch.sin(theta)
+    dy = pos[:, 1:2] - (radius if radius_y is None else radius_y) * torch.sin(theta)
     dist = torch.sqrt(dx**2 + dy**2).clamp_min(0.05 * radius)
     sens = torch.polar(radius / dist, torch.atan2(dy, dx) - theta)
     if normalize:
