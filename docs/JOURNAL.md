@@ -1984,3 +1984,6 @@ The parts of M5 that need no outside access, done while the user was away.
   IXI012 CSF 199 -> 158 mL, same-person brain |log ratio| median 0.055 -> 0.046 (RMS 0.087 -> 0.072), the ratio flat
   with height. Dead end on the way: scalp classes inside the skull (IXI012's intracranial "skin" reads 1.01 x WM in its
   T2: meninges in partial volume, not CSF). 24 heads re-prepared as v13 for r28.
+- **Blinded reader on r27**: the quiz page (12 real + 12 simulated slices, scoring noise, seed 7; local only) scored
+  7 / 24 by the user: below chance (12), P(<= 7) = 0.032 for guessing, two-sided 0.064. A reader cannot pick the
+  simulations out, and whatever cue they used points the wrong way more often than not.
