@@ -2103,3 +2103,30 @@ controls).
   1000 px, mean 9.9 px, bright fraction 0.137 (real 13.9, 11.5, 0.152): count right, pieces smaller.
 - The scratch `profile.py` in the mini's data directory shadowed the stdlib again (LESSONS, 2026-10-11); scripts now
   run from their own directory.
+- **Not the receive ring (q33)**: the v14 heads with a 0.5 m ring centred on the head (`--coil-radius 0.5
+  --coil-gap-mm 405`, a flat receive) keep the posterior / anterior scalp at 1.49 (posterior 0.51, anterior 0.34; real
+  0.47 / 0.45), so the asymmetry is the anatomy (our anterior scalp is dim), and the brain reads 20 % too bright against
+  the scalp's p99 (quartiles 0.232 / 0.288 / 0.438, white-matter mode 0.229; real 0.197 / 0.239 / 0.365, 0.194): the
+  14 cm ring behind the head has been compensating a scalp ~20 % too dim against brain, or a brain too bright. CNN
+  0.825 [0.65, 0.96], W1 0.034 (q29, the same heads with the ring: 0.809, 0.024).
+- **The anterior scalp is the preparation**: along rays at MNI z 10-45 mm in eight v14 heads (scratch scalp_ap.py),
+  the frontal scalp holds 0.9-2.1 mm of labelled fat (IXI334 4.2) in 3.7-7.9 mm of soft tissue, the occipital scalp
+  2.5-4.3 mm in 5.3-10.3; the frontal bone band is 0.8-2.6 mm thick where the occipital is 1.8-6.6 (the forehead bone
+  is ~6 mm in life). Too little frontal fat makes our anterior scalp 0.36 against the real 0.45; too little frontal
+  bone leaves brain and scalp where the real dark band is (the polar map's 1.08-1.14 at the anterior 0.80-0.90).
+  Both sit in prepare_ixi's unmixing at the front, to be checked against IXI's own T1 (fat bright, bone dark).
+- **What the forehead is in IXI012's own scans** (raw T1 and T2, midline rays from the skin inward at three levels
+  above the orbits): skin and fat 2-3 mm (T1 0.5-0.8 x WM), soft tissue 3-4 mm, then a 4-5 mm band bright in T1
+  (0.5-0.7) and intermediate in T2 (0.4-0.5) between two dark tables, then CSF: the frontal diploe. Our rules call bone
+  only what is dark in both (r1 < 0.35, r2 < 0.45), so the diploe becomes "skin" (7.0 mm of skin on the anterior rays
+  against 5.9 at the back; skull 2.4 against 4.5), rendered at skin's 0.77 x WM where the real frontal bone is dark.
+  At the occiput the diploe reads 0.2 in T1 and 0.4-0.56 in T2 and comes out half skull, half skin. The frontal
+  scalp's fat itself is thin in the T1 (~2 mm), so the anterior scalp deficit is partly real anatomy (IXI's young
+  volunteers against fastMRI's patients) and partly the shift-undo at the front. Next: a diploe rule (a band between
+  two dark tables, T1-bright) labelled marrow, with marrow's T2w brightness set from the real scans' calvaria
+  (frontal dark, occipital brighter: the aligned profiles).
+- **Not the bound pool either (q34)**: q33's flat receive with MT off (`--no-mt`, new): white-matter mode 0.332 against
+  0.229 with it, so the simulated incidental MT of the 16-slice train takes 31 % off the brain, inside the 30-45 %
+  multi-slice MTR reported at 3 T (REALISM.md, [21]); the brain's 20 % excess over the scalp under a flat receive is the
+  scalp fat's dimness against brain (the J-coupling route was negative; what is left: adipose water and PD, the
+  diploe below), not missing MT. (CNN 0.897, histogram 0.993, W1 0.088: the ablation, not a candidate.)

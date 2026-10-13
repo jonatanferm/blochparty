@@ -471,15 +471,75 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       *Done 2026-10-10 / 13* (`validation/realism/`, docs/JOURNAL.md): CNN AUC 1.0 on the first
       heads, 0.875 on r27 (IXI heads with a fitted residual layer, the real echo train),
       histogram test at chance, a blinded reader 7 / 24; `quick.sh` for 10-minute iterations.
-      Open: the posterior skull band, sequence-dependent fat (M6.1), population (age, pathology).
+      What is left is M5b.
 
 Verify: PD conservation and bit-identity of `to_phantom` defaults (existing tests); tissue
 statistics within 5 % of their targets over 100 samples; deformation Jacobian > 0 everywhere;
 dataset round trip; a 3 T T1w / T2w / T2*w triplet of ten sampled heads in `examples/`.
 
+## M5b. Closing the realism gap (revised 2026-10-13)
+
+Where it stands: by eye the simulated T2w slices pass (a blinded reader 7 / 24); the CNN still
+separates them, AUC 0.875 on r27, but that number is soft: the CNN's own seed moves it to 0.93,
+against the 11 Skyra scans alone it is 0.94-0.99, and 21 real against 16 simulated people give a
++-0.12 interval. The real set's own scanner splits score 0.42-0.58 (`gap.py controls`), so the
+remaining gap is real, and `validation/realism/gap.py` says where it sits (journal 2026-10-13).
+Items in the order of measured effect over cost; each has its own number to move, checked with
+`quick.sh` (10 min) and `gap.py` before a full run.
+
+1. **The scalp against the brain, and placement** (2 days). Posterior / anterior scalp 1.48
+   against the real 1.03 (ours: anterior 0.36 vs real 0.45, posterior 0.53 vs 0.47), the sides'
+   and front's scalp 0.83-0.93 of real, the interior p99 above the scalp's (1.04; real 0.95, where
+   the scalp fat sets the scale). Not the receive ring: with a flat receive (q33, a 0.5 m ring
+   centred on the head) the ratio stays 1.49 and the whole brain reads 20 % too bright against the
+   scalp (quartiles 0.23 / 0.29 / 0.44 vs real 0.20 / 0.24 / 0.37), so the 14 cm ring behind the
+   head has been standing in for scalp fat that is ~20 % too dim against brain, or brain that is
+   too bright (incidental MT: measure its size with the bound pool off; fat's water content and
+   PD). The anterior deficit is the preparation: in eight v14 heads the frontal scalp carries
+   0.9-2.1 mm of labelled fat (one 4.2) against 2.5-4.3 mm at the back, and the frontal bone band
+   is 0.8-2.6 mm thick against 1.8-6.6 behind (the real forehead bone is ~6 mm, which also
+   explains the anterior band reading 1.08-1.14 x real): prepare_ixi's unmixing at the front,
+   where fat, bone and the undone water-fat shift meet; check the labels against IXI's own T1
+   (fat bright, bone dark) on the forehead and fix the rule. The head centroid sits
+   2.8 px (4.8 mm) further anterior than the real operators place it (AUC 0.83 for that one
+   feature): offset the field of view. Verify: scalp / brain and posterior / anterior within 0.1
+   of real under a flat receive, p99 inside below the scalp's, centroid row 60 +- 3.
+2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
+   the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
+   distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
+   with all seven slices; more real scans: more 3 T AXT2 volumes from fastMRI (the download links
+   have expired: a new request); the CNN averaged over three seeds. Verify: real-vs-real controls
+   at 0.5 +- 0.05; the interval on real vs simulated half as wide.
+3. **Coarse structure at matched CSF** (2-3 days). The heads the CNN catches (older, CSF-rich)
+   carry 1.36-1.40 x the real coarse structure power (0.05-0.45 of Nyquist) at a CSF share that
+   real scans reach with 1.3, and 0.9 x at the top band; their CSF pieces are smaller than real
+   (9.9 vs 11.5 px). Candidates, each a quick run: the sulcal CSF of older subjects through the
+   5 mm slice (IXI's own T2 at 1.2 mm against the real partial volume), the residual's 1.5 mm
+   smoothing (the missing fine texture), the slice profile. Verify: power by band within 10 % of
+   real at matched CSF share; the caught heads' scores fall.
+4. **The posterior band** (1-2 days). 0.72-0.89 of real at 0.80-0.94 of the head radius behind
+   the brain, 1.31 at the posterior edge: deeper and darker than real. Known: not the labels, not
+   the pitch, partly IXI's fat shift (journal 2026-10-12). Open: the occipital diploë (the real
+   aligned profile reads 1.6 where ours is 0.8), the dura and CSF under the occiput. Verify with
+   the aligned posterior profiles (minimum depth and value within 0.5 px / 0.03 of real).
+5. **A second contrast** (3-5 days). The heads must hold across sequences, or the T2w fit is a
+   fit. fastMRI's 3 T AXFLAIR (15 volumes on the mini) and AXT1PRE (11) score the same heads under
+   inversion recovery and T1 weighting with nothing re-tuned; the residual layer then needs the
+   subject's T1 scan too (IXI has it). Expect FLAIR to expose T1 values, CSF nulling and the
+   bound pool. Verify: a CNN AUC per contrast, reported together; a blinded reader on FLAIR.
+6. **Population**: fastMRI's patients are older, larger-headed and some carry lesions. Subject
+   choice (item 2) covers size and CSF; pathology is out of scope until a lesion model exists.
+
+After items 1-2 the realism loop becomes a regression (a nightly quick run with its numbers in
+the journal) and M7's generation driver starts; items 3-6 continue beside it. The physics backlog
+(M6) is ordered by what M7's protocol families and item 5 need, not by this benchmark, which
+cannot see motion, pTx or orientation effects.
+
 ## M6. Physics backlog, in order (each 1 to 3 days)
 
-Ordered by what training data and sequence design will hit first. Each item ships with the
+Ordered by what training data and sequence design will hit first (revised 2026-10-13: 6.1 is
+closed as a negative result; 6.4 moves up because fastMRI's post-contrast T1w scans give it a
+benchmark; 6.2, 6.3 and 6.5 wait for a protocol family that needs them). Each item ships with the
 phantom input that feeds it (M5 schema) and its reference. Each is opt-in, core first, Metal
 second, parity test third; the Metal adjoint either differentiates it (gradient check against the
 core) or raises, and the engine matrix says which.
@@ -528,9 +588,11 @@ core) or raises, and the engine matrix says which.
    readouts in the builders with gridding reconstruction; SLR pulses; respiration coupled to a
    low-order field model from a breathing phantom (M6.2 and `drift.respiration` together).
 
-## M7. Training data and agentic design (after M5 and M6.1 to 6.3)
+## M7. Training data and agentic design (after M5b items 1-2; revised 2026-10-13)
 
-The two downstream goals. Only what their first users need; details when we get there.
+The two downstream goals. Only what their first users need; details when we get there. The
+generation driver comes first: it turns the realism loop into a nightly regression and shows
+which physics (M6) the protocol families call for.
 
 - [ ] Generation driver: sample anatomy (M5) → sample a protocol family (builders, or a `.seq`
       from a library) → sample scanner imperfections (B1+, B0 shim, GIRF from benchmark 7, coil

@@ -348,7 +348,10 @@ def refine_csf(frac, t2w, valid, origin=None, voxel=None):
                   "csf_voxels_refined": int(sel.sum()), "csf_ratio_after_before": round(float(frac[i["csf"]].sum()) / before, 3)}
 
 
-def residual_maps(frac, t2w, pdw, valid, origin, voxel):
+RESIDUAL_SMOOTH_MM = 1.5  # --residual-smooth-mm: the residual's within-tissue smoothing (1.5 since v11; a test of the fine texture)
+
+
+def residual_maps(frac, t2w, pdw, valid, origin, voxel, smooth_mm=None):
     """Per-voxel multipliers on the simulator's T2 and PD that make its tissue mixture reproduce this subject's own
     dual-echo TSE (TE 8 / 100 ms, TR 5.726 s): the echo ratio's log L = ln(S_8 / S_100) ~ (100 - 8) ms / T2; L is put
     on its absolute scale by deep ventricular CSF (predicted 0.048 with T2 1.91 s), t2_scale = L_predicted / L_measured
@@ -400,7 +403,7 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     # between tissues (a nucleus's edge, the cortex) stay where the anatomy puts them
     dominant = np.argmax(np.stack([f[k] for k in names]), 0)
 
-    def smooth(v, m, sigma=1.5):
+    def smooth(v, m, sigma=RESIDUAL_SMOOTH_MM if smooth_mm is None else smooth_mm):
         out = np.zeros_like(v)
         for i in np.unique(dominant[m]):
             mi = m & (dominant == i)
@@ -454,7 +457,7 @@ def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     return t2_scale.astype(np.float32), np.exp(log_pd).astype(np.float32), diag
 
 
-def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
+def prepare(ixi_id, root, atlas, fixed2, partial_volume=True, residual_smooth_mm=None):
     t0 = time.time()
     t1p = next((root / "T1").glob(f"IXI{ixi_id:03d}-HH-*-T1.nii.gz"))
     t2p = next((root / "T2").glob(f"IXI{ixi_id:03d}-HH-*-T2.nii.gz"))
@@ -559,7 +562,8 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     frac, csf_diag = refine_csf(frac, t2w, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
     if pd_onto is not None:  # both echoes corrected by the T2's bias field (one coil, one acquisition)
         pdw = np.zeros(shape, np.float32); pdw[idx] = np.maximum(pd_onto[idx], 1e-6) * np.exp(-bias[1])
-        t2s, pds, diag = residual_maps(frac, t2w, pdw, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
+        t2s, pds, diag = residual_maps(frac, t2w, pdw, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel, residual_smooth_mm)
+        diag["smooth_mm"] = RESIDUAL_SMOOTH_MM if residual_smooth_mm is None else residual_smooth_mm
         maps = {"t2_scale": t2s, "pd_scale": pds}
     scale = abs(np.linalg.det(M[:3, :3])) * 1e-3  # mL per MNI voxel in the subject's own size
     vol = {c: round(float(frac[i].sum()) * scale, 1) for i, c in enumerate(CLASSES) if c != "background"}
@@ -576,6 +580,8 @@ if __name__ == "__main__":
     ap.add_argument("--count", type=int, default=None, help="this many subjects spread over the ages")
     ap.add_argument("--posteriors", action="store_true", help="keep the EM posteriors as fractions (no partial-volume unmixing)")
     ap.add_argument("--out", type=Path, default=None, help="output folder (default root/prepared)")
+    ap.add_argument("--residual-smooth-mm", type=float, default=None,
+                    help=f"the residual maps' within-tissue smoothing [mm] (default {RESIDUAL_SMOOTH_MM})")
     args = ap.parse_args()
     demo = demographics(args.root)
     ids = sorted(int(p.name[3:6]) for p in (args.root / "T1").glob("*-HH-*-T1.nii.gz"))
@@ -596,7 +602,7 @@ if __name__ == "__main__":
         dest = out / f"IXI{i:03d}.npz"
         if dest.exists():
             continue
-        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors)
+        frac, M, score, vol, files, secs, maps = prepare(i, args.root, atlas, (img, aff), not args.posteriors, args.residual_smooth_mm)
         meta = {"ixi_id": i, **demo[i], "atlas": f"brainweb{ATLAS:02d}", "classes": CLASSES, "affine_mm": M.tolist(),
                 "lncc": round(score, 3), "volumes_ml": vol, "files": files, "origin": list(atlas.origin),
                 "voxel": list(atlas.voxel), "shape": list(atlas.shape)}

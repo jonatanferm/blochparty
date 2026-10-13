@@ -347,6 +347,7 @@ def main():
     ap.add_argument("--out", type=Path, default=Path.home() / "data" / "realism_sim")
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")
+    ap.add_argument("--no-mt", action="store_true", help="ablation: bound pool off even under --preset realistic")
     ap.add_argument("--table", choices=("default", "tissuedb"), default="default")
     ap.add_argument("--scalp", choices=("brainweb", "layered", "layered_drawn"), default=None,
                     help="layered: BrainWeb's skin class split into skin and subcutaneous fat (anatomy.layer_scalp); "
@@ -355,6 +356,10 @@ def main():
                     help="anthropometric: heads scaled to ANSUR II breadth and length (BrainWeb is MNI-sized); "
                          "_shell: by scaling the skull's contents, the skull and scalp keeping their thickness")
     ap.add_argument("--centre", action="store_true", help="field of view centred on the head (as an operator would)")
+    ap.add_argument("--centre-offset-mm", type=float, default=None,
+                    help="with --centre: the field of view's centre this far anterior of the head's bounding-box centre "
+                         "(the real operators leave the head 2.8 px = 4.8 mm further posterior than a centred box, r27 "
+                         "vs fastMRI, gap.py features: the preset's default)")
     ap.add_argument("--stack", choices=("landmarks", "protocol"), default="landmarks", help="slice positions (stack())")
     ap.add_argument("--yaw-sd", type=float, default=0.0, help="head yaw SD [deg] (sample_head(yaw_sd=))")
     ap.add_argument("--pitch", default=None, help="mean,sd [deg], nose down positive (sample_head(pitch=))")
@@ -421,6 +426,8 @@ def main():
         ap.error("--train header needs --ordering linear_full (the real scans' 396-line linear order)")
     if args.preset == "realistic":
         args.multislice = args.mt = args.centre = True
+        args.mt = not args.no_mt
+        args.centre_offset_mm = 4.8 if args.centre_offset_mm is None else args.centre_offset_mm
         args.table, args.size, args.stack, args.yaw_sd = "tissuedb", "anthropometric_shell", "protocol", 3.8
         # BrainWeb lumps scalp fat into "skin": a drawn layer; IXI heads keep their own scalp fat (prepare_ixi)
         args.scalp = args.scalp or ("brainweb" if args.source == "ixi" else "layered_drawn")
@@ -498,6 +505,7 @@ def main():
         zs = stack(head.anatomy, args.stack, MONRO_BELOW_BODIES if args.stack_offset_mm is None else args.stack_offset_mm * 1e-3,
                    head.meta["ventricle_landmark"][0] if args.source == "ixi" else None)
         cx, cy = centre(head.anatomy, zs) if args.centre else (0.0, 0.0)
+        cy += (args.centre_offset_mm or 0.0) * 1e-3
         ring = 0.0 if args.coil_gap_mm is None else coil_offset(head.anatomy, zs, cy, args.coil_radius, args.coil_gap_mm * 1e-3)
         kspace, timing = {}, []
 
