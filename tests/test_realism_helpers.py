@@ -108,3 +108,29 @@ def test_header_train_matches_the_real_echo_blocks():
     assert echo[ky == 0][0] == 10  # 0-based: echo 11
     assert set(ky[1:][np.diff(echo) != 0].tolist()) == {-47, -28, -9, 10, 29, 48}
     assert seq.meta["te"] == pytest.approx(11 * 0.01026)
+
+
+def test_refine_csf_takes_the_csf_share_from_the_t2():
+    """A synthetic brain: white matter, a deep CSF block (the calibration; its T2 at x1.1 the table, as IXI's MT makes
+    it), and a sulcal region the segmentation calls 50 % CSF / 50 % grey matter whose T2 was made with 30 % CSF. The
+    refined CSF share there is ~0.3, the grey matter takes the rest, and the deep CSF and white matter are unchanged."""
+    from blochparty import tissuedb
+    table = tissuedb.tissue_table(3.0)
+    tr, te = P.IXI_T2["tr"], P.IXI_T2["te"]
+    sig = {c: table[c].pd.mean * (1 - np.exp(-tr / table[c].t1.mean)) * np.exp(-te / table[c].t2.mean) for c in ("csf", "gm", "wm")}
+    n = (20, 20, 20)
+    k = {c: P.CLASSES.index(c) for c in P.CLASSES}
+    frac = np.zeros((len(P.CLASSES),) + n, np.float32)
+    frac[k["wm"]] = 1
+    deep = (slice(2, 10),) * 3
+    sulcus = (slice(12, 18), slice(12, 18), slice(12, 18))
+    frac[k["wm"]][deep] = 0; frac[k["csf"]][deep] = 1
+    frac[k["wm"]][sulcus] = 0; frac[k["csf"]][sulcus] = .5; frac[k["gm"]][sulcus] = .5
+    t2w = np.full(n, sig["wm"], np.float32)
+    t2w[deep] = 1.1 * sig["csf"]
+    t2w[sulcus] = .3 * 1.1 * sig["csf"] + .7 * sig["gm"]
+    out, diag = P.refine_csf(frac, t2w * 2.7, np.ones(n, bool))
+    assert np.median(out[k["csf"]][sulcus]) == pytest.approx(.3, abs=.01)
+    assert np.median(out[k["gm"]][sulcus]) == pytest.approx(.7, abs=.01)
+    assert np.allclose(out[k["csf"]][deep], 1) and np.allclose(out.sum(0), 1, atol=1e-5)
+    assert diag["csf_over_wm_deep"] == pytest.approx(1.1 * sig["csf"] / sig["wm"], rel=1e-3)

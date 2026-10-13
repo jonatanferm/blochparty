@@ -8,7 +8,8 @@ per channel assigns the classes. Priors: BrainWeb 04's head classes smoothed 2 m
 smoothed 2 mm and split among CSF / grey / white by their 8 mm proportions, so the subject's intensities,
 not BrainWeb's sulci, place the cortex; inside the brain CSF / grey / white partial volumes are then unmixed from
 the bias-corrected T1 and T2 against local pure intensities (``unmix_partial_volume``; the EM posterior is close
-to a step in intensity and doubled the CSF in boundary voxels). Outside the skull the head classes come from rules on the
+to a step in intensity and doubled the CSF in boundary voxels), and every CSF-containing voxel's CSF share is set
+from the T2 against the subject's ventricular CSF (``refine_csf``). Outside the skull the head classes come from rules on the
 bias-corrected intensities relative to the subject's white matter (the EM swapped them in the thin layers):
 bone dark in both; fat by unmixing T2 between soft tissue (0.9 x white matter) and the subject's own pure
 fat (the median T2 of T1-bright head tissue), with a bright T1 (inside the bone shell: marrow); soft tissue the rest,
@@ -271,6 +272,41 @@ def soft_references():
 IXI_PD_TE = 0.008  # the dual-echo TSE's first echo (brain-development.org/scanner-philips-medical-systems-intera-3t)
 
 
+def refine_csf(frac, t2w, valid):
+    """Each voxel's CSF fraction from the subject's own T2 (TE 100 ms, where CSF is ~4 x white matter): the observed
+    signal (over the white-matter median) between the subject's pure CSF (deep ventricles, eroded twice) and the
+    voxel's other tissues at the simulator's IXI-T2 values (their mix renormalised; grey matter where they are under
+    5 %), clipped to [0, 1]; the other tissues keep their proportions. Only voxels the segmentation gave CSF. The
+    unmixing calibrates CSF on the ventricles' T2, but the 1 mm convexity voxels it calls pure are not: IXI012's
+    labels predicted 30-50 % more CSF-like voxels (> 2.5 x WM) than its T2 shows at MNI z 30-70, its "pure" CSF there
+    read 0.86-0.88 of the prediction against 1.04 low down (2026-10-13). Returns the fractions and a summary."""
+    from blochparty import tissuedb
+    table = tissuedb.tissue_table(3.0)
+    tr, te = IXI_T2["tr"], IXI_T2["te"]
+    i = {c: CLASSES.index(c) for c in CLASSES}
+    sig = np.array([table[c].pd.mean * (1 - np.exp(-tr / table[c].t1.mean)) * np.exp(-te / table[c].t2.mean)
+                    if c in table and c != "background" else 0. for c in CLASSES], np.float32)
+    sig /= sig[i["wm"]]
+    s = t2w / np.median(t2w[(frac[i["wm"]] > .9) & valid])
+    deep = ndimage.binary_erosion(frac[i["csf"]] > .95, iterations=2) & valid
+    s_csf = float(np.median(s[deep]))
+    sel = valid & (frac[i["csf"]] > .01) & ~deep
+    f = frac[:, sel]
+    total = 1 - f[i["background"]]
+    rest = f.copy(); rest[i["csf"]] = 0; rest[i["background"]] = 0
+    rs = rest.sum(0)
+    s_rest = np.where(rs > .05, (rest * sig[:, None]).sum(0) / np.maximum(rs, 1e-6), sig[i["gm"]])
+    csf_new = np.clip((s[sel] - s_rest) / np.maximum(s_csf - s_rest, 1e-3), 0, 1) * total
+    scale = np.where(rs > .05, (total - csf_new) / np.maximum(rs, 1e-6), 0.)
+    out = f * np.where(np.arange(len(CLASSES))[:, None] == i["background"], 1., scale[None])
+    out[i["csf"]] = csf_new
+    out[i["gm"]] += np.where(rs > .05, 0., total - csf_new)
+    before = float(frac[i["csf"]].sum())
+    frac = frac.copy(); frac[:, sel] = out
+    return frac, {"csf_over_wm_deep": round(s_csf, 3), "csf_table_over_wm": round(float(sig[i["csf"]]), 3),
+                  "csf_voxels_refined": int(sel.sum()), "csf_ratio_after_before": round(float(frac[i["csf"]].sum()) / before, 3)}
+
+
 def residual_maps(frac, t2w, pdw, valid, origin, voxel):
     """Per-voxel multipliers on the simulator's T2 and PD that make its tissue mixture reproduce this subject's own
     dual-echo TSE (TE 8 / 100 ms, TR 5.726 s): the echo ratio's log L = ln(S_8 / S_100) ~ (100 - 8) ms / T2; L is put
@@ -475,8 +511,9 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
             frac[i[c]][~head] = 0
     frac /= frac.sum(0, keepdims=True)
     maps, diag = {}, None
+    t2w = np.zeros(shape, np.float32); t2w[idx] = np.exp(y[1] - bias[1])  # bias-corrected T2
+    frac, csf_diag = refine_csf(frac, t2w, valid)
     if pd_onto is not None:  # both echoes corrected by the T2's bias field (one coil, one acquisition)
-        t2w = np.zeros(shape, np.float32); t2w[idx] = np.exp(y[1] - bias[1])
         pdw = np.zeros(shape, np.float32); pdw[idx] = np.maximum(pd_onto[idx], 1e-6) * np.exp(-bias[1])
         t2s, pds, diag = residual_maps(frac, t2w, pdw, valid, tuple(np.asarray(origin) * 1e-3), atlas.voxel)
         maps = {"t2_scale": t2s, "pd_scale": pds}
@@ -484,7 +521,7 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     vol = {c: round(float(frac[i].sum()) * scale, 1) for i, c in enumerate(CLASSES) if c != "background"}
     t2_motion = {"shift_mm": np.round(R2[:3, 3], 2).tolist(), "rotation_deg": round(float(np.degrees(np.arccos(np.clip((np.trace(R2[:3, :3]) - 1) / 2, -1, 1)))), 2),
                  "gradient_r": round(t2score, 3)}
-    files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion} | ({"pd": pdp.name, "residual": diag} if diag else {})
+    files = {"t1": t1p.name, "t2": t2p.name, "t2_to_t1": t2_motion, "csf_refined": csf_diag} | ({"pd": pdp.name, "residual": diag} if diag else {})
     return frac, M, score, vol, files, round(time.time() - t0), maps
 
 
