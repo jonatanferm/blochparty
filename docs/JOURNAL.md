@@ -2198,3 +2198,15 @@ controls).
   relaxation for the soft tissue; CPMG fat T2). Next quick runs: skin's T2 90 ms with the MT x1.3 (q41), plus fat 170 ms
   (q42), against the four levels, the edge profile and W1; if they land, the values enter the table as calibrations
   on fastMRI's 0.57 mm profiles, flagged as such.
+- **q40, the residual smoothed 0.5 mm**: bands 1.04 / 1.11 / 1.13 / 1.03 / 0.94 / 0.97 x real (q36 at 0.75 mm: ... 0.89 /
+  0.92; q35 at 1.5: ... 0.82 / 0.86): the fine structure is within 3-6 % of real, the mid band 13 % over; W1 0.0276
+  (q35 0.0245), CNN 0.876 (noise). 0.5 mm becomes prepare_ixi's default for the next preparation (v16, in progress,
+  keeps 1.5; r31 runs on it).
+- **q41 / q42, the scalp under a flat receive with MT x1.3** (skin T2 90 ms; + fat T2 170 ms): levels over WM
+  q50 / q75 / CSF / scalp 1.34 / 2.10 / 5.27 / 3.98 and 1.33 / 2.10 / 5.26 / 4.24 (real 1.24 / 1.89 / 5.27 / 4.40):
+  CSF exact, the scalp within 4 % with both changes, but grey matter 8-11 % high over white (5 % at MT x1 in q39, the
+  rest from the stronger MT, which darkens WM more than GM); W1 0.038 / 0.033 against the ring's 0.025, the posterior
+  scalp 0.58-0.59 vs 0.47 (anatomy; the v15 heads). So the flat receive needs the whole scalp calibration at once and a
+  milder MT (x1.15 would put GM / WM within ~1 % and CSF / WM within ~4 %); decided after r31 (64 v16 heads, the ring)
+  gives the scaled baseline, as r32 with the flat receive, MT x1.15, skin 90 ms, fat 170 ms, each value flagged as a
+  calibration on fastMRI's levels.

@@ -348,7 +348,7 @@ def refine_csf(frac, t2w, valid, origin=None, voxel=None):
                   "csf_voxels_refined": int(sel.sum()), "csf_ratio_after_before": round(float(frac[i["csf"]].sum()) / before, 3)}
 
 
-RESIDUAL_SMOOTH_MM = 1.5  # --residual-smooth-mm: the residual's within-tissue smoothing (1.5 since v11; a test of the fine texture)
+RESIDUAL_SMOOTH_MM = 0.5  # --residual-smooth-mm: the residual maps' within-tissue smoothing; 1.5 from v11 to v16, 0.5 since 2026-10-13 (q36 / q40: the fine structure bands 0.82 / 0.86 -> 0.94 / 0.97 x real)
 
 
 def residual_maps(frac, t2w, pdw, valid, origin, voxel, smooth_mm=None):

@@ -508,15 +508,20 @@ Items in the order of measured effect over cost; each has its own number to move
    labelled skin under the T2's displaced fat and is bone again (a29d685: IXI012 2.2 -> 3.4 mm),
    in the v16 heads; the scalp / brain level and the posterior / anterior ratio remain. Over the
    white-matter mode (gap.py, journal): with a flat receive the brain's quartiles match real and
-   CSF is 9 %, the scalp 21 % dim; the ring had been masking that. Next: flat receive in the
-   preset, then MT (31 % here, 30-45 % reported) and fat against the four levels.
+   CSF is 9 %, the scalp 21 % dim; the ring had been masking that. Tested (q37-q42): MT x1.3
+   puts CSF / WM on real but GM / WM 8-11 % high; skin T2 90 ms and fat T2 170 ms bring the scalp
+   within 4 %. Next: r32 = flat receive + MT x1.15 + the scalp values, against r31's baseline,
+   the values entering the table as flagged calibrations if the levels and W1 both land.
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
    with all seven slices; more real scans: more 3 T AXT2 volumes from the fastMRI validation archive
    (streamed with the existing link; `fetch_fastmri.py`); the CNN averaged over three seeds. Verify: real-vs-real controls
    at 0.5 +- 0.05; the interval on real vs simulated half as wide.
-3. **Coarse structure at matched CSF** (2-3 days). The heads the CNN catches (older, CSF-rich)
+3. **Coarse structure at matched CSF** (2-3 days). *2026-10-13:* mostly closed by refine_csf and
+   the subjects (r30: coarse bands 1.03 / 1.05 / 0.99 x real); the fine bands were 15 % short and
+   the residual's smoothing at 0.5 mm instead of 1.5 brings them to 0.94 / 0.97 (q40; the new
+   default, from v17 on). The heads the CNN catches (older, CSF-rich)
    carry 1.36-1.40 x the real coarse structure power (0.05-0.45 of Nyquist) at a CSF share that
    real scans reach with 1.3, and 0.9 x at the top band; their CSF pieces are smaller than real
    (9.9 vs 11.5 px). Candidates, each a quick run: the sulcal CSF of older subjects through the
