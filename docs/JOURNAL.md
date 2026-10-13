@@ -2186,3 +2186,15 @@ controls).
   bands up 8 %, the coarse unchanged; CNN 0.792 [0.59, 0.95] (q35 0.872; noise), W1 0.0253 (0.0245). Half the fine
   deficit; a 0.5 mm variant (q40) follows, with the v10 lesson in mind (the unsmoothed residual carried IXI's noise at
   1.4-2.4 x real fine texture). The 64-head v16 preparation keeps 1.5 mm; the default moves with the next preparation.
+- **Flat receive on the v15 heads, three ways** (q39 alone, q37 with the bound-pool fractions x1.3, q38 with fat T2
+  170 ms; levels over the white-matter mode, real q50 / q75 / CSF / scalp = 1.24 / 1.89 / 5.27 / 4.40): q39 1.30 / 1.98
+  / 4.78 / 3.40; q37 1.32 / 2.09 / 5.26 / 3.78; q38 1.30 / 1.98 / 4.77 / 3.60. The stronger MT puts CSF / WM exactly on
+  real but lifts q75 / WM 10 % (grey matter loses less to MT than white); fat's T2 moves the scalp 6 %; neither
+  reaches it: the scalp stays 14-23 % dim against white matter under a flat receive, and the posterior / anterior
+  ratio 1.44 (these heads lack the frontal bone rule). CNN 0.78 / 0.90 / 0.74 (noise), W1 0.040 / 0.029 / 0.036 (the ring's
+  q35: 0.025; a flat receive without the scalp fixed is worse on W1). Against the real 0.57 mm layers (skin 0.8-1.1,
+  the soft tissue under the fat 1.9, fat 5.0 x WM) our classes give skin 0.71, muscle 0.16, fat 3.2: the scalp's soft
+  tissue (galea, loose connective tissue) is 2-3 x too dark and the fat 1.5 x; both are flagged proxies (muscle's
+  relaxation for the soft tissue; CPMG fat T2). Next quick runs: skin's T2 90 ms with the MT x1.3 (q41), plus fat 170 ms
+  (q42), against the four levels, the edge profile and W1; if they land, the values enter the table as calibrations
+  on fastMRI's 0.57 mm profiles, flagged as such.
