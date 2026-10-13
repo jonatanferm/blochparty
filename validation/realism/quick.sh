@@ -14,13 +14,14 @@ UV="${UV:-$HOME/.local/bin/uv}"
 OUT="${OUT:-$HOME/data}"
 D=validation/anatomy/data/ixi
 tag=$1; shift
-if [ -n "$1" ] && [ -d "$D/$1" ]; then rm -rf $D/prepared && cp -R $D/$1 $D/prepared; echo "prepared = $1"; shift; fi
-subs=($(ls $D/prepared | sed 's/IXI0*\([0-9]*\).npz/\1/' | sort -n)); n=${#subs[@]}
+P=$D/prepared
+if [ -n "$1" ] && [ -d "$D/$1" ]; then P=$D/$1; echo "prepared = $1"; shift; fi  # its own directory: no copying (LESSONS 2026-10-13)
+subs=($(ls $P | sed 's/IXI0*\([0-9]*\).npz/\1/' | sort -n)); n=${#subs[@]}
 t0=$(date +%s); echo "$tag started $(date)"
 for s in $(seq 200 2 214); do
   i=$((s - 200)); sub=${subs[$(( (i * n) / 16 ))]}
   $UV run python -W ignore validation/realism/simulate_heads.py --seeds $s-$s --slices 2-6:2 --preset realistic \
-    --quality real_fine --spins 2,2,2 --source ixi --subject $sub --ordering linear_full --train header --residual \
+    --quality real_fine --spins 2,2,2 --source ixi --prepared $P --subject $sub --ordering linear_full --train header --residual \
     --out "$OUT/$tag" "$@" >> "$OUT/$tag.log" 2>&1
 done
 t1=$(date +%s); echo "$tag simulated: $(ls "$OUT/$tag" | wc -l | tr -d ' ') heads in $(( (t1 - t0) / 60 )) min"

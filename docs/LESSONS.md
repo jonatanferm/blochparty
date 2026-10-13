@@ -1208,6 +1208,11 @@ says where it came from so it can be re-checked.
   streams into a second directory of symlinks plus new files (`~/data/fastmri_more` on the mini) and only the runs
   meant for the larger benchmark point `--fastmri` at it.
 
+- **Queued jobs must not share a working directory** (2026-10-13): `quick.sh` swaps `prepared/` (rm, copy) to pick its
+  head set, and two chained scripts did the same while r31 was reading heads from it: 50 of 57 heads failed with
+  "No such file" and a quick run lost its own heads the same way. Each run names its own input directory
+  (`simulate_heads --prepared`), and nothing copies into a directory another process reads.
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts

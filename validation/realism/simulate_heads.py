@@ -444,6 +444,9 @@ def main():
     ap.add_argument("--stack-offset-mm", type=float, default=None,
                     help="protocol stack: slice 0 this far below the ventricle bodies' largest cross-section "
                          f"(default {MONRO_BELOW_BODIES * 1e3:g} mm)")
+    ap.add_argument("--prepared", type=Path, default=None,
+                    help="with --source ixi: the directory of prepared heads (default <root>/ixi/prepared); runs queued on one "
+                         "machine each name their own instead of swapping one directory (LESSONS 2026-10-13)")
     ap.add_argument("--source", choices=("brainweb", "ixi"), default="brainweb",
                     help="ixi: heads segmented from IXI 3 T subjects (validation/anatomy/prepare_ixi.py); with the "
                          "preset: their own size, sulci and ventricles, no rim calibration")
@@ -521,7 +524,7 @@ def main():
             continue
         t0 = time.perf_counter()
         proto = protocols[seed % len(protocols)]
-        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp,
+        head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3, table=table, scalp=args.scalp, ixi_prepared=args.prepared,
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
                               ventricle_age=vage, pitch=pitch, source=args.source, falx=args.falx,
                               interpolation=args.interp_order, residual=args.residual, dermis=args.dermis,
@@ -577,7 +580,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_radius_lr": args.coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "ordering": args.ordering, "train": args.train,
+                "age": head.meta.get("age"), "source": args.source, "prepared": None if args.prepared is None else str(args.prepared), "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": args.coil_radius, "coil_radius_lr": args.coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": args.coil_gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": args.receive_normalise_mm, "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

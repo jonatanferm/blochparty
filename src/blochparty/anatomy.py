@@ -668,25 +668,28 @@ def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
 IXI_MIN_LNCC = 0.15  # registration quality below which a prepared head is not drawn (IXI598, 0.112: CSF all over)
 
 
-def ixi_subjects(root) -> list[int]:
-    """IXI ids with a prepared head under ``root`` (validation/anatomy/prepare_ixi.py writes root/prepared)
-    whose registration to BrainWeb's frame reached ``IXI_MIN_LNCC`` (the rest segmented badly)."""
+def ixi_subjects(root, prepared=None) -> list[int]:
+    """IXI ids with a prepared head under ``root`` (validation/anatomy/prepare_ixi.py writes root/prepared; ``prepared``
+    names another directory of prepared heads) whose registration to BrainWeb's frame reached ``IXI_MIN_LNCC`` (the
+    rest segmented badly)."""
     out = []
-    for p in sorted((Path(root) / "prepared").glob("IXI*.npz")):
+    for p in sorted(Path(prepared if prepared is not None else Path(root) / "prepared").glob("IXI*.npz")):
         if json.loads(str(np.load(p)["meta"]))["lncc"] >= IXI_MIN_LNCC:
             out.append(int(p.stem[3:]))
     return out
 
 
-def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32, residual: bool = False) -> tuple[Anatomy, dict]:
+def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32, residual: bool = False,
+             prepared=None) -> tuple[Anatomy, dict]:
     """An IXI 3 T head (Hammersmith, IXI dataset, CC BY-SA 3.0) prepared by validation/anatomy/prepare_ixi.py:
     BrainWeb's 12 classes on BrainWeb's 1 mm MNI grid, segmented from the subject's own T1 and T2 (EM with
     BrainWeb priors, affine registration), so the MNI-based steps (deep grey regions, ventricle prior, slice
     stack) apply. Returns the anatomy (resampled to ``voxel`` if given) and the preparation's meta: age,
     sex, the affine (MNI mm -> the subject's world mm; its scale is the subject's size), volumes. ``residual``: also
     the per-voxel T2 / PD multipliers fitted to the subject's own dual-echo TSE (``t2_scale``, ``pd_scale`` maps, if
-    prepared; ``to_phantom`` applies them)."""
-    path = Path(root) / "prepared" / f"IXI{int(subject):03d}.npz"
+    prepared; ``to_phantom`` applies them). ``prepared``: a directory of prepared heads other than root/prepared
+    (runs that queue on one machine must not share and swap one directory; LESSONS 2026-10-13)."""
+    path = Path(prepared if prepared is not None else Path(root) / "prepared") / f"IXI{int(subject):03d}.npz"
     data = np.load(path)
     meta = json.loads(str(data["meta"]))
     raw = data["fractions"]
@@ -1749,7 +1752,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
                 source: str = "brainweb", interpolation: int = 1, residual: bool = False,
-                dermis: bool = False) -> DigitalPhantom:
+                dermis: bool = False, ixi_prepared=None) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1812,14 +1815,14 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     if source == "ixi":
         ixi_root = Path(root) / "ixi"
         if subject is None:
-            pool = ixi_subjects(ixi_root)
+            pool = ixi_subjects(ixi_root, ixi_prepared)
             subject = pool[int(np.random.default_rng(streams[0]).integers(len(pool)))]
         subject = int(str(subject).removeprefix("IXI"))
     elif subject is None:
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     age_draw = None
     if source == "ixi":
-        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype, residual=residual)
+        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype, residual=residual, prepared=ixi_prepared)
     elif age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
         years = float(age) if np.isscalar(age) else float(np.random.default_rng(
             np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
