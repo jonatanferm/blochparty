@@ -504,6 +504,9 @@ Items in the order of measured effect over cost; each has its own number to move
    2.8 px (4.8 mm) further anterior than the real operators place it (AUC 0.83 for that one
    feature): offset the field of view. Verify: scalp / brain and posterior / anterior within 0.1
    of real under a flat receive, p99 inside below the scalp's, centroid row 60 +- 3.
+   *2026-10-13:* the placement is done (q35: row 60.1, AUC 0.48; 7a53466); the frontal bone was
+   labelled skin under the T2's displaced fat and is bone again (a29d685: IXI012 2.2 -> 3.4 mm),
+   in the v16 heads; the scalp / brain level and the posterior / anterior ratio remain.
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality

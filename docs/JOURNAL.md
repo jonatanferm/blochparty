@@ -2149,3 +2149,10 @@ controls).
   bone 2.4 -> 3.6 mm, occipital 4.5 -> 5.2 mm along the rays; 96 mL of such voxels in the head outside the brain, 58
   of them below MNI z 0 (face, sinuses). The 64-head v16 preparation was stopped (7 heads in) and restarts with the
   rule; the orbit's vitreous is found before the rule so it stays an eye.
+- **Placement fixed (q35)**: with the field of view 4.8 mm anterior of the head's box (`--centre-offset-mm`, the preset's
+  default now) the v15 heads' centroid row is 60.1 +- 1.2 against the real 60.4 +- 2.6 (that feature's AUC 0.83 -> 0.48);
+  CNN 0.872 [0.70, 0.99], W1 0.0245 (q29 0.809 / 0.0236: within the quick CNN's noise). Still there, now the largest
+  single features: posterior / anterior scalp 0.59 / 0.32 against 0.47 / 0.45 (AUC 0.76 / 0.20), the quartiles 10-15 %
+  high (0.215 / 0.275 / 0.420 vs 0.197 / 0.239 / 0.365) with the scalp as the p99 scale.
+- **v16** (the 64 selected subjects, the bone rule, prepared on the mini): IXI012's anterior rays now 3.4 mm of bone (2.2
+  before) and 5.4 mm of soft tissue (6.2), posterior 4.8 (4.2); 64 mL of bone under displaced fat with the 3 mm guard.
