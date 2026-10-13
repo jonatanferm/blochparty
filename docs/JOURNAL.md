@@ -2255,3 +2255,16 @@ controls).
   the 1 / d ring under-boosts the scalp alone. The anterior scalp peak stays short in both (2.0 vs 2.78): the
   frontal scalp's composition, not the coil. r32 runs with q45's receive (1 / d ellipse); the element model needs
   the real array's geometry (element size and spacing) rather than another guess.
+- **The real set grown to 34 scans** (13 new 3 T AXT2 volumes from the stream; `~/data/fastmri_more`): r30 re-scored
+  against it reads CNN 0.904 (0.748 against the 21), controls 0.54 / 0.55, W1 0.0138. The new scans' periphery is
+  dimmer: real scalp over WM 4.06 against the old set's 4.37, posterior scalp 0.44 vs 0.47, while r30's ring gives
+  4.21 — brighter than this real set. The real scans are not one receive: sites and coils differ, and some may not
+  be intensity-normalised at all. The receive calibration must be judged per scanner model / coil count, not on the
+  pooled set (scratch realscans.py lists them).
+- **The 34 scans one by one** (scratch realscans.py on score_r30m): Biograph mMR 14 coils (5), Prisma 16 / 20 (7),
+  Skyra 12 / 16 / 20 (20), TrioTim 4 coils at 120 deg (2); the scalp's bright decile over WM runs 2.1-6.0 (mMR
+  3.2-4.6, Prisma 2.7-4.9, Skyra 3.1-6.0, TrioTim 2.1-2.8), posterior / anterior 0.66-2.7, CSF / WM 3.5-6.2; our
+  runs sit at one scalp level (4.5 +- 0.4 in q49) and one ratio (1.45). The receive is not one thing across scans
+  (coil, positioning, the site's normalisation), so the model draws it per head (`--receive-draw`: semi-axes x
+  U(1, 1.25), gap U(5, 30) mm, normalisation length U(20, 60) mm), to be checked on the spread of the scalp level
+  (q50) and then as r33 on the 64 heads behind r31 / r32.
