@@ -2068,3 +2068,38 @@ same reconstruction, normalisation and coloured coil noise for both sides):
   capped pure vitreous at 0.87. 24 heads being prepared as v15. No effect on the realism score (fastMRI's stack
   starts above the orbits).
 - Not done: dura and connective tissue relaxation (no in-vivo measurements found; muscle's stay, flagged).
+
+## 2026-10-13 — Where the gap sits now (`validation/realism/gap.py`)
+
+Diagnostics on r27's scored images (147 real from 21 scans, 112 simulated from 16 IXI heads, slices 1-7), to decide
+the next realism steps; the three scratch analyses became `validation/realism/gap.py` (features, polar, structure,
+controls).
+- **The benchmark's own resolution** (`controls`): real vs real split by scanner model scores 0.52 / 0.56 (Skyra vs
+  Prisma + mMR, two CNN seeds) and 0.46 / 0.42 (Prisma vs Skyra); by echo spacing 0.58 / 0.46 (one scan against
+  twenty). The real set's scanners are not told apart, so 0.875 is signal. But the CNN's own seed moves the full
+  number: seed 1 gives 0.927 (seed 0 0.875), and against the 11 Skyra scans alone the simulations score 0.99 / 0.94.
+  With 21 against 16 people the interval is +-0.12 and the seed adds +-0.05: the next steps need a bigger benchmark
+  (more heads, more scans, seeds averaged) before changes below ~0.1 can be read.
+- **Per scan and per head**: 18 of 21 real scans score < 0.2 (three Skyra scans 0.93-0.96); the simulated heads are
+  bimodal: ixi150 / 277 / 013 / 216 / 130 at 0.07-0.26, ixi255 / 334 / 511 / 167 / 538 / 146 / 205 at 0.89-1.00. The
+  caught heads are mostly the older women (58-82 y) with the most CSF (share 0.18-0.27), but ixi277 (61 y) passes and
+  real scans with as much CSF (0.22-0.24) score as real: it is how the CSF-rich heads look, not how much CSF they have.
+- **Features** (AUC of one feature alone, > 0.5 larger in the simulations): the head centroid row 63.2 +- 1.9 against
+  the real 60.4 +- 2.6 (AUC 0.83): our heads sit 2.8 px (4.8 mm) further anterior in the field of view (the real
+  operators centre the FOV 6 mm behind the head's centroid); the interior p99 1.04 against 0.95 (0.76): in the real
+  scans the scalp fat sets the p99 scale above the CSF, in ours the CSF is the brightest; posterior scalp 0.53 vs 0.47
+  (0.68) and anterior scalp 0.36 vs 0.45 (0.28): a posterior / anterior ratio of 1.48 against the real 1.03, the
+  receive ring behind the head. Area 0.95 x real (IXI volunteers' heads are smaller), scalp 0.41 vs 0.44, the band
+  minimum 0.125 vs 0.140. Within the simulations the CNN score tracks the CSF share (Spearman +0.33) and nothing else
+  above 0.25.
+- **Polar map** (angle x radius / head radius, mean over images): sim / real 0.72-0.89 at the posterior 0.80-0.94
+  (the deep dark band), 1.31 at the posterior edge (0.98-1.02), 0.83-0.93 at the sides' and front's 0.90-1.02 (the
+  dim scalp), 1.08-1.14 at the anterior 0.80-0.90; inside 0.8 of the radius everything is within 2-10 %.
+- **Structure**: interior power by band relative to the real mean: all simulations 1.16 / 1.28 / 1.25 / 1.13 / 1.03 /
+  0.90 (0.05-0.15 ... 0.8-1.0 of Nyquist); the caught heads 1.36 / 1.40 / 1.36 / 1.22 / 1.10 / 0.96 at CSF share 0.196,
+  where the real scans with CSF share > 0.17 (mean 0.235) carry 1.39 / 1.29 / 1.29 / 1.24 / 1.25 / 1.21. At a matched
+  CSF share ours have ~15-20 % too much coarse structure (0.15-0.45) and ~10 % too little at the top band: the sulcal
+  CSF of the older heads is rendered coarser and smoother than real. CSF-bright components under the edge: 14.3 per
+  1000 px, mean 9.9 px, bright fraction 0.137 (real 13.9, 11.5, 0.152): count right, pieces smaller.
+- The scratch `profile.py` in the mini's data directory shadowed the stdlib again (LESSONS, 2026-10-11); scripts now
+  run from their own directory.
