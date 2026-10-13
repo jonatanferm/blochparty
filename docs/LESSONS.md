@@ -684,6 +684,11 @@ says where it came from so it can be re-checked.
   on top (r26: CSF p99 1.28 x r24's). A multiplier that is the same in every subject is the model's gap, not anatomy:
   keep only the within-tissue pattern of a quantity whose forward model is incomplete (re-centred per tissue), or model
   the missing mechanism. T2 from an echo ratio cancels MT and kept its tissue offsets.
+- **Partial-volume unmixing needs a pure reference where it unmixes** (2026-10-13): IXI's CSF / grey matter shares were
+  unmixed against CSF's intensity from the cores of CSF regions, which near the convexity means the ventricles' (no
+  pure CSF within 10 mm). 1 mm sulcal voxels are never pure, so the labels carried 30-50 % more CSF-like voxels than the
+  subject's own T2 at MNI z 30-70, and the simulated top slices too much CSF (6.38 x WM vs 5.25) and too little white
+  matter. Check a segmentation's fractions against its source image by region (height, depth) before simulating.
 - **zsh does not split `$var` into words**: `pytest $files` with a space-separated list ran
   nothing ("no tests ran"); use `${=files}` or list the files.
 

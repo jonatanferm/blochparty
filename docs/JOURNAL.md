@@ -1958,3 +1958,29 @@ The parts of M5 that need no outside access, done while the user was away.
   CSF's p99 by 7 % and texture by ~6 %; the rest was the PD residual: CSF x1.21-1.28 and grey matter x1.05-1.09 in all
   subjects, IXI's own MT read as PD (1d90f18: PD multipliers re-centred per tissue; T2's kept). 24 heads re-prepared
   as v12 (mini 18, laptop 6) for r27 = r26 on v12.
+
+## 2026-10-13 — r27: CNN AUC 0.875; too much convexity CSF
+
+- **r27** (r24's 16 subjects and seeds; v12 heads: residual inside the skull, smoothed 1.5 mm within tissue, PD
+  re-centred per tissue; no assumed texture; the real echo train; coloured noise): CNN AUC **0.875** [0.745, 0.976]
+  (r24 0.9996, the first run clearly below 0.96), histogram AUC 0.572 [0.40, 0.73] (r24 0.826), intensity W1 0.0134,
+  quartiles 0.215 / 0.303 / 0.498 vs real 0.216 / 0.299 / 0.491; controls 0.44 / 0.46. The laptop's share was moved to
+  the mini at the user's request (laptop paused until 22:00); the run finished there at 21:01.
+- Against r24 (all 16 heads): background beside the head 1.03 x the floor (1.21, real 1.09), white matter front / back
+  0.89 (real 0.89), outer ring front / back 0.61 (0.51, real 0.71), white-matter share at slices 1-5 0.46-0.51 (real
+  0.47-0.51). Still off: CSF over the white-matter mode at slices 5-7 6.38 (real 5.25; slices 1-3 5.32 vs 5.12) with
+  white matter's share there 0.38 (0.44); the fissure 4.17 (3.89); coarse hemisphere texture 1.5-1.7 x real at 0.15-0.45
+  of Nyquist (all structure: the noise adds < 1 % in those patches); behind the scalp the dark minimum 0.13-0.17 at
+  5-6 px against the real 0.19-0.27 at 4.5-5.5, the brain 2-3 px later.
+- **Where the CNN looks**: masked to the interior (> 12 px) 0.774, to the outer 12 px 0.796 (r20: 0.785 / 0.96):
+  no region dominates. Occlusion (logit drop per px x 1000, simulated images): the posterior third carries most
+  (rim 6-14 px 268, interior 203, outer 0-6 px 136; blur 284 / 159 / 292), the front and middle thirds 13-117.
+- Diagnostic caveat: in 15 % of r27's images (real 7 %) the posterior scalp falls outside lab.head_mask (the skull band
+  under its 12 % threshold all round), which shifts edge-aligned profiles for those images.
+- **Too much convexity CSF in the IXI labels**: against IXI012's own T2 the labels predicted 30-50 % more CSF-like voxels
+  (> 2.5 x WM) than the image shows at MNI z 30-70, their "pure" convexity CSF reading 0.86-0.88 of the prediction
+  (1.04 at z 0-30); the unmixing calibrates CSF on the ventricles' T2, and 1 mm convexity voxels are not pure.
+  refine_csf (9450c7d) sets each CSF-containing voxel's share from the T2 against the subject's ventricular CSF:
+  IXI012 CSF 199 -> 158 mL, same-person brain |log ratio| median 0.055 -> 0.046 (RMS 0.087 -> 0.072), the ratio flat
+  with height. Dead end on the way: scalp classes inside the skull (IXI012's intracranial "skin" reads 1.01 x WM in its
+  T2: meninges in partial volume, not CSF). 24 heads re-prepared as v13 for r28.
