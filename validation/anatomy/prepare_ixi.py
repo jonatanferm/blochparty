@@ -34,7 +34,10 @@ import torch.nn.functional as Fn
 import blochparty as bp
 
 HERE = Path(__file__).resolve().parent
-CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+EM_CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+CLASSES = EM_CLASSES + ("eye",)  # the eye (vitreous) from the rules outside the skull: BrainWeb has no eye prior
+# the orbits in MNI space [mm]: |x| 10-55, y 30-85, z -60 to -10 (generous boxes around both globes)
+ORBIT_MM = ((10., 55.), (30., 85.), (-60., -10.))
 BRAIN = ("csf", "gm", "wm")
 # T1-weighted intensities for the registration target (relative; only the pattern matters for local NCC)
 T1W = {"background": 0., "csf": .25, "gm": .62, "wm": 1., "fat": 1.15, "muscle": .45, "skin": .7, "skull": .08,
@@ -272,6 +275,27 @@ def soft_references():
 IXI_PD_TE = 0.008  # the dual-echo TSE's first echo (brain-development.org/scanner-philips-medical-systems-intera-3t)
 
 
+def orbit_vitreous(r1, r2, p_bone, head, intra, origin_mm, voxel):
+    """The eyes' vitreous fraction outside the skull. It is bright in T2 (T2 ~0.5 s) and dark in T1 (T1 ~4 s) like CSF,
+    so the soft-tissue rules called it skin (dark in the simulation). In the orbits (``ORBIT_MM``, MNI mm; ``origin_mm``
+    (x, y, z), arrays (z, y, x)): sigmoids of T2 above 2 x (width 0.3) and T1 below 0.55 x (width 0.05) white matter (vitreous T1 0.29-0.33 x in IXI012: 0.99), kept in the largest
+    connected piece over 0.5 on each side, grown by two voxels (the globe; not sinus fluid or orbital fat).
+    r1, r2: bias-corrected T1 / T2 over white matter. IXI012: two globes ~24 x 21 x 27 mm at MNI (-35, 56, -39) and
+    (33, 55, -39), 9.0 mL of vitreous at its own size (2026-10-13)."""
+    sig = lambda x: 1 / (1 + np.exp(-x))
+    zmm, ymm, xmm = (origin_mm[2 - a] + np.arange(r1.shape[a]) * voxel[a] * 1e3 for a in range(3))
+    orbit = ((np.abs(xmm)[None, None, :] >= ORBIT_MM[0][0]) & (np.abs(xmm)[None, None, :] <= ORBIT_MM[0][1])
+             & (ymm[None, :, None] >= ORBIT_MM[1][0]) & (ymm[None, :, None] <= ORBIT_MM[1][1])
+             & (zmm[:, None, None] >= ORBIT_MM[2][0]) & (zmm[:, None, None] <= ORBIT_MM[2][1]))
+    p_eye = sig((r2 - 2.) / .3) * sig((.55 - r1) / .05) * (1 - p_bone) * orbit * head * ~(np.asarray(intra) > .5)
+    globes = np.zeros(r1.shape, bool)
+    for side in (xmm > 0, xmm < 0):
+        lab, n = ndimage.label((p_eye > .5) & side[None, None, :])
+        if n:
+            globes |= lab == np.argmax(np.bincount(lab[lab > 0]))  # bincount is indexed by label
+    return p_eye * ndimage.binary_dilation(globes, iterations=2)
+
+
 def refine_csf(frac, t2w, valid, origin=None, voxel=None):
     """Each voxel's CSF fraction from the subject's own T2 (TE 100 ms, where CSF is ~4 x white matter): the observed
     signal (over the white-matter median) between the subject's pure CSF (deep ventricles, eroded twice) and the
@@ -448,11 +472,11 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
         pdv, apd = load_ras(pdp)
         pd_onto = onto(pdv, apd, M2, shape, origin, order=3)  # the T2's acquisition: same geometry, same motion
     valid = (onto(np.ones_like(t1), a1, M, shape, origin) > 0.99) & (onto(np.ones_like(t2), a2, M2, shape, origin) > 0.99)
-    fr = {k: atlas.fractions[k].numpy().astype(np.float32) for k in CLASSES}
+    fr = {k: atlas.fractions[k].numpy().astype(np.float32) for k in EM_CLASSES}
     intra = ndimage.gaussian_filter(sum(fr[k] for k in BRAIN), 2.0)
     share = {k: ndimage.gaussian_filter(fr[k], 8.0) + 0.02 for k in BRAIN}
     tot = sum(share.values())
-    prior = np.stack([intra * share[k] / tot if k in BRAIN else ndimage.gaussian_filter(fr[k], 2.0) for k in CLASSES]) + 1e-3
+    prior = np.stack([intra * share[k] / tot if k in BRAIN else ndimage.gaussian_filter(fr[k], 2.0) for k in EM_CLASSES]) + 1e-3
     prior /= prior.sum(0)
     idx = np.nonzero(valid)
     y = np.stack([np.log(np.maximum(c[idx], 1e-3)) for c in chans])
@@ -463,7 +487,7 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     if partial_volume:
         post = unmix_partial_volume(post, y, bias, idx, shape)
     frac = np.zeros((len(CLASSES),) + tuple(shape), np.float32)
-    frac[:, idx[0], idx[1], idx[2]] = post
+    frac[:len(EM_CLASSES), idx[0], idx[1], idx[2]] = post
     frac[0][~valid] = 1
     # outside the skull, rules on the bias-corrected intensities relative to the subject's white matter (the
     # EM's head classes swap identities where BrainWeb's affine-aligned priors miss the thin layers): fat bright
@@ -501,7 +525,9 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     p_fat = np.clip((r2 - .9) / (pure - .9), 0, 1) * sig((r1 - .55) / .08) * (1 - p_bone)
     # undo the T2's water-fat shift: its fat sits IXI_FAT_SHIFT_MM posterior of the water tissue (front-back readout)
     p_fat = np.clip(ndimage.shift(p_fat, (0, IXI_FAT_SHIFT_MM / (atlas.voxel[1] * 1e3), 0), order=1, mode="nearest"), 0, 1) * (1 - p_bone)
-    p_soft = np.clip(1 - p_fat - p_bone, 0, 1)
+    p_eye = orbit_vitreous(r1, r2, p_bone, head, intra, origin, atlas.voxel)
+    p_fat = p_fat * (1 - p_eye)
+    p_soft = np.clip(1 - p_fat - p_bone - p_eye, 0, 1)
     shell = ndimage.binary_closing(p_bone > .5, iterations=2) & ~intra
     out_mask = head & ~intra & valid
     i = {c: CLASSES.index(c) for c in CLASSES}
@@ -514,6 +540,7 @@ def prepare(ixi_id, root, atlas, fixed2, partial_volume=True):
     frac[i["marrow"]][out_mask] = (p_fat * shell)[out_mask]
     frac[i["fat"]][out_mask] = (p_fat * ~shell)[out_mask]
     frac[i["skull"]][out_mask] = p_bone[out_mask]
+    frac[i["eye"]][out_mask] = p_eye[out_mask]
     # soft tissue unmixed by its T2 between skin and muscle, at the brightness the simulator's own tissue values give
     # them in IXI's T2 (soft_references). Until 2026-10-12 soft tissue deeper than 8 mm was muscle: IXI012's soft
     # tissue at MNI z 5-50 reads 0.56-0.70 x WM in T2 at every depth, so a block of near-black muscle (T2 30 ms)

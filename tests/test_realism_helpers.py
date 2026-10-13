@@ -134,3 +134,26 @@ def test_refine_csf_takes_the_csf_share_from_the_t2():
     assert np.median(out[k["gm"]][sulcus]) == pytest.approx(.7, abs=.01)
     assert np.allclose(out[k["csf"]][deep], 1) and np.allclose(out.sum(0), 1, atol=1e-5)
     assert diag["csf_over_wm_deep"] == pytest.approx(1.1 * sig["csf"] / sig["wm"], rel=1e-3)
+
+
+def test_orbit_vitreous_finds_the_globes_only():
+    """Two vitreous-like spheres (T2 4 x, T1 0.3 x white matter) in the orbits, a fat blob there (T1 bright), a
+    small fluid pocket beside a globe and a CSF-like sphere outside the orbits: only the globes come out."""
+    n, h = (90, 110, 120), 1e-3
+    origin = (-60., 0., -80.)  # mm, (x, y, z)
+    z = origin[2] + np.arange(n[0]); y = origin[1] + np.arange(n[1]); x = origin[0] + np.arange(n[2])
+    zz, yy, xx = np.meshgrid(z, y, x, indexing="ij")
+    r1 = np.ones(n, np.float32); r2 = np.ones(n, np.float32)
+    def ball(c, r):
+        return (zz - c[2]) ** 2 + (yy - c[1]) ** 2 + (xx - c[0]) ** 2 <= r ** 2
+    globes = ball((-33, 55, -39), 11) | ball((33, 55, -39), 11)
+    fat = ball((-35, 70, -20), 6)
+    pocket = ball((-30, 35, -55), 3)
+    outside = ball((0, 60, -40), 6)  # between the orbits
+    for m in (globes, pocket, outside):
+        r1[m], r2[m] = .3, 4.
+    r1[fat], r2[fat] = 1.4, 3.5
+    head = np.ones(n, bool)
+    p = P.orbit_vitreous(r1, r2, np.zeros(n, np.float32), head, np.zeros(n, bool), origin, (h,) * 3)
+    assert (p[globes] > .9).mean() > .95
+    assert p[fat].max() < .05 and p[pocket].max() < .05 and p[outside].max() < .05
