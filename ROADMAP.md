@@ -510,8 +510,15 @@ Items in the order of measured effect over cost; each has its own number to move
    white-matter mode (gap.py, journal): with a flat receive the brain's quartiles match real and
    CSF is 9 %, the scalp 21 % dim; the ring had been masking that. Tested (q37-q42): MT x1.3
    puts CSF / WM on real but GM / WM 8-11 % high; skin T2 90 ms and fat T2 170 ms bring the scalp
-   within 4 %. Next: r32 = flat receive + MT x1.15 + the scalp values, against r31's baseline,
-   the values entering the table as flagged calibrations if the levels and W1 both land.
+   within 4 %. *Later that day:* the 0.57 mm profiles showed the whole outer 2 cm 1.3-2.7 x
+   brighter in the real scans with the interior flat: the array's sensitivity under the scanner's
+   normalisation, not fat (a 2 x on fat needs T2 ~650 ms). Modelled as an elliptical ring hugging
+   the head with its RSS divided by its own smoothed RSS (`--receive-normalise-mm`), and, since the
+   34 real scans spread 2.1-6.0 in scalp level by coil and site, drawn per head (`--receive-draw`:
+   q50 reproduces the real spread, 4.5 +- 0.8). r31 (ring) / r32 (one normalised receive) / r33
+   (drawn) on the 64 v16 heads against 34 scans decide the preset; no tissue value was changed.
+   Open: CSF / WM 8 % low (MT or CSF inflow), the posterior scalp still +20 %, and the v16 heads
+   need a screen (two outliers in area and CSF share came through the proxy selection).
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality

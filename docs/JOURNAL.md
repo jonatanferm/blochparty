@@ -2268,3 +2268,9 @@ controls).
   (coil, positioning, the site's normalisation), so the model draws it per head (`--receive-draw`: semi-axes x
   U(1, 1.25), gap U(5, 30) mm, normalisation length U(20, 60) mm), to be checked on the spread of the scalp level
   (q50) and then as r33 on the 64 heads behind r31 / r32.
+- **q50, the drawn receive on 8 v16 heads**: scalp over WM 4.50 +- 0.79 against the real 4.40 +- 0.82 (q49 with one
+  receive: 4.52 +- 0.34), posterior / anterior 0.78-2.16 per head (real 0.66-2.7), q50 / q75 over WM 1.24 / 1.94
+  (1.24 / 1.89), histogram AUC 0.417, W1 0.036, CNN 0.907 (8 heads; noise, and two of these heads look wrong: ixi175
+  with 9033 px of area and a CSF share of 0.012, ixi239 with 4844 px: the proxy-based selection admitted extremes
+  that need a screen on the prepared heads (area, CSF share, lncc) before r33's score is read). r33 (64 heads, drawn
+  receive) is chained behind r32 and r31b.
