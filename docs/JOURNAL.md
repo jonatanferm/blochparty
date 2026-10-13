@@ -2274,3 +2274,9 @@ controls).
   with 9033 px of area and a CSF share of 0.012, ixi239 with 4844 px: the proxy-based selection admitted extremes
   that need a screen on the prepared heads (area, CSF share, lncc) before r33's score is read). r33 (64 heads, drawn
   receive) is chained behind r32 and r31b.
+- **v16 screened** (the preparation metadata of the 63 heads): lncc 0.195 +- 0.014, CSF 179 +- 54 mL, GM 713 +- 130,
+  WM 492 +- 66, skull 305 +- 58, fat 318 +- 101 mL. IXI175 is a failed preparation (CSF 26 mL, refine ratio 0.06,
+  GM 1064, fat 880: the one q50 flagged) and IXI586 registered badly (lncc 0.137 < IXI_MIN_LNCC 0.15); both moved to
+  prepared_v16_rejected before r31b and r33 list their heads (r32 had listed 64 and skips 175 with an error).
+  IXI097 (lncc 0.154) and IXI048 (skull 473 mL) stay. The proxy selection needs these two checks built in
+  (select_ixi after preparation: lncc and the CSF refine ratio), noted for M5b item 2.
