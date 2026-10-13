@@ -9,20 +9,28 @@ from torch import Tensor
 
 
 def birdcage_sensitivities(
-    pos: Tensor, n_coils: int = 8, radius: float = 0.18, normalize: bool = False, radius_y: float | None = None
+    pos: Tensor, n_coils: int = 8, radius: float = 0.18, normalize: bool = False, radius_y: float | None = None,
+    element_radius: float | None = None,
 ) -> Tensor:
     """(N, C) complex sensitivities of ``n_coils`` elements evenly spaced on a circle (an ellipse with semi-axes
     ``radius`` along x and ``radius_y`` along y when the latter is given: a head array hugging a head).
 
     A smooth analytic model, not an EM solution: magnitude falls off as
     radius / distance and the phase winds around each element. With
-    ``normalize`` the root-sum-of-squares over coils is 1 everywhere.
+    ``normalize`` the root-sum-of-squares over coils is 1 everywhere. With ``element_radius`` (a, the loops' radius)
+    the magnitude is a loop's on-axis field, a^2 / (a^2 + d^2)^(3/2) (times radius for scale), which is steeper than
+    1 / d within a few a of the element: a head array's elements sit 1-3 cm from the scalp (2026-10-13).
     """
     theta = 2 * math.pi * torch.arange(n_coils, dtype=pos.dtype, device=pos.device) / n_coils
     dx = pos[:, :1] - radius * torch.cos(theta)
     dy = pos[:, 1:2] - (radius if radius_y is None else radius_y) * torch.sin(theta)
     dist = torch.sqrt(dx**2 + dy**2).clamp_min(0.05 * radius)
-    sens = torch.polar(radius / dist, torch.atan2(dy, dx) - theta)
+    if element_radius is None:
+        mag = radius / dist
+    else:
+        a = element_radius
+        mag = radius * a**2 / (a**2 + dist**2) ** 1.5 * (a**2 + radius**2) ** 1.5 / a**2  # = 1 at the centre of a circle
+    sens = torch.polar(mag, torch.atan2(dy, dx) - theta)
     if normalize:
         sens = sens / torch.sqrt((sens.abs() ** 2).sum(dim=1, keepdim=True))
     return sens
