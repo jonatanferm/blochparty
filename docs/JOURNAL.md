@@ -2240,3 +2240,9 @@ controls).
   beyond 1.95-2.45 (2.1-2.3); sides 2.17 (2.98); front 2.01 (2.78): the outer 2 cm uniformly 0.72 x real now, the
   interior right. q47 (0.105 x 0.09 m, 8 mm, smoothed 45 mm) next; the seven missing v16 heads are prepared (IXI598
   skipped: a non-finite map), r31 runs on the 57.
+- **q47 (0.105 x 0.09 m, 8 mm, smoothed 45 mm)**: scalp 4.58 over WM (real 4.40), W1 0.0161 (the best), histogram
+  0.712 (worse than q45's 0.545): the front elements now too close, the anterior interior over-boosted at 384 px
+  (3.7-4.5 vs the real 2.9-3.1) while the posterior peak barely moves (3.27 vs q45's 3.24, real 4.47): with this
+  model's 1 / d falloff a tighter ring brightens the front interior before it lifts the posterior scalp. A loop's
+  own near field, a^2 / (a^2 + d^2)^(3/2), is steeper within a few radii of the element (`element_radius`, next,
+  q48); r32 (the 64 v16 heads) is chained behind r31 with q45's receive.
