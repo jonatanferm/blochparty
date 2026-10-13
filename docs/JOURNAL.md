@@ -2166,3 +2166,8 @@ controls).
   receive gain from fat is the non-fat scalp tissue and the bone minimum at the scalp's radius (the real skin edge
   0.82-1.09 x WM at 0.57 mm). Next quick runs: flat receive with the bound-pool fraction scaled 1.3 (`--override`),
   and with fat's T2 at 170 ms, each against these four levels.
+- **The real set grows**: the fastMRI link was not expired (a HEAD request is refused, a ranged GET works; LESSONS).
+  `fetch_fastmri.py` streams the validation archive again into `~/data/fastmri_more` on the mini (symlinks to the 71
+  files already kept, the AXT2 cap raised 15 -> 27 GB: ~40-60 more 3 T AXT2 volumes, 8 GB of disk kept free). The
+  queued runs (r30, q36-q39) keep the frozen 21-scan set; r31 (64 v16 heads x 7 slices) scores against the larger one
+  and r30 will be re-scored against it for the comparison. score.py's noise-covariance cache now grows with the set.

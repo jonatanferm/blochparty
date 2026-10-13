@@ -1200,6 +1200,14 @@ says where it came from so it can be re-checked.
   one it anchored on. Wait on the process (`while kill -0 PID`) or match failure and success alike,
   give the loop a deadline, and stop the loops when the result is in.
 
+- **A presigned S3 link answers HEAD with 403** (2026-10-13): the fastMRI download link looked expired to `curl -I`;
+  the signature covers GET only, and a ranged GET (`-r 0-1023`) returned 206. Test signed links with the method they
+  were signed for.
+- **Freeze the real set while runs are queued** (2026-10-13): score.py reads whatever the fastMRI manifest holds at
+  scoring time, so extending the data mid-queue would have given consecutive runs different real sets. The extension
+  streams into a second directory of symlinks plus new files (`~/data/fastmri_more` on the mini) and only the runs
+  meant for the larger benchmark point `--fastmri` at it.
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts
