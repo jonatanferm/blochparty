@@ -513,8 +513,8 @@ Items in the order of measured effect over cost; each has its own number to move
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
-   with all seven slices; more real scans: more 3 T AXT2 volumes from fastMRI (the download links
-   have expired: a new request); the CNN averaged over three seeds. Verify: real-vs-real controls
+   with all seven slices; more real scans: more 3 T AXT2 volumes from the fastMRI validation archive
+   (streamed with the existing link; `fetch_fastmri.py`); the CNN averaged over three seeds. Verify: real-vs-real controls
    at 0.5 +- 0.05; the interval on real vs simulated half as wide.
 3. **Coarse structure at matched CSF** (2-3 days). The heads the CNN catches (older, CSF-rich)
    carry 1.36-1.40 x the real coarse structure power (0.05-0.45 of Nyquist) at a CSF share that

@@ -66,13 +66,16 @@ def noise_covariances(cache: Path, root: Path = R.FASTMRI) -> dict:
     correlated and unequal: the real background's SD / median is 0.163 and its skew 0.41, independent equal-sigma
     noise in 16 coils gives 0.126 and 0.20."""
     path = cache / "noise_cov.json"
+    out = {}
     if path.exists():
         raw = json.loads(path.read_text())
-        return {k: np.array(v["re"]) + 1j * np.array(v["im"]) for k, v in raw.items()}
+        out = {k: np.array(v["re"]) + 1j * np.array(v["im"]) for k, v in raw.items()}
+    todo = [f for f in R.manifest(root=root) if f.name not in out]  # the cache grows with the real set
+    if not todo:
+        return out
     import h5py
-    out = {}
     c = CORNER
-    for f in R.manifest(root=root):
+    for f in todo:
         with h5py.File(f, "r") as h:
             k = h["kspace"][()]
             hdr = __import__("ismrmrd").xsd.CreateFromDocument(h["ismrmrd_header"][()])
