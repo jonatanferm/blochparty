@@ -10,7 +10,8 @@ k-space; target: the RSS of the full k-space; both normalised by the target's p9
 on the held-out real slices: NMSE and SSIM against the fully sampled RSS, for (a) zero-filling, (b) the net trained on
 synthetic data, (c) the net trained on real data (other people), (d) synthetic pre-training then real fine-tuning.
 Everything at the realism resolution (128 x 128 on 220 mm) where the real k-space is already cached (score.real_set);
-the simulated set's noisy k-space is ``/truth/kspace``.
+the simulated set's noisy k-space is ``/truth/kspace``, transposed into the display orientation before the mask so the
+phase axis is the same image axis on both sides.
 """
 from __future__ import annotations
 
@@ -161,7 +162,10 @@ def main():
             skipped.append((f.name, type(e).__name__)); continue
         if not np.isfinite(k).all() or np.abs(k).max() == 0:
             skipped.append((f.name, "non-finite or empty")); continue
-        x, y = pair(k, args.accel, args.centre, rng, SH.to_real_orientation)
+        # into the display orientation BEFORE undersampling: the FFT of a transposed image is the transposed k-space, and
+        # the phase axis must be the same image axis on both sides (2026-10-14: undersampling the simulated k-space's
+        # last axis and then transposing the image trained the net on streaks along the other axis: SSIM up, NMSE up)
+        x, y = pair(k.transpose(0, 2, 1), args.accel, args.centre, rng, lambda i: i)
         if not (np.isfinite(x).all() and np.isfinite(y).all()):
             skipped.append((f.name, "non-finite image")); continue
         Xs.append(x); Ys.append(y)
