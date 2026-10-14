@@ -54,7 +54,7 @@ def real_set(cache: Path, root: Path = R.FASTMRI, slices=SLICES):
             np.save(f, vol.astype(np.float32))
         vol = np.load(f).astype(np.float64)
         imgs = [R.normalise(v) for v in vol]
-        floor[path.name] = float(np.median([background(i) for i in imgs]))
+        floor[R.manifest_key(path)] = float(np.median([background(i) for i in imgs]))
         items += [(f"real:{path.stem}", s, imgs[s]) for s in slices]
     return items, floor
 
@@ -70,22 +70,16 @@ def noise_covariances(cache: Path, root: Path = R.FASTMRI) -> dict:
     if path.exists():
         raw = json.loads(path.read_text())
         out = {k: np.array(v["re"]) + 1j * np.array(v["im"]) for k, v in raw.items()}
-    todo = [f for f in R.manifest(root=root) if f.name not in out]  # the cache grows with the real set
+    todo = [f for f in R.manifest(root=root) if R.manifest_key(f) not in out]  # the cache grows with the real set
     if not todo:
         return out
-    import h5py
     c = CORNER
     for f in todo:
-        with h5py.File(f, "r") as h:
-            k = h["kspace"][()]
-            hdr = __import__("ismrmrd").xsd.CreateFromDocument(h["ismrmrd_header"][()])
-        rx, ry = hdr.encoding[0].reconSpace.matrixSize.x, hdr.encoding[0].reconSpace.matrixSize.y
-        coil = R.crop_centre(R.centred_ifft(k, (-2, -1)), (rx, ry))  # (S, C, rx, ry)
-        low = np.stack([R.centred_ifft(R.lowres_kspace(sl, 128), (-2, -1)) for sl in coil])  # (S, C, 128, 128)
+        low = R.centred_ifft(R.coil_kspace(f, 128)[0].astype(np.complex128), (-2, -1))  # (S, C, 128, 128) coil images
         x = np.concatenate([low[..., :c, :c], low[..., :c, -c:], low[..., -c:, :c], low[..., -c:, -c:]], -1)
         x = np.moveaxis(x, 1, 0).reshape(x.shape[1], -1)  # (C, samples)
         cov = x @ x.conj().T / x.shape[1]
-        out[f.name] = cov
+        out[R.manifest_key(f)] = cov
     path.write_text(json.dumps({k: {"re": v.real.tolist(), "im": v.imag.tolist()} for k, v in out.items()}))
     return out
 

@@ -129,18 +129,12 @@ def main():
     lo, _, hi = args.slices.partition("-")
     slices = range(int(lo), int(hi or lo) + 1)
     # real k-space (full), per scan, through the realism reconstruction: cached per file by score.real_set's recipe
-    import ismrmrd  # noqa: F401  (realism.fastmri_volume needs it)
     real = []
     for f in R.manifest(root=args.fastmri):
-        with h5py.File(f, "r") as h:
-            k = h["kspace"][()]
-            hdr = ismrmrd.xsd.CreateFromDocument(h["ismrmrd_header"][()])
-        enc = hdr.encoding[0]
-        rx, ry = enc.reconSpace.matrixSize.x, enc.reconSpace.matrixSize.y
-        imgs = R.crop_centre(R.centred_ifft(k, (-2, -1)), (rx, ry))
+        low, _ = R.coil_kspace(f, 128)  # (S, C, 128, 128), raw or compact
         for s in slices:
-            if s < k.shape[0]:
-                real.append((f.stem, s, R.lowres_kspace(imgs[s], 128)))
+            if s < low.shape[0]:
+                real.append((f.stem, s, low[s].astype(np.complex128)))
     people = sorted({p for p, _, _ in real})
     rng.shuffle(people)
     test_people = set(people[: max(len(people) // 3, 1)])

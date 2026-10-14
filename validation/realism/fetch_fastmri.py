@@ -15,6 +15,9 @@ it. Data stay outside the repository (no redistribution; fastMRI data-sharing ag
 
     uv run python validation/realism/fetch_fastmri.py --curl-config ~/.fastmri_val0.curl \\
         --out ~/data/fastmri_brain --cap AXT2=15 --cap AXT1=4 --cap AXT1PRE=4 --cap AXFLAIR=7
+
+Since 2026-10-14 the kept form is compact: ``--compact 128 --min-field 2`` stores each 3 T volume's central 128 x 128
+coil k-space per slice (~40 MB) and deletes the raw file; the cap still counts the raw bytes taken from the archive.
 """
 from __future__ import annotations
 
@@ -23,9 +26,12 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
+
+import numpy as np
 
 GB = 1e9
 
@@ -66,7 +72,15 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--cap", action="append", default=[], help="CONTRAST=GB, e.g. AXT2=15 (repeatable)")
     ap.add_argument("--min-free", type=float, default=30.0, help="stop when free disk falls below this [GB]")
+    ap.add_argument("--compact", type=int, default=None,
+                    help="keep each volume as its central N x N coil k-space per slice (realism.coil_kspace) in a .npz "
+                         "and delete the raw file: ~40 MB a scan instead of ~500 (the realism score and the transfer "
+                         "test use nothing else)")
+    ap.add_argument("--min-field", type=float, default=None, help="drop volumes below this field strength [T] after reading their header")
     args = ap.parse_args()
+    if args.compact:
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        import realism as R
     caps = {k: float(v) * GB for k, v in (c.split("=") for c in args.cap)}
     args.out.mkdir(parents=True, exist_ok=True)
     manifest_path = args.out / "manifest.json"
@@ -90,7 +104,8 @@ def main():
                     break
                 name = Path(member.name).name
                 dest = args.out / name
-                if name in manifest and dest.exists() and dest.stat().st_size == manifest[name]["bytes"]:
+                if name in manifest and ((dest.exists() and dest.stat().st_size == manifest[name]["bytes"])
+                                         or ("compact" in manifest[name] and (args.out / manifest[name]["compact"]).exists())):
                     continue
                 digest = hashlib.sha256()
                 part = dest.with_suffix(".part")
@@ -104,6 +119,17 @@ def main():
                     entry |= describe(dest)
                 except Exception as err:  # keep the file, record why it could not be read
                     entry["error"] = f"{type(err).__name__}: {err}"
+                if args.min_field is not None and "error" not in entry and (entry.get("field_T") or 0) < args.min_field:
+                    dest.unlink()
+                    print(f"{name}: {entry.get('field_T')} T, dropped", flush=True)
+                    continue
+                if args.compact and "error" not in entry:
+                    low, info = R.coil_kspace(dest, args.compact)
+                    compact = dest.with_suffix(".npz")
+                    np.savez_compressed(compact, kspace=low, info=json.dumps(info | {"compact": args.compact}))
+                    dest.unlink()
+                    entry["compact"] = compact.name
+                    entry["compact_bytes"] = compact.stat().st_size
                 manifest[name] = entry
                 kept[kind] += member.size
                 manifest_path.write_text(json.dumps(manifest, indent=1))
