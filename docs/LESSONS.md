@@ -1218,6 +1218,12 @@ says where it came from so it can be re-checked.
   timings and no error; the same heads regenerated in fresh processes were fine. One head per process, and never
   write a sample without checking the signal is finite and non-zero (`generate.py` now raises).
 
+- **A shared machine's disk is not ours** (2026-10-14): with the mini at 88 % full (42 GB of fastMRI archives, every
+  run's raw k-space, a generated set), its owner removed `~/data` wholesale: the real scans, the caches, the runs, the
+  181-sample set. The numbers survived in the journal; the data did not. Fetch only what a benchmark needs (the 3 T
+  AXT2 subset, not every contrast), delete raw simulations once scored, prune old prepared-head versions, check
+  `df -h` before anything that writes gigabytes, and keep whatever matters in the repo or on the laptop.
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts
