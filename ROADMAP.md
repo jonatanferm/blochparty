@@ -620,6 +620,12 @@ which physics (M6) the protocol families call for.
       from a library) → sample scanner imperfections (B1+, B0 shim, GIRF from benchmark 7, coil
       array from `loops.py` / `em.py`, noise covariance) → simulate on Metal → `write_dataset`.
       Throughput target and a nightly run that records spins·segments/s.
+      *Started 2026-10-14:* `validation/realism/generate.py` (spec + seed -> ISMRMRD sample with
+      a `/truth` group: clean / noisy k-space, clean image, fractions, residual maps, lesion mask);
+      the spec's front door is the brain itself: `anatomy.add_lesions` places white-matter lesions by
+      region with cited tissue values. The first consumer is reconstruction: `transfer.py` scores a
+      U-Net trained on synthetic data on held-out real fastMRI k-space (zero-fill / synthetic / real
+      / synthetic-then-real); the first 300-sample set and its number are queued (journal).
 - [ ] Sequence spec in: JSON → builder calls (`design.design_report` already produces the report
       out). Linter messages mapped to Pulseq blocks (M4 provenance). Parameterized sequence API
       (which tensors are free, bounds, reparameterizations), hardware projections.

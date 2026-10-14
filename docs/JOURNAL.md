@@ -2306,3 +2306,32 @@ controls).
   the real 0.010: 2 x 3 x 3 spins (18; in-plane 9, 2.25 x the quick cost) should land there. r34 = the 62 v16 heads at
   2 x 3 x 3 with the drawn receive, ~8 h; v17 (the 0.5 mm residual) prepared beside it on the CPU. The receive,
   placement and bone findings stand (their measures are independent of the grain).
+
+## 2026-10-14 — M7 started: the lesion model, the generation driver, the transfer test
+
+- **Lesions** (25e1a04): `anatomy.add_lesions` places ellipsoidal, soft-edged white-matter lesions by region
+  (periventricular within 10 mm of the lateral ventricles, deep, juxtacortical within 3 mm of cortex, or anywhere in
+  white matter), the major axis log-uniform between the size bounds, orientation uniform, centres at least a spacing
+  apart; they replace white matter only, every voxel's total conserved, each recorded (centre, semi-axes, rotation,
+  volume). `sample_head(lesions=...)` applies them in MNI space before the deformation from their own stream (the other
+  classes' draws unchanged, tested), `simulate_heads --lesions`, and the generator's spec draws the count per head.
+  The class `lesion` has West 2014's 1.5 T values (QRAPMASTER: T1 917 +- 93, T2 125 +- 14 ms, PD 0.82 +- 0.04;
+  controls' WM 606 / 78 ms / 0.66) in the database; at 3 T the table's white matter scaled by the measured ratios
+  (T1 x1.51, T2 x1.61; assumed, flagged), bound pool 0.6 x WM (F reduced in lesions in every qMT study, York 2022;
+  MPF 7.2 % in lesions vs ~12 % WM, 2024) and diffusivity 1.2e-9 (plaque MD 1.23-1.24e-3 mm2/s), both assumed with
+  sources. Literature with 3 T lesion T1 / T2 tables (Hagiwara 2017, Bonnier 2014 for lesions) was behind paywalls or
+  reCAPTCHA; West's open-access table is the measured anchor. Core snapshot bit-identical; 116 tests.
+- **The driver** (`validation/realism/generate.py`): a spec (anatomy with lesions, protocol family from the real
+  headers, scanner with the receive drawn per head and the paired scan's coloured noise, quality) and a seed give one
+  head's slices as ISMRMRD files via `write_dataset` (provenance: the phantom's draws, git commit) with a `/truth`
+  group: clean and noisy k-space, the clean image, the tissue fractions and residual maps on the acquisition grid, the
+  lesion mask, every draw as JSON; a JSONL manifest. The truth grid's orientation was checked numerically against the
+  simulated image (a T2w proxy of the fractions correlates 0.74 in the display orientation, 0.68 flipped; the column
+  direction was wrong at first). The Pulseq export inside `write_dataset` fails on the multi-slice train's
+  bound-pool-only RF segments and is recorded as `seq_error` (the sequence itself is stored). Smoke test on the laptop:
+  32 x 32, one slice, two lesions, 21 s.
+- **The transfer test** (`validation/realism/transfer.py`): 4 x Cartesian undersampling with an 8 % centre at the
+  realism resolution; a 0.5 M-parameter U-Net from the zero-filled RSS to the fully sampled RSS; four numbers on
+  held-out real people: zero-filling, trained on synthetic only, trained on real (other people), synthetic then real.
+- Queued on the mini behind r34 and the v17 preparation: 100 heads x 3 drawn slices (lesions 0-4 per head, 2 x 3 x 3
+  spins, 34 real protocols) as `~/data/gen_t2w`, then `transfer_1`.
