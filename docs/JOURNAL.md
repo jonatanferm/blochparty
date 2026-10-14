@@ -2353,3 +2353,9 @@ controls).
   0.76) but gets their intensities wrong (NMSE up): a scale or contrast mismatch to read before anything else, and its
   own in-domain NMSE (0.26) says the synthetic task is harder than the real one or the net is undertrained at 140
   samples. Next: the full 181, zero-fill and the real net scored on synthetic (in-domain floors), the error maps.
+- **Why the synthetic net sharpened but did not de-alias**: its error on real images sat in the mid and bright bands
+  and at both scales, no global scale (a least-squares rescale made NMSE worse), and the error maps showed the
+  zero-fill's horizontal streaks still there. The undersampling mask was applied to the simulated k-space's last axis
+  before the display transpose, so the synthetic training inputs aliased along the other image axis than the real
+  test inputs (streak-direction ratio 0.76 against the real 1.42; after transposing the k-space into the display
+  orientation first, 1.81). transfer.py fixed (7f904a7); the test reruns on the regenerated 181.
