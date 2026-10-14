@@ -59,6 +59,7 @@ class UNet(nn.Module):
         self.out = nn.Conv2d(ch[0], 1, 1)
 
     def forward(self, x):
+        x_in = x
         skips = []
         for i, d in enumerate(self.down):
             x = d(x)
@@ -68,7 +69,7 @@ class UNet(nn.Module):
         for u in self.up:
             x = nn.functional.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
             x = u(torch.cat([x, skips.pop()], 1))
-        return self.out(x) + 0  # residual-free: the input's aliasing is not a good prior to keep
+        return x_in + self.out(x)  # residual: the net learns the correction to the zero-filled image
 
 
 def train(net, X, Y, epochs, device, lr=1e-3, seed=0, batch=16):
