@@ -2377,3 +2377,10 @@ controls).
   use small (memory `mini-disk-budget`, LESSONS). The real set will come back as a compact form, the 128 x 128 coil
   k-space per slice that the realism score and the transfer test actually use (~1.5 GB for the 34 scans instead of
   16 GB of raw files), streamed and compacted file by file.
+- **The compact real set** (6beffdc): a scan is kept as its central 128 x 128 coil k-space per slice plus the header's
+  facts (`realism.coil_kspace`, `.npz`, ~27-40 MB) and the loaders, floors and noise covariances are keyed by the
+  fastMRI file name; `fetch_fastmri.py --compact 128 --min-field 2` streams the archive, compacts each 3 T AXT2 volume
+  and deletes the raw file, drops the 1.5 T ones (the first: 0.55 GB -> 27 MB). Streaming into `~/data/fastmri_c` on
+  the mini overnight (0.2 GB/min); r34 (62 v16 heads at 2 x 3 x 3, the drawn receive, one head per process) is
+  chained behind it and the v17 preparation resumed on the CPU. echo_train.py still wants raw files (the k-space
+  line energies): it ran once and its result is in the journal.
