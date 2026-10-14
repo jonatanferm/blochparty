@@ -2336,3 +2336,9 @@ controls).
 - On the mini, first in line (r34 paused at 9 heads and resumed after it: the transfer number matters more than the
   realism confirmation): 100 v16 heads x 3 drawn slices (lesions 0-4 per head, 2 x 3 x 3 spins, the 34 real
   protocols) as `~/data/gen_t2w` (~7 h), then `transfer_1`; the v17 preparation continues on the CPU beside it.
+- **First samples and a dry run**: the generator writes a sample every ~45-110 s per slice on the mini (8-9 M spins at
+  2 x 3 x 3), heads loading in between; the first run ended after 16 samples with no traceback (a hard exit while the
+  v17 preparation ran beside it on the CPU), so the relaunch runs serial (one phantom in memory) and logs its exit
+  status, and the set is capped at 60 heads / 180 samples to land today. transfer.py ran end to end on the 16 (40
+  epochs): zero-fill NMSE 0.133 / SSIM 0.569, synthetic-only 0.200 / 0.662, real-only 0.050 / 0.875, synthetic-then-real
+  0.067 / 0.846: the pipeline works; the numbers wait for the set.
