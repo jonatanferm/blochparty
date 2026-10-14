@@ -126,7 +126,7 @@ def add_noise(k: np.ndarray, floor: float, cov, rng) -> tuple[np.ndarray, float]
 
 
 def generate(spec: dict, seed: int, out: Path, *, table, protocols: list[dict], floors: dict, covs: dict | None,
-             device_check: bool = True) -> list[dict]:
+             serial: bool = False) -> list[dict]:
     """One head for ``seed``: its slices simulated, noised, written as ``out/sample_<seed>_<slice>.h5``; returns the
     manifest records."""
     spec = merged(spec)
@@ -187,12 +187,12 @@ def generate(spec: dict, seed: int, out: Path, *, table, protocols: list[dict], 
     import h5py
     out.mkdir(parents=True, exist_ok=True)
     records = []
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pending = pool.submit(prepare, slices[0])
+    with ThreadPoolExecutor(max_workers=1) as pool:  # the next slice's phantom built while the GPU runs this one
+        pending = None if serial else pool.submit(prepare, slices[0])
         for j, i in enumerate(slices):
             t0 = time.perf_counter()
-            seq, ph, coils = pending.result()
-            if j + 1 < len(slices):
+            seq, ph, coils = prepare(i) if serial else pending.result()
+            if j + 1 < len(slices) and not serial:
                 pending = pool.submit(prepare, slices[j + 1])
             signal, engine = SH.simulate(ph, seq.merge_free(), coils)
             k_clean = SH.kspace_on_fov(signal, seq).astype(np.complex64)
@@ -253,6 +253,7 @@ def main():
     ap.add_argument("--cache", type=Path, default=Path.home() / "data" / "realism_cache")
     ap.add_argument("--fastmri", type=Path, default=None, help="real scans (floors, coil covariances); default from the spec's manifest")
     ap.add_argument("--set", action="append", default=[], help="override spec entries: section.key=json, e.g. protocol.n=64")
+    ap.add_argument("--serial", action="store_true", help="build each slice's phantom after the previous one is simulated (half the memory)")
     args = ap.parse_args()
     spec = json.loads(args.spec.read_text()) if args.spec else {}
     for item in args.set:
@@ -275,7 +276,7 @@ def main():
     (args.out).mkdir(parents=True, exist_ok=True)
     (args.out / "spec.json").write_text(json.dumps(spec, indent=1))
     for seed in _span(args.seeds):
-        generate(spec, seed, args.out, table=table, protocols=protocols, floors=floors, covs=covs)
+        generate(spec, seed, args.out, table=table, protocols=protocols, floors=floors, covs=covs, serial=args.serial)
 
 
 if __name__ == "__main__":
