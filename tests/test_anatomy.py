@@ -666,3 +666,38 @@ def test_add_dermis_is_a_conserved_surface_shell():
     total = d.fractions["skin"] + d.fractions["dermis"] + d.fractions["background"]
     assert torch.allclose(total, torch.ones_like(total))
     assert float(d.fractions["dermis"][torch.from_numpy(r < 40e-3 - t - 2 * h)].max()) == 0
+
+
+def test_add_lesions_honours_count_size_and_conservation():
+    """A white-matter block with a cortex shell: the requested number of lesions appears, each lesion's placed volume
+    is within the ellipsoid range the size bounds allow, lesion mass comes only from white matter (grey matter and
+    CSF untouched), every voxel's total stays 1, and the draw is reproducible from its generator."""
+    from blochparty.anatomy import add_lesions
+    h, n = 1e-3, 60
+    c = (np.arange(n) - n / 2 + .5) * h
+    zz, yy, xx = np.meshgrid(c, c, c, indexing="ij")
+    r = np.sqrt(zz ** 2 + yy ** 2 + xx ** 2)
+    wm = torch.from_numpy((r < 22e-3).astype(np.float64))
+    gm = torch.from_numpy(((r >= 22e-3) & (r < 26e-3)).astype(np.float64))
+    csf = torch.from_numpy(((r >= 26e-3) & (r < 28e-3)).astype(np.float64))
+    bg = 1 - wm - gm - csf
+    a = bp.Anatomy({"wm": wm, "gm": gm, "csf": csf, "background": bg}, (h,) * 3, (-n / 2 * h,) * 3)
+    out, records = add_lesions(a, np.random.default_rng(3), count=4, size_mm=(4., 8.), region="any", spacing_mm=12.)
+    assert len(records) == 4
+    total = sum(out.fractions.values())
+    assert torch.allclose(total, torch.ones_like(total))
+    assert torch.equal(out.fractions["gm"], gm) and torch.equal(out.fractions["csf"], csf)
+    assert torch.allclose(out.fractions["wm"] + out.fractions["lesion"], wm)
+    for rec in records:
+        lo, hi = (4 / 3 * math.pi * (2e-3 * .5) ** 2 * 2e-3 * 1e6, 4 / 3 * math.pi * (4e-3) ** 3 * 1e6)
+        assert lo * 0.5 <= rec["volume_ml"] <= hi * 1.5, rec  # soft edges widen the range a little
+        assert 2. <= rec["semi_axes_mm"][0] <= 4. and all(1. <= s <= 4. for s in rec["semi_axes_mm"][1:])
+        assert rec["semi_axes_mm"][0] == max(rec["semi_axes_mm"])
+    again, rec2 = add_lesions(a, np.random.default_rng(3), count=4, size_mm=(4., 8.), region="any", spacing_mm=12.)
+    assert torch.equal(again.fractions["lesion"], out.fractions["lesion"]) and rec2 == records
+    # juxtacortical lesions sit within 3 mm of the cortex; deep ones need a ventricle (MNI) frame: not here
+    out2, rec3 = add_lesions(a, np.random.default_rng(1), count=2, size_mm=(3., 5.), region="juxtacortical")
+    for rec in rec3:
+        assert np.linalg.norm(np.array(rec["centre_mm"]) * 1e-3) >= 22e-3 - 3e-3 - 1e-3
+    with pytest.raises(ValueError):
+        add_lesions(a, np.random.default_rng(0), region="cortical")

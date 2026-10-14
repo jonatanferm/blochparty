@@ -110,6 +110,8 @@ _RI = ("Richard et al. 1991 / 1993, doi:10.1111/1523-1747.ep12478540 / 10.1111/1
        "epidermis's mobile water is at least twice the dermis's")
 _ET = ("Ettl et al. 1994, doi:10.1159/000310486: vitreous of 8 normal eyes at 1.5 T, T1 3257 +- 307 ms, T2 546 +- "
        "157 ms")
+_WEST = ("West et al. 2014, doi:10.1371/journal.pone.0095161: MS lesions at 1.5 T by QRAPMASTER (synthetic MRI), R1 1.09 "
+       "+- 0.11 1/s, R2 7.97 +- 0.91 1/s, PD 82.2 +- 3.8 % (controls' white matter 1.65, 12.87, 65.8 %)")
 _SM24 = ("Simpson et al. 2024, doi:10.1002/mrm.29849: vitreous T1 at 3 T by inversion-recovery TrueFISP, healthy "
          "control eyes of 8 patients, 4.518 s")
 
@@ -186,6 +188,17 @@ def _tables():
         default[strength]["eye"] = replace(default[strength]["csf"], t1=eye_t1, t2=eye_t2,
             pd=_assumed(1., "vitreous ~99 % water: PD of CSF"),
             t2star=_assumed(eye_t2.mean, "vitreous T2* = T2: no intrinsic broadening assumed"))
+        # white-matter lesions (class lesion, anatomy.add_lesions): MS plaques measured at 1.5 T (West 2014, SyMRI);
+        # at 3 T the white matter's values scaled by the measured ratios (T1 1.51 x, T2 1.61 x), assumed
+        wm_ = default[strength]["wm"]
+        if strength == 1.5:
+            default[strength]["lesion"] = replace(wm_, pd=Distribution(.822, .038, _WEST), t1=Distribution(.917, .093, _WEST),
+                                                  t2=Distribution(.125, .014, _WEST), t2star=_assumed(.1, _WEST + "; T2* 0.8 x T2 assumed"))
+        else:
+            default[strength]["lesion"] = replace(wm_, pd=Distribution(.822, .038, _WEST),
+                t1=_assumed(wm_.t1.mean * 1.51, _WEST + f"; the 1.5 T lesion / WM T1 ratio 1.51 on this table's {strength} T WM"),
+                t2=_assumed(wm_.t2.mean * 1.61, _WEST + f"; the 1.5 T lesion / WM T2 ratio 1.61 on this table's {strength} T WM"),
+                t2star=_assumed(wm_.t2.mean * 1.61 * .8, _WEST + "; T2* 0.8 x T2 assumed"))
         # CSF and subcutaneous fat: measured values replace the legacy 1.5 T simulator priors,
         # whose CSF (T1 2.57 s, T2 0.33 s) was the largest error in T2-weighted contrast.
         csf, fat = default[strength]["csf"], default[strength]["fat"]
@@ -264,6 +277,14 @@ def _mt_and_diffusion(strength):
                      for key, d in out["fat"].items()}
     out["dermis"] = {key: _assumed(d.mean, d.citation.removeprefix("Assumption: ") + "; muscle used for the dermis "
                                    "(collagen-rich: likely more MT, no in-vivo value found)") for key, d in out["muscle"].items()}
+    out["lesion"] = {key: _assumed(d.mean * (.6 if key == "bound_fraction" else 1.),
+                                   d.citation.removeprefix("Assumption: ") + ("; MS lesions: 0.6 x white matter's bound pool assumed "
+                                   "(F reduced against NAWM in every qMT study, York et al. 2022 meta-analysis doi:10.1093/braincomms/fcac134; "
+                                   "MPF 7.2 % in lesions against ~12 % in white matter, Sci Rep 2024 doi:10.1038/s41598-024-67445-4)"
+                                   if key == "bound_fraction" else "; white matter's value used for lesions"))
+                     for key, d in out["wm"].items() if key != "diffusivity"}
+    out["lesion"]["diffusivity"] = _assumed(1.2e-9, "MS plaque mean diffusivity 1.23 +- 0.12 and 1.24 +- 0.11 x 1e-3 mm2/s (Chin J "
+                                            "Contemp Neurol Neurosurg 2012, 32 patients; Egypt J Radiol Nucl Med 2017, 3 T)")
     out["eye"] = dict(bound_fraction=_assumed(0., "vitreous: dilute macromolecules, no semi-solid pool"),
                       diffusivity=_assumed(3.04e-9, _HO + "; free water used for the vitreous"))
     return out
@@ -1253,7 +1274,7 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
 
 
-GENERATED = ("dermis", "eye")  # classes the head generator adds (add_dermis; prepare_ixi's orbit eye class)
+GENERATED = ("dermis", "eye", "lesion")  # classes the head generator adds (add_dermis; prepare_ixi's orbit eye class; add_lesions)
 
 
 def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
@@ -1277,6 +1298,93 @@ def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
     out = {k: (v if k == "background" else v * (1 - w)) for k, v in fr.items()}
     out["dermis"] = tissue * w
     return replace(anatomy, fractions=out)
+
+
+LESION_REGIONS = ("any", "periventricular", "deep", "juxtacortical")
+
+
+def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), region: str = "any",
+                edge_mm: float = 1.0, spacing_mm: float = 10.) -> tuple[Anatomy, list[dict]]:
+    """White-matter lesions as their own class (``lesion``; ROADMAP M7: "a brain with this kind of lesion there"): ``count``
+    ellipsoidal blobs with soft edges, each replacing the white matter it covers (every voxel's total is conserved; grey
+    matter, CSF and the rest keep their fractions), centred on white matter of ``region``: "periventricular" (within
+    10 mm of the lateral ventricles), "deep" (10 mm or more from them and 5 mm or more from the cortex),
+    "juxtacortical" (within 3 mm of grey matter) or "any". Sizes: the major semi-axis is drawn log-uniform between
+    ``size_mm`` (full lengths, mm), the two others 0.5-1 of it, the orientation uniform; the edge is a logistic ramp of
+    ``edge_mm`` (partial volume); centres at least ``spacing_mm`` apart; ``rng`` a numpy Generator. Needs MNI
+    coordinates for the ventricle region (a model before ``deform``). Returns the anatomy and one record per lesion
+    (centre [MNI mm], semi-axes [mm], rotation, volume [mL] actually placed). The shapes are synthetic (ellipsoids, no
+    mass effect, no rim); the tissue values of ``lesion`` are the measured ones (``DEFAULT_TISSUES``)."""
+    from scipy import ndimage
+
+    if region not in LESION_REGIONS:
+        raise ValueError(f"region must be one of {LESION_REGIONS}, not {region!r}")
+    fr = anatomy.fractions
+    if "wm" not in fr:
+        raise ValueError("add_lesions needs a wm class")
+    voxel = np.asarray(anatomy.voxel, float)
+    wm = fr["wm"].numpy()
+    candidates = wm > .5
+    if region != "any":
+        gm = (fr["gm"].numpy() > .5) if "gm" in fr else np.zeros_like(candidates)
+        d_gm = ndimage.distance_transform_edt(~gm, sampling=voxel)
+        if region == "juxtacortical":
+            candidates &= d_gm <= 3e-3
+        else:
+            vent = ventricle_mask(anatomy)
+            d_vent = ndimage.distance_transform_edt(~vent, sampling=voxel)
+            candidates &= (d_vent <= 10e-3) if region == "periventricular" else ((d_vent >= 10e-3) & (d_gm >= 5e-3))
+    idx = np.flatnonzero(candidates)
+    if len(idx) == 0:
+        raise ValueError(f"no white matter for region {region!r}")
+    grid = [np.arange(n) * h for n, h in zip(anatomy.shape, voxel)]  # z, y, x [m] from the array origin
+    centres = []
+    for _ in range(count):
+        for _try in range(200):
+            k = int(rng.choice(idx))
+            c = np.array(np.unravel_index(k, candidates.shape)) * voxel
+            if all(np.linalg.norm(c - o) >= spacing_mm * 1e-3 for o in centres):
+                centres.append(c)
+                break
+        else:
+            break  # no room for more at this spacing
+    lesion = np.zeros_like(wm)
+    records = []
+    for c in centres:
+        a = np.exp(rng.uniform(np.log(size_mm[0]), np.log(size_mm[1]))) * 1e-3 / 2
+        axes = np.array([a, a * rng.uniform(.5, 1.), a * rng.uniform(.5, 1.)])
+        q = rng.standard_normal(4)
+        q /= np.linalg.norm(q)
+        w_, x_, y_, z_ = q  # a uniform random rotation from a unit quaternion
+        rot = np.array([[1 - 2 * (y_ ** 2 + z_ ** 2), 2 * (x_ * y_ - z_ * w_), 2 * (x_ * z_ + y_ * w_)],
+                        [2 * (x_ * y_ + z_ * w_), 1 - 2 * (x_ ** 2 + z_ ** 2), 2 * (y_ * z_ - x_ * w_)],
+                        [2 * (x_ * z_ - y_ * w_), 2 * (y_ * z_ + x_ * w_), 1 - 2 * (x_ ** 2 + y_ ** 2)]])
+        reach = axes.max() + 3 * edge_mm * 1e-3
+        lo = np.maximum(np.floor((c - reach) / voxel).astype(int), 0)
+        hi = np.minimum(np.ceil((c + reach) / voxel).astype(int) + 1, np.array(candidates.shape))
+        sub = tuple(slice(l, h) for l, h in zip(lo, hi))
+        zz, yy, xx = np.meshgrid(*(g[s_] - cc for g, s_, cc in zip(grid, sub, c)), indexing="ij")
+        local = rot.T @ np.stack([zz.ravel(), yy.ravel(), xx.ravel()])
+        rho = np.sqrt(((local / axes[:, None]) ** 2).sum(0)).reshape(zz.shape)
+        # signed distance from the surface along the radius, in m, then a logistic edge
+        dist = (1 - rho) * axes.min()
+        w = 1 / (1 + np.exp(-dist / (edge_mm * 1e-3 / 4)))
+        w = np.maximum(w, lesion[sub])
+        lesion[sub] = w
+        records.append({"centre_mm": ((c + np.array(anatomy.origin[::-1])) * 1e3)[::-1].round(1).tolist(),
+                        "semi_axes_mm": (axes * 1e3).round(2).tolist(), "rotation": rot.round(4).tolist()})
+    taken = wm * lesion
+    out = {k: (v - torch.from_numpy(taken).to(v.dtype) if k == "wm" else v) for k, v in fr.items()}
+    out["lesion"] = torch.from_numpy(taken).to(fr["wm"].dtype) + (out["lesion"] if "lesion" in out else 0)
+    placed = replace(anatomy, fractions=out)
+    for r in records:  # the volume each lesion took from white matter, at the placed (soft) fractions
+        c = (np.array(r["centre_mm"][::-1]) * 1e-3 - np.array(anatomy.origin[::-1]))
+        reach = max(r["semi_axes_mm"]) * 1e-3 + 3 * edge_mm * 1e-3
+        lo = np.maximum(np.floor((c - reach) / voxel).astype(int), 0)
+        hi = np.minimum(np.ceil((c + reach) / voxel).astype(int) + 1, np.array(candidates.shape))
+        sub = tuple(slice(l, h) for l, h in zip(lo, hi))
+        r["volume_ml"] = round(float(taken[sub].sum() * np.prod(voxel) * 1e6), 3)
+    return placed, records
 
 
 # Deep grey nuclei in BrainWeb's models, which lie in MNI (ICBM) space and label them grey matter:
@@ -1752,7 +1860,7 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 ventricle_age: float | tuple[float, float] | None = None,
                 pitch: tuple[float, float] | None = None, sulci: str = "conserved",
                 source: str = "brainweb", interpolation: int = 1, residual: bool = False,
-                dermis: bool = False, ixi_prepared=None) -> DigitalPhantom:
+                dermis: bool = False, ixi_prepared=None, lesions: dict | None = None) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -1785,7 +1893,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     draw uniformly, or "age" for the head's ``age``): the lateral ventricles enlarged by ``ventricle_factor`` (Yamada 2023) through
     ``ventricle_displacement``, in MNI space before the deformation. ``pitch`` (mean, SD) [deg]:
     the head tipped about the left-right axis through its centre, nose down positive, by a normal
-    draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level). ``dermis``: the
+    draw from its own stream (applied before the yaw); None: as the model lies (MNI, AC-PC level). ``lesions``: ``add_lesions`` keywords (count, size_mm, region, ...) for white-matter lesions placed in MNI
+    space before the deformation, from their own stream (the record of each in ``meta["lesions"]``). ``dermis``: the
     skin's dermis as its own class (``add_dermis``, on the final head; with "layered_drawn", this head's dermis
     thickness), which ``table`` must hold. Classes the generator adds (``GENERATED``) draw from their own stream, so
     adding them to a table leaves the other classes' draws unchanged."""
@@ -1854,6 +1963,10 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         anatomy = label_deep_grey(anatomy)  # in MNI space, before the deformation
     if falx:
         anatomy = add_falx(anatomy)  # in MNI space (x = 0 is the midline), before the deformation
+    lesion_records = None
+    if lesions:  # white-matter lesions by region (add_lesions), in MNI space before the deformation, their own stream
+        lrng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(16)[15])
+        anatomy, lesion_records = add_lesions(anatomy, lrng, **lesions)
     vent_draw = None
     if ventricle_age is not None:
         vrng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(9)[8])
@@ -1945,6 +2058,8 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         meta["deep_grey"] = list(DEEP_GREY)
     if vent_draw is not None:
         meta["ventricles"] = vent_draw
+    if lesion_records is not None:
+        meta["lesions"] = {"spec": dict(lesions), "placed": lesion_records}
     field = total(displacement * scale)
     # where MNI's lateral-ventricle bodies (x 0, y -15, z +20 mm) landed: the output voxel whose source point is
     # nearest (a prior for the slice-stack landmark; the models are MNI-registered, the pose moves them)

@@ -126,3 +126,4 @@ uterus.myometrium,myometrium,uterus,,smooth-muscle wall of the uterine body
 vagina,vagina,,,
 vessel_wall,blood vessel wall,,,
 water,pure water,,,physical reference (not a tissue)
+lesion,white-matter lesion,,lesion,"multiple-sclerosis plaque / white-matter hyperintensity as the generator places it (anatomy.add_lesions); stand-alone, like dermis"

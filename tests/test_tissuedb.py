@@ -19,7 +19,7 @@ from blochparty.tissuedb import FIELD_DEPENDENT, FRACTIONS, PROPERTIES, load, po
 
 DB = load()
 CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
-GENERATED = ("dermis", "eye")  # classes the head generator adds (anatomy.add_dermis, prepare_ixi's eye)
+from blochparty.anatomy import GENERATED  # classes the head generator adds (dermis, eye, lesion)
 HEADER = ["tissue", "region", "property", "field_T", "value", "sd", "sd_kind", "n", "unit", "species", "state",
           "temperature_C", "method", "source", "location", "note"]
 

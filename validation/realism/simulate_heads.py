@@ -393,6 +393,8 @@ def main():
     ap.add_argument("--residual", action="store_true",
                     help="IXI heads carry their fitted T2 / PD multipliers (sample_head(residual=True)), which replace "
                          "the assumed within-tissue texture (no texture with it)")
+    ap.add_argument("--lesions", default=None,
+                    help='JSON for sample_head(lesions=...), e.g. \'{"count": 3, "size_mm": [3, 10], "region": "periventricular"}\'')
     ap.add_argument("--dermis", action="store_true",
                     help="the skin's dermis as its own class (sample_head(dermis=True), anatomy.add_dermis: the outer "
                          "1.61 mm, T2 ~12 ms)")
@@ -531,6 +533,7 @@ def main():
                               size=args.size, yaw_sd=args.yaw_sd, age=age, deep_grey=args.deep_grey, magnitude=args.deform_mm * 1e-3,
                               ventricle_age=vage, pitch=pitch, source=args.source, falx=args.falx,
                               interpolation=args.interp_order, residual=args.residual, dermis=args.dermis,
+                              lesions=json.loads(args.lesions) if args.lesions else None,
                               **({"texture": {}} if args.no_texture or args.residual else {}))
         drop_detached(head)
         if args.flow_void:
@@ -596,7 +599,7 @@ def main():
         meta = {"seed": seed, "subject": head.meta["subject"], "protocol": proto, "z_mm": (zs * 1e3).round(2).tolist(),
                 "multislice": args.multislice, "mt": args.mt, "table": args.table, "scalp": args.scalp,
                 "size": head.meta.get("size", "brainweb"), "centre": [cx, cy], "pose": head.meta.get("pose"),
-                "age": head.meta.get("age"), "source": args.source, "prepared": None if args.prepared is None else str(args.prepared), "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "coil_radius": coil_radius, "coil_radius_lr": coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": norm_mm, "receive_draw": draw or None, "ordering": args.ordering, "train": args.train,
+                "age": head.meta.get("age"), "source": args.source, "prepared": None if args.prepared is None else str(args.prepared), "ixi": head.meta.get("ixi"), "deep_grey": args.deep_grey, "deform_mm": args.deform_mm, "flow_void": args.flow_void, "sas_mm": args.sas_mm, "refocus": args.refocus, "falx": args.falx, "interp_order": args.interp_order, "texture": not (args.no_texture or args.residual), "residual": args.residual, "dermis": args.dermis, "lesions": head.meta.get("lesions"), "coil_radius": coil_radius, "coil_radius_lr": coil_radius_lr, "coil_element_radius": args.coil_element_radius, "coil_gap_mm": gap_mm, "coil_offset_mm": round(ring * 1e3, 1), "receive_normalise_mm": norm_mm, "receive_draw": draw or None, "ordering": args.ordering, "train": args.train,
                 "override": args.override, "traced_sulci_ml": None if traced is None else round(traced * 1e6, 2),
                 "ventricles": head.meta.get("ventricles"),
                 "stack": args.stack, "stack_offset_mm": args.stack_offset_mm,

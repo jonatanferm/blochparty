@@ -310,3 +310,27 @@ def test_generated_classes_leave_the_other_draws_unchanged(field):
     b = sample_head(7, subject=4, root=DATA, voxel=(4e-3,) * 3, table=bare, field_T=field)
     for k, v in b.meta["draws"].items():
         assert a.meta["draws"][k] == v
+
+
+def test_lesions_in_sampled_heads(tmp_path):
+    """sample_head(lesions=...) on an IXI head: the lesion class appears with the requested count recorded in meta,
+    its mass comes out of white matter (every voxel's total 1), the draw is its own stream (the same seed without lesions
+    gives the same tissue draws), and the lesion class has tissue values at both fields."""
+    import numpy as np
+    from blochparty.anatomy import GENERATED
+
+    _fake_ixi(tmp_path)
+    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0., source="ixi")
+    spec = {"count": 2, "size_mm": [8., 12.], "region": "any", "spacing_mm": 8.}
+    head = sample_head(5, lesions=spec, **kw)
+    plain = sample_head(5, **kw)
+    assert "lesion" in head.anatomy.fractions and "lesion" not in plain.anatomy.fractions
+    placed = head.meta["lesions"]["placed"]
+    assert head.meta["lesions"]["spec"] == spec and len(placed) == 2 and all(r["volume_ml"] > 0 for r in placed)
+    total = sum(head.anatomy.fractions.values())
+    assert float((total - 1).abs().max()) < 1e-4
+    wm_lost = float(plain.anatomy.fractions["wm"].sum() - head.anatomy.fractions["wm"].sum()) * 4e-3 ** 3 * 1e6
+    assert wm_lost == pytest.approx(float(head.anatomy.fractions["lesion"].sum()) * 4e-3 ** 3 * 1e6, rel=1e-3)
+    for k in ("wm", "gm", "csf"):  # the other classes' tissue draws do not move
+        assert head.tissues[k] == plain.tissues[k]
+    assert "lesion" in GENERATED and head.tissues["lesion"].t2.mean > head.tissues["wm"].t2.mean
