@@ -52,6 +52,15 @@ def wm_mode(vals):
     return edges[np.argmax(hist)] + (edges[1] - edges[0]) / 2
 
 
+def grain(img, m):
+    """Pixel-scale texture (Immerkaer's noise estimate) over ``m``, as a fraction of the image's p99: the simulation's
+    sub-voxel spin grain and the noise together (journal 2026-10-11: 64 spins per voxel 0.0136, 8 spins ~0.026, real
+    0.014 with its noise)."""
+    k = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], float)
+    c = np.abs(ndi.convolve(img, k, mode="reflect"))
+    return float(np.sqrt(np.pi / 2) / 6 * c[m].mean() / max(np.quantile(img[img > 0.12], .99), 1e-6))
+
+
 def features(img):
     m = head_mask(img)
     yy, xx = np.nonzero(m)
@@ -69,6 +78,8 @@ def features(img):
         # (interior p99.5), the scalp's bright decile (outer 6 px, p90)
         "q50/wm": np.quantile(vals, .5) / wm, "q75/wm": np.quantile(vals, .75) / wm, "csf/wm": np.quantile(vals, .995) / wm,
         "scalp90/wm": np.quantile(img[m & (d <= 6)], .9) / wm,
+        # grain in flat white matter (interior pixels within 15 % of the mode, eroded)
+        "grain_wm": grain(img, ndi.binary_erosion((d > 12) & (np.abs(img - wm) < 0.15 * wm), iterations=1)),
     }
 
 

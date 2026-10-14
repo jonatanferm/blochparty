@@ -519,6 +519,10 @@ Items in the order of measured effect over cost; each has its own number to move
    (drawn) on the 64 v16 heads against 34 scans decide the preset; no tissue value was changed.
    Open: CSF / WM 8 % low (MT or CSF inflow), the posterior scalp still +20 %, and the v16 heads
    need a screen (two outliers in area and CSF share came through the proxy selection).
+   *2026-10-14:* the 62-head runs (r31b / r32 / r33) against 34 scans read 0.97-1.0 because the
+   quick quality's spin grain (8 per voxel: 0.015 vs the real 0.010 in flat white matter) is a cue
+   the CNN learns with that many heads (24 heads: 0.89-0.90). Benchmark runs use 2 x 3 x 3 spins
+   from r34 on; quick.sh is read by its W1 and gap.py measures, never its CNN.
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
