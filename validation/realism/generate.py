@@ -1,6 +1,9 @@
 """The generation driver (ROADMAP M7): a spec and a seed -> one simulated sample with its truth, written with provenance.
 
-    uv run python validation/realism/generate.py --spec spec.json --seeds 0-299 --out ~/data/gen_t2w
+    for s in $(seq 0 299); do uv run python validation/realism/generate.py --spec spec.json --seeds $s-$s --out ~/data/gen_t2w; done
+
+One head per process: a process that ran 60 heads on the mini began returning all-zero signals from the GPU after
+~30 slices (2026-10-14); the driver refuses to write such a sample, so a per-head loop can simply retry.
 
 A sample is one slice of multi-coil k-space as a scanner would store it (ISMRMRD HDF5 via ``blochparty.io.write_dataset``:
 the signal in sequence order, the trajectory, the sequence, the phantom's draws), plus a ``/truth`` group a scanner never
@@ -196,6 +199,11 @@ def generate(spec: dict, seed: int, out: Path, *, table, protocols: list[dict], 
                 pending = pool.submit(prepare, slices[j + 1])
             signal, engine = SH.simulate(ph, seq.merge_free(), coils)
             k_clean = SH.kspace_on_fov(signal, seq).astype(np.complex64)
+            if not np.isfinite(k_clean).all() or np.abs(k_clean).max() == 0:
+                # 2026-10-14: a long-running process on the mini started returning all-zero signals from the GPU after
+                # ~30 slices (41 of 181 samples, not reproducible head by head); never write such a sample
+                raise RuntimeError(f"the engine returned {'no' if np.abs(k_clean).max() == 0 else 'a non-finite'} signal for seed {seed} "
+                                   f"slice {i} ({engine}): run one head per process and retry")
             floor = floors.get(proto["file"], float(np.median(list(floors.values()))))
             cov = None if covs is None or s["noise"] != "paired" else covs.get(proto["file"])
             k_noisy, sigma = (add_noise(k_clean.astype(np.complex128), floor, cov, rng_noise) if s["noise"] != "none"
