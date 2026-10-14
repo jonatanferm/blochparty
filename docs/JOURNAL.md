@@ -2333,5 +2333,6 @@ controls).
 - **The transfer test** (`validation/realism/transfer.py`): 4 x Cartesian undersampling with an 8 % centre at the
   realism resolution; a 0.5 M-parameter U-Net from the zero-filled RSS to the fully sampled RSS; four numbers on
   held-out real people: zero-filling, trained on synthetic only, trained on real (other people), synthetic then real.
-- Queued on the mini behind r34 and the v17 preparation: 100 heads x 3 drawn slices (lesions 0-4 per head, 2 x 3 x 3
-  spins, 34 real protocols) as `~/data/gen_t2w`, then `transfer_1`.
+- On the mini, first in line (r34 paused at 9 heads and resumed after it: the transfer number matters more than the
+  realism confirmation): 100 v16 heads x 3 drawn slices (lesions 0-4 per head, 2 x 3 x 3 spins, the 34 real
+  protocols) as `~/data/gen_t2w` (~7 h), then `transfer_1`; the v17 preparation continues on the CPU beside it.
