@@ -625,7 +625,10 @@ which physics (M6) the protocol families call for.
       the spec's front door is the brain itself: `anatomy.add_lesions` places white-matter lesions by
       region with cited tissue values. The first consumer is reconstruction: `transfer.py` scores a
       U-Net trained on synthetic data on held-out real fastMRI k-space (zero-fill / synthetic / real
-      / synthetic-then-real); the first 300-sample set and its number are queued (journal).
+      / synthetic-then-real). *First number, 2026-10-14 (181 samples, 11 held-out people):* zero-fill
+      NMSE 0.133 / SSIM 0.569, synthetic-only 0.052 / 0.867, real-only 0.053 / 0.857, synthetic then
+      real 0.044 / 0.887. Next: error bars (seeds), fastMRI-native 320 x 320, more heads from v17,
+      a second contrast; the lesion model's own test (does a synthetic-trained net keep real lesions?).
 - [ ] Sequence spec in: JSON → builder calls (`design.design_report` already produces the report
       out). Linter messages mapped to Pulseq blocks (M4 provenance). Parameterized sequence API
       (which tensors are free, bounds, reparameterizations), hardware projections.

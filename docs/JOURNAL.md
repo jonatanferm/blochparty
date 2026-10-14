@@ -2359,3 +2359,13 @@ controls).
   before the display transpose, so the synthetic training inputs aliased along the other image axis than the real
   test inputs (streak-direction ratio 0.76 against the real 1.42; after transposing the k-space into the display
   orientation first, 1.81). transfer.py fixed (7f904a7); the test reruns on the regenerated 181.
+- **The first transfer number, M7's benchmark** (`~/data/transfer_1` on the mini; 181 synthetic samples from 60 v16
+  heads with 0-4 lesions each, 2 x 3 x 3 spins, the 34 real protocols, the receive drawn per head, the paired scans'
+  coloured noise; 4 x Cartesian undersampling with an 8 % centre at 128 x 128; a 0.5 M-parameter residual U-Net, 40
+  epochs; 11 held-out real people, 77 slices): zero-fill NMSE 0.133 / SSIM 0.569; **trained on synthetic data only
+  0.052 / 0.867**; trained on real data (23 other people, 161 slices) 0.053 / 0.857; synthetic then real fine-tuning
+  0.044 / 0.887. In domain: the synthetic net on synthetic 0.053 / 0.885, zero-fill on synthetic 0.172 / 0.518 (the
+  synthetic task is the harder one), the real net on synthetic 0.071 / 0.846. A reconstruction net that never saw a
+  real scan matches one trained on real scans, and pre-training on synthetic beats real-only by 17 % in NMSE. Caveats:
+  one seed (a second runs as transfer_1s1), a small net and matrix, a real training set of 161 slices (the regime
+  synthetic data is for), the same 34 scans' protocols and noise covariances feed both sides (not their images).
