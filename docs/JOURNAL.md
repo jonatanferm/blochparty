@@ -2369,3 +2369,11 @@ controls).
   real scan matches one trained on real scans, and pre-training on synthetic beats real-only by 17 % in NMSE. Caveats:
   one seed (a second runs as transfer_1s1), a small net and matrix, a real training set of 161 slices (the regime
   synthetic data is for), the same 34 scans' protocols and noise covariances feed both sides (not their images).
+- **The mini's `~/data` is gone** (22:22, its owner, after the disk reached 88 % with 42 GB of fastMRI archives, every
+  run's raw k-space and the generated set): the 34 + 37 real scans, the realism cache and noise covariances, r27-r34
+  and their scores, `gen_t2w` and `transfer_1*`, the v15s / v16 / v17 preparation logs. The repo's prepared heads
+  survived (v14-v17; the obsolete versions pruned, the repo's data dir 9.8 -> 7.1 GB, 72 GB free). Every number is in
+  the journal; the second-seed transfer run and r34 were lost unread. Standing rule from the user: keep the mini's disk
+  use small (memory `mini-disk-budget`, LESSONS). The real set will come back as a compact form, the 128 x 128 coil
+  k-space per slice that the realism score and the transfer test actually use (~1.5 GB for the 34 scans instead of
+  16 GB of raw files), streamed and compacted file by file.
