@@ -152,16 +152,25 @@ def main():
     Xr_tr, Yr_tr, Xr_te, Yr_te = (np.stack(v) for v in (Xr_tr, Yr_tr, Xr_te, Yr_te))
     # simulated: /truth/kspace (noisy, display orientation after recon as score.sim_set does)
     import simulate_heads as SH
-    Xs, Ys = [], []
+    Xs, Ys, skipped = [], [], []
     for f in sorted(args.sim.glob("sample_*.h5")):
-        with h5py.File(f, "r") as h:
-            k = h["truth"]["kspace"][()].astype(np.complex128)
+        try:
+            with h5py.File(f, "r") as h:
+                k = h["truth"]["kspace"][()].astype(np.complex128)
+        except Exception as e:  # a file cut short (the generator killed mid-write)
+            skipped.append((f.name, type(e).__name__)); continue
+        if not np.isfinite(k).all() or np.abs(k).max() == 0:
+            skipped.append((f.name, "non-finite or empty")); continue
         x, y = pair(k, args.accel, args.centre, rng, SH.to_real_orientation)
+        if not (np.isfinite(x).all() and np.isfinite(y).all()):
+            skipped.append((f.name, "non-finite image")); continue
         Xs.append(x); Ys.append(y)
     Xs, Ys = np.stack(Xs), np.stack(Ys)
+    if skipped:
+        print(f"skipped {len(skipped)} simulated samples: {skipped[:5]}", flush=True)
     print(f"real: {len(Xr_tr)} train / {len(Xr_te)} test slices ({len(people) - len(test_people)} / {len(test_people)} people); "
           f"simulated: {len(Xs)} slices", flush=True)
-    results = {"n": {"real_train": len(Xr_tr), "real_test": len(Xr_te), "sim": len(Xs)}, "accel": args.accel}
+    results = {"n": {"real_train": len(Xr_tr), "real_test": len(Xr_te), "sim": len(Xs), "sim_skipped": len(skipped)}, "accel": args.accel}
     results["zero_fill"], _ = evaluate(nn.Identity(), Xr_te, Yr_te, device)
     torch.manual_seed(args.seed)
     net_s = train(UNet().to(device), Xs, Ys, args.epochs, device, seed=args.seed)
@@ -171,7 +180,10 @@ def main():
     results["real"], P_r = evaluate(net_r, Xr_te, Yr_te, device)
     net_f = train(net_s, Xr_tr, Yr_tr, args.finetune_epochs, device, lr=3e-4, seed=args.seed)
     results["synthetic_then_real"], P_f = evaluate(net_f, Xr_te, Yr_te, device)
-    results["synthetic_on_synthetic"], _ = evaluate(net_s, Xs[-max(len(Xs) // 10, 1):], Ys[-max(len(Ys) // 10, 1):], device)
+    hold = max(len(Xs) // 10, 1)  # the last tenth of the synthetic set (not held out of training: an in-domain fit check)
+    results["synthetic_on_synthetic"], _ = evaluate(net_s, Xs[-hold:], Ys[-hold:], device)
+    results["zero_fill_on_synthetic"], _ = evaluate(nn.Identity(), Xs[-hold:], Ys[-hold:], device)
+    results["real_on_synthetic"], _ = evaluate(net_r, Xs[-hold:], Ys[-hold:], device)
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(json.dumps(results, indent=1))
     np.savez_compressed(args.out / "examples.npz", X=Xr_te[:8], Y=Yr_te[:8], synthetic=P_s[:8], real=P_r[:8], finetuned=P_f[:8])

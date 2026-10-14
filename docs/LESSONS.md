@@ -1213,6 +1213,11 @@ says where it came from so it can be re-checked.
   "No such file" and a quick run lost its own heads the same way. Each run names its own input directory
   (`simulate_heads --prepared`), and nothing copies into a directory another process reads.
 
+- **A long-running Metal process can start returning zero signals** (2026-10-14): a generator that simulated 60 heads
+  in one process on the mini returned all-zero k-space for 41 of 181 slices from the 30th slice on, with normal
+  timings and no error; the same heads regenerated in fresh processes were fine. One head per process, and never
+  write a sample without checking the signal is finite and non-zero (`generate.py` now raises).
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts

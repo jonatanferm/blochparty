@@ -2342,3 +2342,14 @@ controls).
   status, and the set is capped at 60 heads / 180 samples to land today. transfer.py ran end to end on the 16 (40
   epochs): zero-fill NMSE 0.133 / SSIM 0.569, synthetic-only 0.200 / 0.662, real-only 0.050 / 0.875, synthetic-then-real
   0.067 / 0.846: the pipeline works; the numbers wait for the set.
+- **The set, and the first transfer number**: 181 samples by 14:55 (60 heads x 3 slices, capped), but 41 of them carry
+  an all-zero clean k-space: the one long-running generator process began returning nothing from the GPU after ~30
+  slices (seed 15 on; denser later: three of three slices of heads 48, 54, 59), timings and logs normal, the same head
+  regenerated alone fine. The driver now refuses to write a sample with zero or non-finite signal, generation runs
+  one head per process (as the realism runs always did), and the 20 affected heads are being regenerated. On the 140
+  good samples (`transfer_1`, 40 epochs, 4 x undersampling, 11 held-out real people): zero-fill NMSE 0.133 / SSIM 0.569;
+  **trained on synthetic only 0.166 / 0.756**; trained on real (23 other people) 0.053 / 0.857; synthetic then real
+  0.058 / 0.847; the synthetic net on synthetic 0.259 / 0.765. The synthetic net sharpens real images (SSIM 0.57 ->
+  0.76) but gets their intensities wrong (NMSE up): a scale or contrast mismatch to read before anything else, and its
+  own in-domain NMSE (0.26) says the synthetic task is harder than the real one or the net is undertrained at 140
+  samples. Next: the full 181, zero-fill and the real net scored on synthetic (in-domain floors), the error maps.
