@@ -417,6 +417,9 @@ def main():
     ap.add_argument("--receive-draw", action="store_true",
                     help="draw the receive per head: ring semi-axes x U(1, 1.25), gap behind the occiput U(5, 30) mm, "
                          "normalisation length U(20, 60) mm (the real scans' spread of coils, positioning and normalisation)")
+    ap.add_argument("--receive-scale", default="1.1,1.45",
+                    help="with --receive-draw: the ring's semi-axes scale drawn uniformly in lo,hi (1.0,1.25 matched the "
+                         "first 34 scans' scalp level 4.4 over WM; the 65-scan set reads 3.87 +- 1.02: 2026-10-15)")
     ap.add_argument("--coil-element-radius", type=float, default=None,
                     help="the receive elements' loop radius [m]: a loop's on-axis falloff instead of 1 / distance")
     ap.add_argument("--receive-normalise-mm", type=float, default=None,
@@ -462,6 +465,7 @@ def main():
                          "phantom and its coil maps in memory instead of two (the 16 GB mini swapped 6.7 GB in r24)")
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
+    args.receive_scale = tuple(float(v) for v in args.receive_scale.split(","))
     if args.train == "header" and args.ordering != "linear_full":
         ap.error("--train header needs --ordering linear_full (the real scans' 396-line linear order)")
     if args.preset == "realistic":
@@ -554,7 +558,8 @@ def main():
         coil_radius, coil_radius_lr, gap_mm, norm_mm = args.coil_radius, args.coil_radius_lr, args.coil_gap_mm, args.receive_normalise_mm
         if args.receive_draw:
             rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(15)[14])
-            draw = {"radius_scale": float(rng.uniform(1.0, 1.25)), "gap_mm": float(rng.uniform(5., 30.)),
+            lo, hi = args.receive_scale
+            draw = {"radius_scale": float(rng.uniform(lo, hi)), "gap_mm": float(rng.uniform(5., 30.)),
                     "normalise_mm": float(rng.uniform(20., 60.))}
             coil_radius = coil_radius * draw["radius_scale"]
             coil_radius_lr = None if coil_radius_lr is None else coil_radius_lr * draw["radius_scale"]

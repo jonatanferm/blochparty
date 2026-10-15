@@ -24,7 +24,8 @@ anatomy: an IXI head (``subject`` null: drawn from the prepared directory), the 
 keywords; null for none; "count": [lo, hi] draws the count per head, 0 meaning none). protocol: ``fastmri_t2w`` pairs the sample with one real scan's header (TR, TE, refocusing
 angle, coil count, echo spacing: ``simulate_heads.real_protocols``) and plays its 21-echo train over 16 slices; ``n``
 the matrix on the 220 mm field of view; ``slices`` the stack indices (a-b:step) or {"count": k} for k drawn levels.
-scanner: ``receive`` "draw" (the elliptical normalised array drawn per head, simulate_heads 2026-10-13) or "ring"
+scanner: ``receive`` "draw" (the elliptical normalised array drawn per head, simulate_heads 2026-10-13; ``receive_scale``
+the semi-axes' scale range, re-centred on the 65-scan set's scalp level on 2026-10-15) or "ring"
 (the 14 cm ring); ``b1`` "birdcage" or "uniform"; ``noise`` "paired" (the paired scan's background floor and coil
 covariance, as score.py adds it) or "none". quality: spins per voxel (z, y, x); 2 x 3 x 3 keeps the sub-voxel grain at
 the real scans' level (journal 2026-10-14).
@@ -54,7 +55,7 @@ DEFAULT_SPEC = {
     "anatomy": {"source": "ixi", "prepared": None, "subject": None, "lesions": None, "deform_mm": 3.0},
     "protocol": {"family": "fastmri_t2w", "manifest": str(R.FASTMRI / "manifest.json"),
                  "n": 128, "slices": {"count": 3}},
-    "scanner": {"receive": "draw", "b1": "birdcage", "noise": "paired",
+    "scanner": {"receive": "draw", "b1": "birdcage", "noise": "paired", "receive_scale": [1.1, 1.45],
                 "coil_radius": 0.11, "coil_radius_lr": 0.095, "coil_gap_mm": 10., "receive_normalise_mm": 30.},
     "quality": {"spins": [2, 3, 3], "sampling": "proportional", "jitter": "inplane", "slab_voxels": 3, "rf_raster": 1e-4},
 }
@@ -152,7 +153,8 @@ def generate(spec: dict, seed: int, out: Path, *, table, protocols: list[dict], 
     draw = None
     if s["receive"] == "draw":
         rng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(15)[14])
-        draw = {"radius_scale": float(rng.uniform(1.0, 1.25)), "gap_mm": float(rng.uniform(5., 30.)),
+        lo, hi = s.get("receive_scale", (1.1, 1.45))
+        draw = {"radius_scale": float(rng.uniform(lo, hi)), "gap_mm": float(rng.uniform(5., 30.)),
                 "normalise_mm": float(rng.uniform(20., 60.))}
         coil_radius, coil_radius_lr = coil_radius * draw["radius_scale"], coil_radius_lr * draw["radius_scale"]
         gap_mm, norm_mm = draw["gap_mm"], draw["normalise_mm"]
