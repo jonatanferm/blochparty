@@ -1305,4 +1305,4 @@ The parts of M5 that need no outside access, done while the user was away.
   z = +40 mm slice vs. the phantom, max abs error 2.3e-8; free precession after a 90° pulse under
   Gx 12 / Gy −6 mT/m leaves Mxy = c·i·e^{−i2πk·r} with the tracked k, residual 3e-7 and c real
   positive, so the Bloch integrator and the k-space model agree in sign.
-- No core code changed, so no snapshot.
+- No core code changed, so no snapshot. Commit: 3a3a65c.
