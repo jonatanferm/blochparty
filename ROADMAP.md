@@ -523,6 +523,10 @@ Items in the order of measured effect over cost; each has its own number to move
    quick quality's spin grain (8 per voxel: 0.015 vs the real 0.010 in flat white matter) is a cue
    the CNN learns with that many heads (24 heads: 0.89-0.90). Benchmark runs use 2 x 3 x 3 spins
    from r34 on; quick.sh is read by its W1 and gap.py measures, never its CNN.
+   *2026-10-15, r34 (62 heads at 2 x 3 x 3 vs 65 compact scans): CNN 0.996 with every level
+   over white matter within noise; what it reads is the grain (0.012 vs 0.010: 4 x 4 x 4 fixes it)
+   and the scalp level (+12 % against the larger real set's dimmer scalp: re-centre the receive
+   draw). The real set is now the compact 65 (journal).*
 2. **A benchmark that resolves 0.05** (2 days, plus a data request). More simulated heads: 64 of
    the 185 downloaded IXI subjects, chosen so the heads' size and CSF share follow the real
    distribution (area 0.95 x real today; the CNN's verdict tracks the CSF share), at quick quality
