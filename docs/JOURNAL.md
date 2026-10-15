@@ -2403,3 +2403,12 @@ controls).
   now sits 12 % high) and the posterior scalp 0.51 vs 0.44 (0.67). At 62 heads against 65 scans the CNN resolves
   cues of this size; the two it has left are named and cheap: spins (4 x 4 x 4, ~2.8 x the cost per slice) and the
   receive draw's centre against the larger real set. The transfer test, not this number, is M7's metric.
+- **Next: the transfer number made robust, and the lesion test.** The receive draw re-centred on the 65-scan set
+  (`--receive-scale 1.1,1.45`, the generator's `scanner.receive_scale`): q51 on v17 heads reads scalp over WM 4.09
+  against the real 3.90 (4.35 before), CSF 4.98 vs 5.02, posterior / anterior scalp 0.50 / 0.45 vs 0.44 / 0.44.
+  transfer.py now holds out the last tenth of each synthetic set, takes a second set (`--sim2`) as an ablation, and
+  scores a lesion test: on held-out synthetic samples with lesions, each net's NMSE inside the lesion pixels against
+  the rest of the brain and the lesion's reconstructed level (does a net trained without lesions flatten them?).
+  Tonight on the mini (`night2.sh`): 60 v17 heads x 3 slices at 2 x 4 x 4 spins with 1-4 lesions each (`gen_les`)
+  and the same heads without (`gen_nol`), one head per process with a retry, then three seeds of the transfer test
+  against the 65 real scans (real-only now trains on ~300 slices); the raw samples are deleted afterwards.
