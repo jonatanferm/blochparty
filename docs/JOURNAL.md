@@ -1313,4 +1313,4 @@ The parts of M5 that need no outside access, done while the user was away.
   Checks: 3D k-space vs. a brute-force 3D DFT at sampled points, relative error 2.9e-8; all five
   slices from one whole-slab scan vs. the phantom, max abs error 4.9e-8; 2D single slice still
   3.3e-8; the free-precession check unchanged (residual 3.1e-7). Also replaced fake Unicode
-  subscripts (ᵧ is gamma, ᵩ is phi) in the notes with <sub> markup.
+  subscripts (ᵧ is gamma, ᵩ is phi) in the notes with <sub> markup. Commit: 5527161.
