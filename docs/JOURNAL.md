@@ -1287,3 +1287,22 @@ The parts of M5 that need no outside access, done while the user was away.
 - Commits: 049efdf (script, RESULTS), b7cf67a (LESSONS).
 - After the tissuedb merge (#7) its LESSONS line saying the script uses Wansapura's abstract order
   was corrected to the new assignment.
+
+## 2026-10-15 — "Spins to Image", an interactive MRI explainer
+
+- `examples/spins_to_image.html`: a self-contained web page for non-specialists. It shows protons in
+  five slices in a rotatable 3D view, with a B0 slider (alignment drawn exaggerated, the real
+  excess quoted: 9.9 per million at 3 T, 37 °C), Gx/Gy/Gz sliders colouring each proton by its
+  frequency offset, an RF pulse with slice picking (3 kHz bandwidth, 7.0 mm at Gz 10 mT/m), a
+  Cartesian gradient-echo acquisition into k-space (readout 10 mT/m, Δk = 1/FOV = 4.17 m⁻¹,
+  dwell 9.79 µs, sample i at (i+½)·dwell), and an inverse DFT reconstruction. Phantoms: the letters
+  B-L-O-C-H (one per slice, so slice selection is visible in the image) and an ellipsoid head.
+- Same conventions as the core (pulse along +x tips +z to +y, Mxy ∝ e^{−i2πft}, CODATA γ̄).
+  Each voxel is integrated with an exact rotation per frame; gradient precession runs 40,000×
+  slower than real, relaxation is sped up to seconds.
+- Independent checks (headless Chromium, `window.spinsToImage` hook): page k-space vs. a
+  brute-force 2D DFT written separately, relative error 2.5e-8 (float32); reconstruction of the
+  z = +40 mm slice vs. the phantom, max abs error 2.3e-8; free precession after a 90° pulse under
+  Gx 12 / Gy −6 mT/m leaves Mxy = c·i·e^{−i2πk·r} with the tracked k, residual 3e-7 and c real
+  positive, so the Bloch integrator and the k-space model agree in sign.
+- No core code changed, so no snapshot.
