@@ -53,6 +53,7 @@ import torch
 from scipy import ndimage
 
 import blochparty as bp
+import realism as R  # noqa: E402
 from blochparty.anatomy import Distribution
 from blochparty.sequence import System
 
@@ -366,7 +367,7 @@ def main():
     ap.add_argument("--n", type=int, default=128)
     ap.add_argument("--subject", type=int, default=None)
     ap.add_argument("--root", type=Path, default=ROOT)
-    ap.add_argument("--manifest", type=Path, default=Path.home() / "data" / "fastmri_brain" / "manifest.json")
+    ap.add_argument("--manifest", type=Path, default=R.FASTMRI / "manifest.json", help="the real scans' manifest (realism.FASTMRI)")
     ap.add_argument("--out", type=Path, default=Path.home() / "data" / "realism_sim")
     ap.add_argument("--multislice", action="store_true", help="play the other 15 slices' pulses")
     ap.add_argument("--mt", action="store_true", help="bound pool on (to_phantom(mt=True))")

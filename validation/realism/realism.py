@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-FASTMRI = Path.home() / "data" / "fastmri_brain"
+FASTMRI = Path.home() / "data" / "fastmri_c"  # the compact real set (fetch_fastmri --compact); fastmri_brain until 2026-10-14
 
 
 def centred_fft(x, axes):

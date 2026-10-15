@@ -52,7 +52,7 @@ import simulate_heads as SH  # noqa: E402
 
 DEFAULT_SPEC = {
     "anatomy": {"source": "ixi", "prepared": None, "subject": None, "lesions": None, "deform_mm": 3.0},
-    "protocol": {"family": "fastmri_t2w", "manifest": str(Path.home() / "data" / "fastmri_brain" / "manifest.json"),
+    "protocol": {"family": "fastmri_t2w", "manifest": str(R.FASTMRI / "manifest.json"),
                  "n": 128, "slices": {"count": 3}},
     "scanner": {"receive": "draw", "b1": "birdcage", "noise": "paired",
                 "coil_radius": 0.11, "coil_radius_lr": 0.095, "coil_gap_mm": 10., "receive_normalise_mm": 30.},

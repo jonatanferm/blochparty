@@ -2384,3 +2384,13 @@ controls).
   the mini overnight (0.2 GB/min); r34 (62 v16 heads at 2 x 3 x 3, the drawn receive, one head per process) is
   chained behind it and the v17 preparation resumed on the CPU. echo_train.py still wants raw files (the k-space
   line energies): it ran once and its result is in the journal.
+
+## 2026-10-15 — The compact real set is in: 65 scans; r34 relaunched
+
+- The compacting stream took the whole validation archive overnight: **65 3 T AXT2 scans** (the archive holds 101
+  AXT2 volumes, 36 at 1.5 T dropped after their headers), 1.9 GB in `~/data/fastmri_c` on the mini (the raw set
+  would have been ~35 GB); the real-vs-real control on the 65 reads 0.511. v17 (the 0.5 mm residual) is complete:
+  62 heads, no failures. The first r34 attempt behind the stream produced nothing: simulate_heads' protocol manifest
+  still defaulted to the deleted `fastmri_brain`; the defaults now follow `realism.FASTMRI = ~/data/fastmri_c`
+  (simulate_heads `--manifest`, generate.py's spec). r34 relaunched (62 v16 heads, 2 x 3 x 3, the drawn receive,
+  one head per process, ~8 h), scored against the 65.
