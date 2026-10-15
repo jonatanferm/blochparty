@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Spins to Image</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: left, the 3D spin stage over three scanner screens (signal, k-space, image); right, the five
+   steps of a scan as a control column. Stacks to one column on phones. Palette follows anatomy_viewer.html. */
+:root {
+  --bg: #eef1f3; --panel: #f9fafb; --fg: #1d2429; --muted: #5b6770; --line: #d5dbe0; --stage: #e4e8eb;
+  --accent: #2f6f8f;                                   /* magnet, gradients, controls */
+  --rf: #b8336a;                                       /* RF pulse */
+  --lo: #2a6fc4; --mid: #8a959d; --hi: #d27a1f;        /* proton frequency: below / at / above f0 */
+  /* scanner screens are dark in both themes, like a console monitor */
+  --screen: #070b0e; --screen-dim: #10181d; --screen-grid: #1c262d; --screen-fg: #c9d4da;
+  --trace-re: #ff6f9f; --trace-im: #6db3d4;
+  --sans: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1418; --panel: #151b20; --fg: #dfe6ea; --muted: #8b98a2; --line: #26313a; --stage: #0b1013;
+  --accent: #6db3d4; --rf: #ff6f9f; --lo: #5c9dff; --mid: #77848d; --hi: #f0a250; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1418; --panel: #151b20; --fg: #dfe6ea; --muted: #8b98a2; --line: #26313a; --stage: #0b1013;
+  --accent: #6db3d4; --rf: #ff6f9f; --lo: #5c9dff; --mid: #77848d; --hi: #f0a250; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 var(--sans) }
+.wrap { max-width: 1320px; margin: 0 auto; padding-block: 22px 40px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 18px }
+header { display: grid; gap: 4px; max-width: 72ch }
+h1 { font-size: 26px; line-height: 1.15; margin: 0; font-weight: 700; letter-spacing: -.01em; text-wrap: balance }
+.lede { margin: 0; color: var(--muted) }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 18px; align-items: start }
+.left { display: grid; gap: 14px; min-width: 0 }
+
+/* 3D stage */
+.stage { position: relative; aspect-ratio: 16 / 10; max-width: 100%; background: var(--stage); border: 1px solid var(--line); border-radius: 10px; overflow: hidden }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; cursor: grab }
+.stage canvas:active { cursor: grabbing }
+.hud { position: absolute; left: 12px; top: 10px; font: 12px/1.55 var(--mono); color: var(--fg); pointer-events: none; font-variant-numeric: tabular-nums }
+.hud b { font-weight: 500; color: var(--muted) }
+.viewbar { position: absolute; right: 10px; top: 10px; display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--panel) }
+.seg button { border: 0; border-radius: 0; background: transparent; color: var(--muted); padding: 4px 9px; font: 500 12px var(--sans) }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--panel) }
+.legend { position: absolute; left: 12px; bottom: 10px; display: grid; gap: 3px; font: 11px var(--mono); color: var(--muted); pointer-events: none }
+.legend .bar { width: 170px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, var(--lo), var(--mid), var(--hi)) }
+.legend .ticks { display: flex; justify-content: space-between; width: 170px }
+.hint { position: absolute; right: 12px; bottom: 10px; font: 11px var(--mono); color: var(--muted); pointer-events: none }
+
+/* scanner screens */
+.screens { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px }
+figure { margin: 0; display: grid; gap: 6px; min-width: 0 }
+figure canvas { width: 100%; aspect-ratio: 1; max-width: 100%; display: block; background: var(--screen); border-radius: 8px }
+figcaption { font-size: 12.5px; color: var(--muted); line-height: 1.45 }
+figcaption strong { color: var(--fg); font-weight: 600 }
+
+/* control column */
+.controls { display: grid; gap: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; min-width: 0 }
+.step { padding: 14px 16px; display: grid; gap: 9px; border-top: 1px solid var(--line) }
+.step:first-child { border-top: 0 }
+.step h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: baseline; gap: 8px }
+.step h2 .n { font: 500 11px var(--mono); color: var(--accent); border: 1px solid currentColor; border-radius: 50%; width: 20px; height: 20px; display: inline-grid; place-items: center; flex: none; transform: translateY(-1px) }
+.step p { margin: 0; font-size: 13px; color: var(--muted); max-width: 60ch }
+.ctl { display: grid; grid-template-columns: 54px minmax(0, 1fr) 92px; align-items: center; gap: 8px }
+.ctl label { font-size: 13px; font-weight: 500 }
+.ctl output { font: 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap }
+input[type="range"] { width: 100%; accent-color: var(--accent); margin: 0 }
+#flip, #rfoff { accent-color: var(--rf) }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center }
+button, select { font: 500 13px var(--sans); color: var(--fg); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 11px; cursor: pointer }
+button:hover:not(:disabled), select:hover:not(:disabled) { border-color: var(--muted) }
+button:disabled, select:disabled, input:disabled { opacity: .45; cursor: not-allowed }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.primary { background: var(--accent); border-color: var(--accent); color: var(--panel); font-weight: 600 }
+.fire { background: var(--rf); border-color: var(--rf); color: var(--panel); font-weight: 600 }
+.slices button { padding: 4px 8px; font: 12px var(--mono) }
+.slices button[aria-pressed="true"] { border-color: var(--rf); color: var(--rf); box-shadow: inset 0 0 0 1px var(--rf) }
+.note { font-size: 12.5px; color: var(--fg); background: var(--bg); border-radius: 6px; padding: 7px 9px; line-height: 1.45 }
+.facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 12px; margin: 0; font-size: 12.5px }
+.facts dt { color: var(--muted) }
+.facts dd { margin: 0; font: 12px var(--mono); text-align: right; font-variant-numeric: tabular-nums }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px }
+.pair label { display: grid; gap: 3px; font-size: 12px; color: var(--muted) }
+.pair select { width: 100% }
+.check { display: flex; gap: 7px; align-items: center; font-size: 13px }
+.check input { accent-color: var(--accent) }
+.progress { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden }
+.progress span { display: block; height: 100%; width: 0; background: var(--accent) }
+
+footer { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 4px; display: grid; gap: 6px; max-width: 90ch }
+footer h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0; font-weight: 600 }
+footer ul { margin: 0; padding-left: 18px; color: var(--muted); font-size: 13px; display: grid; gap: 3px }
+
+@media (max-width: 980px) {
+  .main { grid-template-columns: minmax(0, 1fr) }
+  .stage { aspect-ratio: 4 / 3 }
+}
+@media (max-width: 640px) {
+  .screens { grid-template-columns: minmax(0, 1fr) }
+  figure canvas { max-width: 420px }
+  h1 { font-size: 22px }
+  .hud { font-size: 11px }
+  .legend .bar, .legend .ticks { width: 130px }
+  .hint { display: none }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Spins to Image</h1>
+    <p class="lede">How an MRI scanner turns spinning protons into a picture. Switch on the magnet, add gradients, tip the protons with a radio pulse, record their signal into k-space, then Fourier-transform it into an image.</p>
+  </header>
+
+  <div class="main">
+    <div class="left">
+      <div class="stage">
+        <canvas id="view3d" aria-label="3D view of proton magnetization in five slices"></canvas>
+        <div class="hud" id="hud"></div>
+        <div class="viewbar">
+          <div class="seg" role="group" aria-label="Reference frame">
+            <button id="frameLab" aria-pressed="true">Lab frame</button>
+            <button id="frameRot" aria-pressed="false">Rotating frame</button>
+          </div>
+          <div class="seg"><button id="resetView">Reset view</button></div>
+        </div>
+        <div class="legend" aria-hidden="true">
+          <span>proton frequency</span>
+          <div class="bar"></div>
+          <div class="ticks"><span>&minus;50 kHz</span><span>f&#8320;</span><span>+50 kHz</span></div>
+        </div>
+        <div class="hint">drag to turn</div>
+      </div>
+
+      <div class="screens">
+        <figure>
+          <canvas id="sig" aria-label="Coil signal"></canvas>
+          <figcaption><strong>Coil signal.</strong> The receive coil picks up the sum of all tipped protons. When they point the same way the signal is strong; when gradients fan them out it cancels.</figcaption>
+        </figure>
+        <figure>
+          <canvas id="ksp" aria-label="k-space"></canvas>
+          <figcaption><strong>k-space.</strong> Each point is the signal recorded at one gradient setting. The centre holds the broad shapes, the edges hold fine detail. The ring marks where the gradients have taken you. 3D k-space is a stack of k<sub>z</sub> planes.</figcaption>
+        </figure>
+        <figure>
+          <canvas id="img" aria-label="Reconstructed image"></canvas>
+          <figcaption><strong>Image.</strong> The inverse Fourier transform of k-space. Brightness is proton density in what you excited; a 3D scan gives every slice.</figcaption>
+        </figure>
+      </div>
+
+      <footer>
+        <h2>What is simplified</h2>
+        <ul>
+          <li>Alignment is drawn hugely exaggerated. At 3 T only about 10 protons in a million are net aligned; that tiny excess is all the signal there is.</li>
+          <li>Time is slowed. Gradient-driven precession runs 40,000 times slower than real; the Larmor spin in the lab frame is slowed about 10<sup>8</sup> times and not on the same scale.</li>
+          <li>Relaxation (T1, T2) is sped up to a few seconds so you can watch it, and each k-space line starts from fully relaxed protons.</li>
+          <li>Each arrow is the net magnetization of a small volume, drawn for one in every few voxels. One ideal receive coil, no noise, an ideal slice profile, no fat, flow or field errors. For all of that, see the Bloch Party simulator itself.</li>
+        </ul>
+      </footer>
+    </div>
+
+    <aside class="controls">
+      <section class="step">
+        <h2><span class="n">1</span>Main magnet</h2>
+        <p>Each proton is a tiny magnet. With no field they point every which way. Turn up B&#8320; and a small majority lines up with it, and every proton spins around the field at the Larmor frequency f&#8320; = &gamma;&#772;&middot;B&#8320;.</p>
+        <div class="ctl"><label for="b0">B&#8320;</label><input id="b0" type="range" min="0" max="3" step="0.05" value="0" data-lock><output id="b0v" for="b0">0.00 T</output></div>
+        <dl class="facts">
+          <dt>Larmor frequency f&#8320;</dt><dd id="f0v">0 MHz</dd>
+          <dt>Net aligned (real, 37 &deg;C)</dt><dd id="ppmv">0 per million</dd>
+        </dl>
+      </section>
+
+      <section class="step">
+        <h2><span class="n">2</span>Gradients</h2>
+        <p>Gradient coils add a field that grows across the scanner, so each proton's frequency now tells where it is. Colour shows each proton's offset from f&#8320;. The rotating frame hides f&#8320; and shows only these differences.</p>
+        <div class="ctl"><label for="gx">G<sub>x</sub></label><input id="gx" type="range" min="-20" max="20" step="0.5" value="0" data-lock><output id="gxv">0.0 mT/m</output></div>
+        <div class="ctl"><label for="gy">G<sub>y</sub></label><input id="gy" type="range" min="-20" max="20" step="0.5" value="0" data-lock><output id="gyv">0.0 mT/m</output></div>
+        <div class="ctl"><label for="gz">G<sub>z</sub></label><input id="gz" type="range" min="-20" max="20" step="0.5" value="0" data-lock><output id="gzv">0.0 mT/m</output></div>
+        <div class="row"><button id="gzero" data-lock>Zero gradients</button></div>
+        <dl class="facts"><dt>Frequencies across the object</dt><dd id="spreadv">all at f&#8320;</dd></dl>
+      </section>
+
+      <section class="step">
+        <h2><span class="n">3</span>RF pulse</h2>
+        <p>A radio pulse at the protons' own frequency tips them over. With a gradient on, only protons whose frequency matches the pulse respond, which is how a scanner picks one slice.</p>
+        <div class="ctl"><label for="flip">Flip</label><input id="flip" type="range" min="0" max="180" step="5" value="90" data-lock><output id="flipv">90&deg;</output></div>
+        <div class="ctl"><label for="rfoff">Tune</label><input id="rfoff" type="range" min="-70" max="70" step="0.1" value="0" data-lock><output id="rfoffv">f&#8320; + 0.0 kHz</output></div>
+        <div class="row slices" id="slices" role="group" aria-label="Pick a slice">
+          <button data-slice="-1" data-lock>All</button>
+          <button data-slice="0" data-lock>&minus;80</button>
+          <button data-slice="1" data-lock>&minus;40</button>
+          <button data-slice="2" data-lock>0</button>
+          <button data-slice="3" data-lock>+40</button>
+          <button data-slice="4" data-lock>+80 mm</button>
+        </div>
+        <div class="note" id="rfnote"></div>
+        <div class="row"><button class="fire" id="fire" data-lock>Send RF pulse</button><button id="resetSpins" data-lock>Relax all spins</button></div>
+      </section>
+
+      <section class="step">
+        <h2><span class="n">4</span>Fill k-space</h2>
+        <p>Each line repeats the same recipe: tip the protons, use G<sub>y</sub> and G<sub>x</sub> to twist them into a spatial wave, then record while G<sub>x</sub> sweeps the wave finer and finer. The signal says how much of that wave the object contains. In 3D, a G<sub>z</sub> step also twists the wave along z, so one scan of the whole slab separates every slice.</p>
+        <div class="pair">
+          <label>Object<select id="phantom" data-lock><option value="letters">Letters</option><option value="head">Head</option></select></label>
+          <label>Matrix<select id="matrix" data-lock><option value="32">32 &times; 32</option><option value="64">64 &times; 64</option></select></label>
+        </div>
+        <div class="pair">
+          <label>Encoding<select id="enc" data-lock><option value="2">2D: one slice</option><option value="3">3D: whole slab</option></select></label>
+          <label>Speed<select id="speed" data-lock><option value="2">First 2 lines slow</option><option value="0">Fast</option><option value="999">All slow</option></select></label>
+        </div>
+        <div class="note" id="acqnote"></div>
+        <div class="row"><button class="primary" id="acquire" data-lock>Acquire k-space</button><button id="skip" disabled>Finish now</button><button id="clear" data-lock>Clear</button></div>
+        <div class="progress" aria-hidden="true"><span id="prog"></span></div>
+        <dl class="facts">
+          <dt>Progress</dt><dd id="progv">no lines yet</dd>
+          <dt>Readout gradient</dt><dd>10 mT/m</dd>
+          <dt>Sample spacing &Delta;k = 1/FOV</dt><dd id="dkv"></dd>
+          <dt>Dwell time</dt><dd id="dwellv"></dd>
+          <dt>k<sub>z</sub> spacing (3D) = 1/slab</dt><dd id="dkzv"></dd>
+        </dl>
+      </section>
+
+      <section class="step">
+        <h2><span class="n">5</span>Reconstruct</h2>
+        <p>Every k-space point is the strength of one wave. Adding all the waves back together, an inverse Fourier transform, gives the picture. Try it half-way through: missing lines blur the image.</p>
+        <div class="row"><button class="primary" id="recon">Reconstruct image</button></div>
+        <label class="check"><input type="checkbox" id="live"> Update the image after every line</label>
+        <label class="check"><input type="checkbox" id="show3d" checked> Paint the image onto the slices in the 3D view</label>
+      </section>
+    </aside>
+  </div>
+
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = id => document.getElementById(id);
+const TAU = 2 * Math.PI;
+const GAMMA_BAR = 42.577478518e6;          // 1H gamma / 2pi [Hz/T], blochparty.constants.GAMMA_BAR
+const HBAR = 1.054571817e-34, KB = 1.380649e-23, BODY_K = 310.15;
+const FOV = 0.24;                          // [m] in x and y
+const ZPOS = [-0.08, -0.04, 0, 0.04, 0.08], NZ = 5, DZ = 0.04;   // slice centres [m]
+const RF_BW = 3000;                        // RF pulse bandwidth [Hz]
+const SLOW = 40000;                        // gradient precession shown this many times slower
+const LAB_RATE = 0.35;                     // lab-frame Larmor spin [turns/s per T] (real: 42.6 MHz/T)
+const T1V = 3.5, T2V = 3.0;                // relaxation in animation seconds
+const DISP = 16;                           // arrows per side per slice
+const ZDRAW = 1.6;                         // slice spacing drawn stretched in the 3D view
+const GREAD = 0.010, TPE = 1e-3;           // readout gradient [T/m], phase-encode duration [s]
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const st = {
+  N: 32, phantom: 'letters', B0: 0, G: [0, 0, 0], flip: 90, rfOff: 0, lab: true,
+  phiC: 0, k: [0, 0, 0], kLive: false, rf: null, acq: null, exc: new Float32Array(NZ),
+  yaw: -0.5, pitch: 0.78, slowLines: 2, live: false, enc: 2, kSlices: null,
+};
+let V, rho, Mx, My, Mz, df, xs, ys, sumRho, dfMin = 0, dfMax = 0;
+let disp, ux, uy, uz;
+let Ec, Es, Kre, Kim, got, kref = 1, recon = null, reconLines = 0, kDirty = true, imgDirty = true;
+let sig = { re: new Float32Array(300), im: new Float32Array(300), head: 0 };
+let C = {};
+
+const peq = B0 => 1 - Math.exp(-B0 / 0.7);  // drawn alignment, exaggerated
+const prof = d => 1 / (1 + Math.pow(Math.abs(2 * d / RF_BW), 8));
+const fmt = (x, d) => (x < 0 ? '−' : '') + Math.abs(x).toFixed(d);
+const fmtS = (x, d) => (x < 0 ? '−' : '+') + Math.abs(x).toFixed(d);
+
+/* ---------- phantom ---------- */
+const HEAD = [ // centre x,y,z | semi-axes | rotation deg | proton density; painted in order, unit = half FOV / half slab
+  [0, 0, 0, .72, .9, 1.15, 0, .85],          // scalp
+  [0, -.01, 0, .665, .845, 1.08, 0, .05],    // skull: almost no MR signal
+  [0, -.015, 0, .615, .795, 1.0, 0, .62],    // brain
+  [.14, .07, 0, .07, .26, .62, 16, .95],     // ventricles (CSF)
+  [-.14, .07, 0, .07, .26, .62, -16, .95],
+  [.3, -.4, .5, .1, .1, .4, 0, .92],         // lesion in the upper slices
+  [-.32, .36, -.3, .11, .075, .45, 30, .32],
+];
+function makePhantom(name, N) {
+  const r = new Float32Array(NZ * N * N);
+  if (name === 'head') {
+    for (let z = 0; z < NZ; z++) {
+      const Z = ZPOS[z] / 0.1;
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        const X = (i - N / 2 + 0.5) / (N / 2), Y = (j - N / 2 + 0.5) / (N / 2);
+        let v = 0;
+        for (const [cx, cy, cz, ax, ay, az, rot, p] of HEAD) {
+          const c = Math.cos(rot * Math.PI / 180), s = Math.sin(rot * Math.PI / 180);
+          const dx = X - cx, dy = Y - cy, xr = dx * c + dy * s, yr = -dx * s + dy * c, zr = Z - cz;
+          if ((xr / ax) ** 2 + (yr / ay) ** 2 + (zr / az) ** 2 <= 1) v = p;
+        }
+        r[(z * N + j) * N + i] = v;
+      }
+    }
+  } else {
+    const word = 'BLOCH', cv = document.createElement('canvas');
+    cv.width = cv.height = N;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    for (let z = 0; z < NZ; z++) {
+      g.clearRect(0, 0, N, N);
+      g.fillStyle = '#000'; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = `700 ${Math.round(N * 0.84)}px Arial, Helvetica, sans-serif`;
+      g.fillText(word[NZ - 1 - z], N / 2, N / 2 + N * 0.05);   // top slice reads B, bottom H
+      const px = g.getImageData(0, 0, N, N).data;
+      for (let row = 0; row < N; row++) for (let i = 0; i < N; i++)
+        r[(z * N + (N - 1 - row)) * N + i] = 0.9 * px[(row * N + i) * 4 + 3] / 255;   // canvas row 0 is +y
+    }
+  }
+  return r;
+}
+
+/* ---------- state ---------- */
+function build() {
+  const N = st.N;
+  V = NZ * N * N;
+  rho = makePhantom(st.phantom, N);
+  Mx = new Float32Array(V); My = new Float32Array(V); Mz = new Float32Array(V).fill(peq(st.B0));
+  xs = new Float32Array(N); ys = new Float32Array(N);
+  for (let i = 0; i < N; i++) xs[i] = ys[i] = (i - N / 2) * FOV / N;
+  df = new Float32Array(V);
+  sumRho = 0; for (let n = 0; n < V; n++) sumRho += rho[n];
+  const stride = N / DISP, list = [];
+  for (let z = 0; z < NZ; z++) for (let b = 0; b < DISP; b++) for (let a = 0; a < DISP; a++) {
+    const n = (z * N + b * stride + stride / 2) * N + a * stride + stride / 2;
+    if (rho[n] > 0.03) list.push(n);
+  }
+  disp = Int32Array.from(list);
+  ux = new Float32Array(disp.length); uy = new Float32Array(disp.length); uz = new Float32Array(disp.length);
+  for (let d = 0; d < disp.length; d++) {
+    const t = 2 * Math.random() - 1, p = TAU * Math.random(), s = Math.sqrt(1 - t * t);
+    ux[d] = s * Math.cos(p); uy[d] = s * Math.sin(p); uz[d] = t;
+  }
+  Ec = new Float64Array(N * N); Es = new Float64Array(N * N);
+  for (let a = 0; a < N; a++) for (let i = 0; i < N; i++) {
+    const th = TAU * (a - N / 2) * (i - N / 2) / N;
+    Ec[a * N + i] = Math.cos(th); Es[a * N + i] = Math.sin(th);
+  }
+  Kre = new Float32Array(N * N); Kim = new Float32Array(N * N); got = new Uint8Array(N * N);
+  recon = null; reconLines = 0; kDirty = imgDirty = true;
+  st.exc.fill(0); st.kLive = false; st.k = [0, 0, 0];
+  updateDf();
+  $('dkv').textContent = (1 / FOV).toFixed(2) + ' m⁻¹';
+  $('dkzv').textContent = (1 / (NZ * DZ)).toFixed(2) + ' m\u207b\u00b9';
+  $('dwellv').textContent = (1e6 / FOV / (GAMMA_BAR * GREAD)).toFixed(2) + ' µs';
+  updateTexts();
+}
+
+function updateDf() {
+  const N = st.N, [gx, gy, gz] = st.G;
+  dfMin = Infinity; dfMax = -Infinity;
+  for (let z = 0; z < NZ; z++) for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const n = (z * N + j) * N + i, f = GAMMA_BAR * (gx * xs[i] + gy * ys[j] + gz * ZPOS[z]);
+    df[n] = f;
+    if (rho[n] > 0.03) { if (f < dfMin) dfMin = f; if (f > dfMax) dfMax = f; }
+  }
+}
+
+/* ---------- free precession, relaxation, RF ---------- */
+function fireRF() {
+  if (st.acq || st.flip === 0) return;
+  const a = st.flip * Math.PI / 180, N = st.N, alpha = new Float32Array(V);
+  const sum = new Float32Array(NZ), cnt = new Float32Array(NZ);
+  for (let n = 0; n < V; n++) {
+    const p = prof(df[n] - st.rfOff);
+    alpha[n] = a * p;
+    if (rho[n] > 0.03) { const z = Math.floor(n / (N * N)); sum[z] += p; cnt[z]++; }
+  }
+  for (let z = 0; z < NZ; z++) st.exc[z] = cnt[z] ? sum[z] / cnt[z] : 0;
+  st.rf = { t: 0, dur: reduceMotion ? 0.15 : 0.5, alpha };
+  // k-space bookkeeping: an excitation starts at k = 0; a refocusing pulse mirrors k
+  if (st.flip >= 135 && st.kLive) st.k = st.k.map(v => -v);
+  else if (st.flip < 135) { st.k = [0, 0, 0]; st.kLive = true; }
+}
+
+function freeStep(dt) {
+  if (st.kLive) for (let a = 0; a < 3; a++) st.k[a] += GAMMA_BAR * st.G[a] * dt / SLOW;
+  const Meq = peq(st.B0), E1 = Math.exp(-dt / T1V), E2 = Math.exp(-dt / T2V), w = TAU * dt / SLOW;
+  let alpha = null, frac = 0;
+  if (st.rf) {
+    const step = Math.min(dt, st.rf.dur - st.rf.t);
+    frac = step / st.rf.dur; alpha = st.rf.alpha; st.rf.t += step;
+    if (st.rf.t >= st.rf.dur - 1e-9) st.rf = null;
+  }
+  let sr = 0, si = 0;
+  for (let n = 0; n < V; n++) {
+    const r = rho[n];
+    if (r < 1e-3) continue;
+    let x = Mx[n], y = My[n], z = Mz[n];
+    if (alpha) {          // RF along +x tips +z towards +y
+      const b = alpha[n] * frac;
+      if (b) { const c = Math.cos(b), s = Math.sin(b), y2 = y * c + z * s; z = z * c - y * s; y = y2; }
+    }
+    const a = w * df[n];  // Mxy *= exp(-i 2 pi df dt)
+    if (a) { const c = Math.cos(a), s = Math.sin(a), x2 = x * c + y * s; y = y * c - x * s; x = x2; }
+    x *= E2; y *= E2; z = Meq + (z - Meq) * E1;
+    Mx[n] = x; My[n] = y; Mz[n] = z;
+    sr += r * x; si += r * y;
+  }
+  pushSignal(sr / sumRho, si / sumRho);
+  for (let z = 0; z < NZ; z++) st.exc[z] *= E1;
+}
+
+function pushSignal(re, im) {
+  if (st.lab) { const c = Math.cos(st.phiC), s = Math.sin(st.phiC), r2 = re * c + im * s; im = im * c - re * s; re = r2; }
+  sig.re[sig.head] = re; sig.im[sig.head] = im; sig.head = (sig.head + 1) % sig.re.length;
+}
+
+function tumble(dt) {   // thermal disorder of the individual protons, drawn where |M| < 1
+  const amp = (reduceMotion ? 0.25 : 0.9) * Math.sqrt(dt), w = TAU * dt / SLOW;
+  for (let d = 0; d < disp.length; d++) {
+    const a = w * df[disp[d]], c = Math.cos(a), s = Math.sin(a);
+    let x = ux[d] * c + uy[d] * s, y = uy[d] * c - ux[d] * s, z = uz[d];
+    x += amp * gauss(); y += amp * gauss(); z += amp * gauss();
+    const L = Math.hypot(x, y, z) || 1;
+    ux[d] = x / L; uy[d] = y / L; uz[d] = z / L;
+  }
+}
+function gauss() { return Math.sqrt(-2 * Math.log(Math.random() + 1e-12)) * Math.cos(TAU * Math.random()); }
+
+/* ---------- acquisition: Cartesian gradient echo, one line per excitation; 3D adds kz partitions ---------- */
+const kzOf = c => (c - (NZ - 1) / 2) / (NZ * DZ);   // 3D partition c; kz spacing = 1 / slab thickness
+function sliceAngles() {   // flip per slice for slice selection with Gz only
+  const a = st.flip * Math.PI / 180;
+  return ZPOS.map(z => a * prof(GAMMA_BAR * st.G[2] * z - st.rfOff));
+}
+
+function startAcq() {
+  if (st.acq) return;
+  if (st.B0 === 0) { $('acqnote').textContent = 'Turn on B₀ first. With no field there is no net magnetization to tip, so there is no signal.'; return; }
+  const N = st.N, NN = N * N, P = peq(st.B0), ang = sliceAngles(), parts = st.enc === 3 ? NZ : 1;
+  const Sre = new Float64Array(parts * NN), Sim = new Float64Array(parts * NN);
+  const Pre = new Float64Array(NN), Pim = new Float64Array(NN);   // [y][kx]
+  for (let z = 0; z < NZ; z++) {
+    const wz = P * Math.sin(ang[z]);
+    if (Math.abs(wz) < 1e-6) continue;
+    const cz = [], sz = [];   // e^{-i 2pi kz z} for each partition
+    for (let c = 0; c < parts; c++) { const th = parts > 1 ? -TAU * kzOf(c) * ZPOS[z] : 0; cz.push(wz * Math.cos(th)); sz.push(wz * Math.sin(th)); }
+    for (let j = 0; j < N; j++) for (let a = 0; a < N; a++) {   // FT along x: sum rho e^{-i 2pi kx x}
+      let re = 0, im = 0;
+      for (let i = 0; i < N; i++) { const r = rho[(z * N + j) * N + i]; re += r * Ec[a * N + i]; im -= r * Es[a * N + i]; }
+      Pre[j * N + a] = re; Pim[j * N + a] = im;
+    }
+    for (let b = 0; b < N; b++) for (let a = 0; a < N; a++) {   // FT along y, then the kz phase of this slice
+      let re = 0, im = 0;
+      for (let j = 0; j < N; j++) {
+        const c = Ec[b * N + j], s = Es[b * N + j], pr = Pre[j * N + a], pi = Pim[j * N + a];
+        re += pr * c + pi * s; im += pi * c - pr * s;
+      }
+      for (let c = 0; c < parts; c++) {
+        const n = c * NN + b * N + a;
+        Sre[n] += re * cz[c] - im * sz[c]; Sim[n] += re * sz[c] + im * cz[c];
+      }
+    }
+  }
+  for (let n = 0; n < parts * NN; n++) { const r = Sre[n]; Sre[n] = -Sim[n]; Sim[n] = r; }   // tipped to +y: times i
+  kref = 0; for (let n = 0; n < parts * NN; n++) kref = Math.max(kref, Math.hypot(Sre[n], Sim[n]));
+  kref = kref || 1;
+  Kre = new Float32Array(parts * NN); Kim = new Float32Array(parts * NN); got = new Uint8Array(parts * NN);
+  recon = null; reconLines = 0; kDirty = imgDirty = true;
+  const hit = [];
+  for (let z = 0; z < NZ; z++) { st.exc[z] = ang[z] / (st.flip * Math.PI / 180 || 1); if (Math.sin(ang[z]) > 0.3) hit.push(z); }
+  st.kSlices = parts > 1 ? ZPOS.map((_, z) => z) : hit.length === 1 ? hit : null;   // where the image belongs in 3D
+  st.acq = { Sre, Sim, ang, P, parts, line: 0, phase: 'excite', t: 0, sample: 0, savedG: st.G.slice(), slowLines: st.slowLines };
+  lock(true);
+}
+
+function acqStep(dt) {
+  const A = st.acq, N = st.N, dk = 1 / FOV, L = A.line, c = Math.floor(L / N), b = L % N;
+  const slow = L < A.slowLines && !reduceMotion;
+  const T = slow ? { e: 0.8, p: 1.2, r: 2.8 } : A.parts > 1 ? { e: 0.01, p: 0.02, r: 0.07 } : { e: 0.02, p: 0.05, r: 0.13 };
+  const ky = (b - N / 2) * dk, kz = A.parts > 1 ? kzOf(c) : 0, kx0 = -(N / 2 + 0.5) * dk;   // sample i lands at (i + 1/2) dwell
+  A.t += dt;
+  let k = [0, 0, 0], tip = 1, G = [0, 0, 0];
+  if (A.phase === 'excite') {
+    tip = Math.min(1, A.t / T.e); G = [0, 0, A.savedG[2]];
+    if (A.t >= T.e) { A.phase = 'prewind'; A.t = 0; }
+  } else if (A.phase === 'prewind') {
+    const s = Math.min(1, A.t / T.p); k = [kx0 * s, ky * s, kz * s];
+    G = [kx0 / (GAMMA_BAR * TPE), ky / (GAMMA_BAR * TPE), kz / (GAMMA_BAR * TPE)];
+    if (A.t >= T.p) { A.phase = 'read'; A.t = 0; A.sample = 0; }
+  } else {
+    const s = Math.min(1, A.t / T.r); k = [kx0 + N * dk * s, ky, kz]; G = [GREAD, 0, 0];
+    while (A.sample < N && s >= (A.sample + 0.5) / N) {
+      const idx = L * N + A.sample;
+      Kre[idx] = A.Sre[idx]; Kim[idx] = A.Sim[idx]; got[idx] = 1; A.sample++; kDirty = true;
+    }
+    if (s >= 1) {
+      A.line++; A.phase = 'excite'; A.t = 0;
+      if (st.live) reconstruct();
+      if (A.line >= A.parts * N) { setStateFromK(k, 1); st.k = k; finishAcq(); return; }
+    }
+  }
+  st.G = G; updateDf(); showG();
+  st.k = k;
+  setStateFromK(k, tip);
+  let sr = 0, si = 0;
+  if (A.phase === 'read' && A.sample > 0) { sr = Kre[L * N + A.sample - 1]; si = Kim[L * N + A.sample - 1]; }
+  pushSignal(sr / sumRho, si / sumRho);
+  updateProgress();
+}
+
+function setStateFromK(k, tip) {   // Mxy = i sin(a) e^{-i 2pi k.r}, the state an ideal gradient echo leaves
+  const N = st.N, A = st.acq, P = A ? A.P : peq(st.B0), ang = A ? A.ang : sliceAngles();
+  const cx = new Float64Array(N), sx = new Float64Array(N), cy = new Float64Array(N), sy = new Float64Array(N);
+  for (let i = 0; i < N; i++) {
+    cx[i] = Math.cos(-TAU * k[0] * xs[i]); sx[i] = Math.sin(-TAU * k[0] * xs[i]);
+    cy[i] = Math.cos(-TAU * k[1] * ys[i]); sy[i] = Math.sin(-TAU * k[1] * ys[i]);
+  }
+  for (let z = 0; z < NZ; z++) {
+    const m = P * Math.sin(ang[z] * tip), mz = P * Math.cos(ang[z] * tip);
+    const pz = -TAU * (k[2] || 0) * ZPOS[z], cz = Math.cos(pz), sz = Math.sin(pz);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+      const n = (z * N + j) * N + i, c0 = cx[i] * cy[j] - sx[i] * sy[j], s0 = sx[i] * cy[j] + cx[i] * sy[j];
+      const c = c0 * cz - s0 * sz, s = s0 * cz + c0 * sz;
+      Mx[n] = -m * s; My[n] = m * c; Mz[n] = mz;
+    }
+  }
+}
+
+function finishAcq(fillRest) {
+  const A = st.acq, N = st.N;
+  if (fillRest) {
+    Kre.set(A.Sre); Kim.set(A.Sim); got.fill(1);
+    A.line = A.parts * N; kDirty = true;
+    st.k = [(N / 2 - 0.5) / FOV, (N / 2 - 1) / FOV, A.parts > 1 ? kzOf(NZ - 1) : 0];
+    setStateFromK(st.k, 1);
+  }
+  st.G = A.savedG; st.acq = null; st.kLive = true;
+  updateDf(); showG(); lock(false);
+  if (st.live) reconstruct();
+  updateProgress(); updateTexts();
+}
+
+function reconstruct() {
+  const N = st.N, NN = N * N, parts = Kre.length / NN;
+  reconLines = 0;
+  const lineHas = new Uint8Array(parts * N);
+  for (let L = 0; L < parts * N; L++) for (let a = 0; a < N; a++) if (got[L * N + a]) { lineHas[L] = 1; reconLines++; break; }
+  let planes;   // k-space planes (kx, ky), one per output slice
+  if (parts === 1) planes = [[Kre, Kim, lineHas]];
+  else {        // 3D: inverse FT along kz first, sum K e^{+i 2pi kz z}
+    planes = ZPOS.map(z => {
+      const re = new Float64Array(NN), im = new Float64Array(NN), has = new Uint8Array(N);
+      for (let c = 0; c < parts; c++) {
+        const th = TAU * kzOf(c) * z, cc = Math.cos(th), ss = Math.sin(th);
+        for (let n = 0; n < NN; n++) { const kr = Kre[c * NN + n], ki = Kim[c * NN + n]; re[n] += kr * cc - ki * ss; im[n] += kr * ss + ki * cc; }
+        for (let b = 0; b < N; b++) has[b] |= lineHas[c * N + b];
+      }
+      return [re, im, has];
+    });
+  }
+  let mx = 0;
+  const imgs = planes.map(([KR, KI, has]) => {
+    const Tre = new Float64Array(NN), Tim = new Float64Array(NN);
+    for (let b = 0; b < N; b++) {
+      if (!has[b]) continue;
+      for (let i = 0; i < N; i++) {   // inverse FT along kx: sum K e^{+i 2pi kx x}
+        let re = 0, im = 0;
+        for (let a = 0; a < N; a++) {
+          const kr = KR[b * N + a], ki = KI[b * N + a], c = Ec[a * N + i], s = Es[a * N + i];
+          re += kr * c - ki * s; im += kr * s + ki * c;
+        }
+        Tre[b * N + i] = re; Tim[b * N + i] = im;
+      }
+    }
+    const out = new Float32Array(NN);
+    for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {   // inverse FT along ky
+      let re = 0, im = 0;
+      for (let b = 0; b < N; b++) {
+        const tr = Tre[b * N + i], ti = Tim[b * N + i], c = Ec[b * N + j], s = Es[b * N + j];
+        re += tr * c - ti * s; im += tr * s + ti * c;
+      }
+      const v = Math.hypot(re, im) / (NN * parts);
+      out[j * N + i] = v; if (v > mx) mx = v;
+    }
+    return out;
+  });
+  recon = { imgs, max: mx, zs: st.kSlices, parts };
+  imgDirty = true;
+}
+
+/* ---------- drawing ---------- */
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement), v = k => cs.getPropertyValue(k).trim();
+  for (const k of ['fg', 'muted', 'line', 'accent', 'rf', 'lo', 'mid', 'hi', 'stage', 'screen', 'screen-dim', 'screen-grid', 'screen-fg', 'trace-re', 'trace-im', 'mono'])
+    C[k] = v('--' + k);
+  const rgb = h => { h = h.replace('#', ''); if (h.length === 3) h = h.replace(/./g, x => x + x); return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16)); };
+  const lo = rgb(C.lo), mid = rgb(C.mid), hi = rgb(C.hi);
+  C.fgRGB = rgb(C.fg); C.dimRGB = rgb(C['screen-dim']);
+  C.lut = [];
+  for (let q = 0; q <= 40; q++) {
+    const t = q / 20 - 1, o = t < 0 ? lo : hi, f = Math.abs(t);
+    C.lut.push(`rgb(${mid.map((m, i) => Math.round(m + (o[i] - m) * f)).join(',')})`);
+  }
+  kDirty = imgDirty = true;
+}
+
+function fit(cv) {
+  const r = cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+  const W = Math.max(1, Math.round(r.width * dpr)), H = Math.max(1, Math.round(r.height * dpr));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return { ctx, w: r.width, h: r.height, dpr };
+}
+
+const cv3d = $('view3d');
+const buckets = Array.from({ length: 41 }, () => []);
+function draw3D() {
+  const { ctx, w, h, dpr } = fit(cv3d);
+  ctx.clearRect(0, 0, w, h);
+  const cyw = Math.cos(st.yaw), syw = Math.sin(st.yaw), cp = Math.cos(st.pitch), sp = Math.sin(st.pitch);
+  const scale = Math.min(w / 0.44, h / 0.44), ox = w / 2, oy = h / 2 + h * 0.04, D = 0.8;
+  const P = (x, y, z) => {   // z drawn stretched so the slices separate
+    z *= ZDRAW;
+    const x1 = x * cyw - y * syw, y1 = x * syw + y * cyw, Y = z * cp + y1 * sp, d = y1 * cp - z * sp, f = D / (D + d);
+    return [ox + x1 * f * scale, oy - Y * f * scale, f];
+  };
+  const H = FOV / 2, N = st.N;
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  // slice plates, lit up where the RF pulse tipped them
+  ctx.font = `11px ${C.mono}`;
+  for (let z = 0; z < NZ; z++) {
+    const zz = ZPOS[z], c = [P(-H, -H, zz), P(H, -H, zz), P(H, H, zz), P(-H, H, zz)], e = st.exc[z];
+    ctx.beginPath(); c.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1])); ctx.closePath();
+    if (e > 0.03) { ctx.globalAlpha = 0.1 * e; ctx.fillStyle = C.rf; ctx.fill(); }
+    ctx.globalAlpha = e > 0.03 ? 0.35 + 0.6 * e : 0.9; ctx.strokeStyle = e > 0.03 ? C.rf : C.line; ctx.lineWidth = 1; ctx.stroke();
+    ctx.globalAlpha = 0.85; ctx.fillStyle = C.muted;
+    const lp = P(H, -H, zz); ctx.fillText(`z ${fmtS(zz * 1000, 0)}`, lp[0] + 6, lp[1] + 4);
+  }
+  ctx.globalAlpha = 1;
+  // the reconstructed image, painted back onto the slices it came from (an affine fit of each plate)
+  const painted = recon && recon.zs && $('show3d').checked;
+  if (painted) {
+    if (imgDirty) makeTiles();
+    const dx = FOV / N, xl = -H - dx / 2, xr = H - dx / 2, yt = H - dx / 2, yb = -H - dx / 2;
+    recon.zs.forEach((s, q) => {
+      const o = P(xl, yt, ZPOS[s]), a = P(xr, yt, ZPOS[s]), b = P(xl, yb, ZPOS[s]);
+      ctx.save();
+      ctx.setTransform(dpr * (a[0] - o[0]) / N, dpr * (a[1] - o[1]) / N, dpr * (b[0] - o[0]) / N, dpr * (b[1] - o[1]) / N, dpr * o[0], dpr * o[1]);
+      ctx.imageSmoothingEnabled = false; ctx.drawImage(texTiles[q], 0, 0);
+      ctx.restore();
+    });
+  }
+  // B0
+  if (st.B0 > 0) {
+    const bx = -H - 0.03, by = H + 0.02, z0 = -0.06, z1 = z0 + 0.11 * st.B0 / 3;
+    const a = P(bx, by, z0), b = P(bx, by, z1);
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 3; ctx.beginPath(); arrow(ctx, a[0], a[1], b[0], b[1], 9); ctx.stroke();
+    ctx.fillStyle = C.accent; ctx.font = `600 13px ${C.mono}`; ctx.fillText('B₀', b[0] + 7, b[1] + 4);
+  }
+  // spins
+  for (const bk of buckets) bk.length = 0;
+  const cph = st.lab ? Math.cos(st.phiC) : 1, sph = st.lab ? Math.sin(st.phiC) : 0;
+  for (let d = 0; d < disp.length; d++) {
+    const n = disp[d], z = Math.floor(n / (N * N)), j = Math.floor(n / N) % N, i = n % N;
+    let vx = Mx[n], vy = My[n], vz = Mz[n];
+    const q = Math.max(0, 1 - Math.hypot(vx, vy, vz));
+    vx += q * ux[d]; vy += q * uy[d]; vz += q * uz[d];
+    const x2 = vx * cph + vy * sph; vy = vy * cph - vx * sph; vx = x2;
+    const L = Math.hypot(vx, vy, vz) || 1, len = 0.021 * (0.45 + 0.55 * Math.min(1, rho[n] / 0.9)) / L;
+    const bx = xs[i], by = ys[j], bz = ZPOS[z];
+    const p0 = P(bx, by, bz), p1 = P(bx + vx * len, by + vy * len, bz + vz * len);
+    const t = Math.max(-1, Math.min(1, df[n] / 50e3)), qi = Math.round((t + 1) * 20);
+    buckets[qi].push(p0[0], p0[1], p1[0], p1[1], 4.2 * p1[2]);
+  }
+  ctx.lineWidth = 1.5; ctx.globalAlpha = painted ? 0.4 : 1;
+  for (let q = 0; q <= 40; q++) {
+    const bk = buckets[q];
+    if (!bk.length) continue;
+    ctx.strokeStyle = C.lut[q]; ctx.beginPath();
+    for (let m = 0; m < bk.length; m += 5) arrow(ctx, bk[m], bk[m + 1], bk[m + 2], bk[m + 3], bk[m + 4]);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // B1 while a pulse plays
+  const rfOn = st.rf || (st.acq && st.acq.phase === 'excite');
+  if (rfOn) {
+    const ex = st.lab ? Math.cos(st.phiC) : 1, ey = st.lab ? -Math.sin(st.phiC) : 0;
+    const a = P(0, 0, 0.1), b = P(0.08 * ex, 0.08 * ey, 0.1);
+    ctx.strokeStyle = C.rf; ctx.lineWidth = 3; ctx.beginPath(); arrow(ctx, a[0], a[1], b[0], b[1], 9); ctx.stroke();
+    ctx.fillStyle = C.rf; ctx.font = `600 13px ${C.mono}`; ctx.fillText('B₁', b[0] + 6, b[1] - 4);
+  }
+  // axes
+  const gx0 = w - 46, gy0 = h - 52;
+  ctx.font = `11px ${C.mono}`; ctx.lineWidth = 1.2;
+  for (const [ax, lab] of [[[1, 0, 0], 'x'], [[0, 1, 0], 'y'], [[0, 0, 1], 'z']]) {
+    const x1 = ax[0] * cyw - ax[1] * syw, y1 = ax[0] * syw + ax[1] * cyw, Y = ax[2] * cp + y1 * sp;
+    ctx.strokeStyle = C.muted; ctx.beginPath(); ctx.moveTo(gx0, gy0); ctx.lineTo(gx0 + x1 * 22, gy0 - Y * 22); ctx.stroke();
+    ctx.fillStyle = C.muted; ctx.fillText(lab, gx0 + x1 * 29 - 3, gy0 - Y * 29 + 4);
+  }
+}
+
+function arrow(ctx, x0, y0, x1, y1, head) {
+  ctx.moveTo(x0, y0); ctx.lineTo(x1, y1);
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
+  if (L < head * 1.1) return;
+  const ux = dx / L, uy = dy / L;
+  ctx.moveTo(x1 - head * (ux - uy * 0.55), y1 - head * (uy + ux * 0.55));
+  ctx.lineTo(x1, y1);
+  ctx.lineTo(x1 - head * (ux + uy * 0.55), y1 - head * (uy - ux * 0.55));
+}
+
+function screenText(ctx, txt, x, y, color, align) {
+  ctx.fillStyle = color || C['screen-fg']; ctx.textAlign = align || 'left'; ctx.fillText(txt, x, y); ctx.textAlign = 'left';
+}
+
+function drawSignal() {
+  const { ctx, w, h } = fit($('sig'));
+  ctx.fillStyle = C.screen; ctx.fillRect(0, 0, w, h);
+  const top = 28, bot = h - 24, mid = (top + bot) / 2, amp = (bot - top) / 2 * 0.92;
+  ctx.strokeStyle = C['screen-grid']; ctx.lineWidth = 1; ctx.beginPath();
+  for (let q = 0; q <= 4; q++) { const y = top + (bot - top) * q / 4; ctx.moveTo(10, y); ctx.lineTo(w - 10, y); }
+  ctx.stroke();
+  ctx.font = `11px ${C.mono}`;
+  const plot = (get, n, color, lw) => {
+    ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath();
+    for (let q = 0; q < n; q++) { const x = 10 + (w - 20) * q / Math.max(1, n - 1), y = mid - get(q) * amp; q ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+    ctx.stroke();
+  };
+  const A = st.acq;
+  if (A && A.phase === 'read') {
+    const N = st.N, n0 = A.line * N, m = A.sample, sc = 1 / kref, b = A.line % N, c = Math.floor(A.line / N);
+    if (m > 1) {
+      ctx.save(); ctx.beginPath(); ctx.rect(0, 0, 10 + (w - 20) * (m - 1) / (N - 1) + 1, h); ctx.clip();
+      plot(q => Math.hypot(Kre[n0 + q], Kim[n0 + q]) * sc, N, C['screen-fg'], 1);
+      plot(q => Kre[n0 + q] * sc, N, C['trace-re'], 1.6);
+      plot(q => Kim[n0 + q] * sc, N, C['trace-im'], 1.6);
+      ctx.restore();
+    }
+    screenText(ctx, `line ${b + 1}/${N}` + (A.parts > 1 ? `, kz plane ${c + 1}/${A.parts}` : ''), 10, 17);
+    screenText(ctx, `ky ${fmtS((b - N / 2) / FOV, 1)}` + (A.parts > 1 ? `  kz ${fmtS(kzOf(c), 0)}` : '') + ' m⁻¹', 10, h - 8, C.muted);
+  } else {
+    const L = sig.re.length, at = q => (sig.head + q) % L;
+    plot(q => Math.hypot(sig.re[at(q)], sig.im[at(q)]), L, C['screen-fg'], 1);
+    plot(q => sig.re[at(q)], L, C['trace-re'], 1.6);
+    plot(q => sig.im[at(q)], L, C['trace-im'], 1.6);
+    screenText(ctx, A ? 'between readouts' : `live, ${st.lab ? 'lab' : 'rotating'} frame`, 10, 17);
+    screenText(ctx, 'last 5 s', w - 10, h - 8, C.muted, 'right');
+  }
+  if (!(A && A.phase === 'read' && A.parts > 1)) {
+    screenText(ctx, 'Re', w - 74, 17, C['trace-re']);
+    screenText(ctx, 'Im', w - 52, 17, C['trace-im']);
+    screenText(ctx, '|s|', w - 30, 17, C['screen-fg']);
+  }
+}
+
+function grayImage(cnv, N, val, rgbA) {   // val(n) in [0,1], or < 0 for "not measured"; rgbA: colour with alpha = value
+  if (cnv.width !== N) { cnv.width = cnv.height = N; }
+  const g = cnv.getContext('2d'), im = g.createImageData(N, N), dim = C.dimRGB;
+  for (let row = 0; row < N; row++) for (let i = 0; i < N; i++) {
+    const v = val((N - 1 - row) * N + i), o = (row * N + i) * 4;   // row 0 is +y / +ky
+    if (rgbA) { im.data[o] = rgbA[0]; im.data[o + 1] = rgbA[1]; im.data[o + 2] = rgbA[2]; im.data[o + 3] = Math.round(235 * Math.max(0, Math.min(1, v))); continue; }
+    if (v < 0) { im.data[o] = dim[0]; im.data[o + 1] = dim[1]; im.data[o + 2] = dim[2]; }
+    else { const u = Math.round(255 * Math.min(1, v)); im.data[o] = im.data[o + 1] = im.data[o + 2] = u; }
+    im.data[o + 3] = 255;
+  }
+  g.putImageData(im, 0, 0);
+}
+
+// 3D results show as a 3 x 2 mosaic, top slice first; the sixth cell holds a caption
+const tiles = n => Array.from({ length: n }, () => document.createElement('canvas'));
+const kTiles = tiles(NZ), imgTiles = tiles(NZ), texTiles = tiles(NZ);
+const cell = (q, w) => { const s = w / 3; return [(q % 3) * s, 24 + Math.floor(q / 3) * s, s]; };
+
+function makeTiles() {
+  const N = st.N, NN = N * N, m = recon.max || 1;
+  recon.imgs.forEach((img, q) => grayImage(imgTiles[q], N, n => img[n] / m));
+  if (recon.zs) recon.zs.forEach((s, q) => grayImage(texTiles[q], N, n => recon.imgs[recon.parts > 1 ? s : 0][n] / m * 1.15, C.fgRGB));
+  imgDirty = false;
+}
+
+function drawK() {
+  const { ctx, w, h } = fit($('ksp')), N = st.N, NN = N * N, parts = Kre.length / NN;
+  ctx.fillStyle = C.screen; ctx.fillRect(0, 0, w, h);
+  const c0 = 500 / kref, l = Math.log1p(500);
+  if (kDirty) {
+    for (let c = 0; c < parts; c++) grayImage(kTiles[c], N, n => got[c * NN + n] ? Math.log1p(Math.hypot(Kre[c * NN + n], Kim[c * NN + n]) * c0) / l : -1);
+    kDirty = false;
+  }
+  ctx.imageSmoothingEnabled = false; ctx.font = `11px ${C.mono}`;
+  const cursor = (px, py, out) => {
+    ctx.strokeStyle = C['trace-re']; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px, py, 6, 0, TAU); ctx.stroke();
+    if (!out) { ctx.beginPath(); ctx.moveTo(px - 11, py); ctx.lineTo(px - 7, py); ctx.moveTo(px + 7, py); ctx.lineTo(px + 11, py); ctx.moveTo(px, py - 11); ctx.lineTo(px, py - 7); ctx.moveTo(px, py + 7); ctx.lineTo(px, py + 11); ctx.stroke(); }
+  };
+  const showCursor = st.kLive || st.acq;
+  const kxy = (x0, y0, s) => [x0 + (st.k[0] * FOV + N / 2 + 0.5) / N * s, y0 + (N - 1 - (st.k[1] * FOV + N / 2) + 0.5) / N * s];
+  if (parts === 1) {
+    ctx.drawImage(kTiles[0], 0, 0, w, h);
+    if (!got.some(v => v)) screenText(ctx, 'empty: press Acquire', w / 2, h / 2 + 4, C.muted, 'center');
+    screenText(ctx, `kx ±${(N / 2 / FOV).toFixed(1)} m⁻¹`, w - 8, h - 8, C.muted, 'right');
+    screenText(ctx, 'k-space (log |s|)', 8, 17, C['screen-fg']);
+    if (showCursor) {
+      let [px, py] = kxy(0, 0, w);
+      const out = px < 0 || px > w || py < 0 || py > h;
+      cursor(Math.max(6, Math.min(w - 6, px)), Math.max(6, Math.min(h - 6, py)), out);
+    }
+    return;
+  }
+  screenText(ctx, '3D k-space: one plane per kz', 8, 17, C['screen-fg']);
+  for (let q = 0; q < NZ; q++) {
+    const c = NZ - 1 - q, [x0, y0, s] = cell(q, w);
+    ctx.drawImage(kTiles[c], x0 + 1, y0 + 1, s - 2, s - 2);
+    screenText(ctx, `kz ${fmtS(kzOf(c), 0)}`, x0 + 5, y0 + s - 6, C.muted);
+    if (showCursor && Math.abs((st.k[2] || 0) - kzOf(c)) < 0.5 / (NZ * DZ)) {
+      const [px, py] = kxy(x0 + 1, y0 + 1, s - 2);
+      if (px > x0 && px < x0 + s && py > y0 && py < y0 + s) cursor(px, py, false);
+    }
+  }
+  const [x5, y5, s5] = cell(5, w);
+  screenText(ctx, `kz step`, x5 + s5 / 2, y5 + s5 / 2 - 6, C.muted, 'center');
+  screenText(ctx, `${(1 / (NZ * DZ)).toFixed(1)} m⁻¹`, x5 + s5 / 2, y5 + s5 / 2 + 10, C.muted, 'center');
+}
+
+function drawImage() {
+  const { ctx, w, h } = fit($('img')), N = st.N;
+  ctx.fillStyle = C.screen; ctx.fillRect(0, 0, w, h);
+  ctx.font = `11px ${C.mono}`;
+  if (!recon) {
+    screenText(ctx, 'no image yet', w / 2, h / 2 - 6, C['screen-fg'], 'center');
+    screenText(ctx, 'fill k-space, then Reconstruct', w / 2, h / 2 + 12, C.muted, 'center');
+    return;
+  }
+  if (imgDirty) makeTiles();
+  const total = recon.parts * N, lines = `from ${reconLines} of ${total} lines`, lc = reconLines < total ? C['trace-re'] : C.muted;
+  ctx.imageSmoothingEnabled = false;
+  if (recon.parts === 1) {
+    ctx.drawImage(imgTiles[0], 0, 0, w, h);
+    screenText(ctx, `|image|, ${N} × ${N}`, 8, 17);
+    screenText(ctx, lines, w - 8, h - 8, lc, 'right');
+    return;
+  }
+  screenText(ctx, `3D: ${NZ} slices of ${N} × ${N}`, 8, 17);
+  for (let q = 0; q < NZ; q++) {
+    const s = NZ - 1 - q, [x0, y0, sz] = cell(q, w);
+    ctx.drawImage(imgTiles[s], x0 + 1, y0 + 1, sz - 2, sz - 2);
+    screenText(ctx, `z ${fmtS(ZPOS[s] * 1000, 0)}`, x0 + 5, y0 + sz - 6, C.muted);
+  }
+  const [x5, y5, s5] = cell(5, w);
+  screenText(ctx, lines.replace('from ', ''), x5 + s5 / 2, y5 + s5 / 2 + 4, lc, 'center');
+}
+
+/* ---------- controls ---------- */
+function showG() {
+  ['gx', 'gy', 'gz'].forEach((id, a) => { $(id).value = (st.G[a] * 1000).toFixed(1); $(id + 'v').textContent = fmt(st.G[a] * 1000, 1) + ' mT/m'; });
+}
+
+function updateTexts() {
+  $('b0v').textContent = st.B0.toFixed(2) + ' T';
+  $('f0v').textContent = (GAMMA_BAR * st.B0 / 1e6).toFixed(3) + ' MHz';
+  const ppm = TAU * GAMMA_BAR * HBAR * st.B0 / (2 * KB * BODY_K) * 1e6;
+  $('ppmv').textContent = ppm.toFixed(1) + ' per million';
+  $('spreadv').textContent = (dfMax - dfMin < 1) ? 'all at f₀' : `f₀ ${fmtS(dfMin / 1e3, 1)} to ${fmtS(dfMax / 1e3, 1)} kHz`;
+  $('flipv').textContent = st.flip + '°';
+  $('rfoffv').textContent = 'f₀ ' + fmtS(st.rfOff / 1e3, 1) + ' kHz';
+  // RF: which protons will this pulse tip?
+  const [gx, gy, gz] = st.G;
+  let t;
+  if (st.B0 === 0) t = 'There is no net magnetization yet. Turn on B₀ first.';
+  else if (!gx && !gy && !gz) t = Math.abs(st.rfOff) > RF_BW / 2
+    ? 'The pulse is off resonance: with no gradient no proton sits at that frequency, so nothing tips.'
+    : 'All protons share one frequency, so the pulse tips the whole volume.';
+  else if (!gx && !gy) {
+    const zc = st.rfOff / (GAMMA_BAR * gz), th = RF_BW / (GAMMA_BAR * Math.abs(gz));
+    t = Math.abs(zc) > 0.09 ? `Resonant at z = ${fmtS(zc * 1000, 0)} mm, outside the object: nothing tips.`
+      : `Tips a slice at z = ${fmtS(zc * 1000, 0)} mm, ${(th * 1000).toFixed(1)} mm thick (pulse bandwidth ${RF_BW / 1000} kHz).`;
+  } else t = 'With G<sub>x</sub> or G<sub>y</sub> on, the resonant slab is tilted: the pulse tips a band that cuts across the slices.';
+  $('rfnote').innerHTML = t;
+  document.querySelectorAll('#slices button').forEach(b => {
+    const s = +b.dataset.slice;
+    const on = s < 0 ? (!gz && Math.abs(st.rfOff) < 1) : (gz !== 0 && Math.abs(st.rfOff - GAMMA_BAR * gz * ZPOS[s]) < 60);
+    b.setAttribute('aria-pressed', on && !gx && !gy ? 'true' : 'false');
+  });
+  if (!st.acq) {
+    const ang = sliceAngles(), hit = ZPOS.filter((z, i) => Math.sin(ang[i]) > 0.3);
+    let a;
+    const where = `z = ${hit.map(z => fmtS(z * 1000, 0)).join(', ')} mm`;
+    if (st.B0 === 0) a = 'Turn on B\u2080 first.';
+    else if (!hit.length) a = 'With these RF settings no slice is tipped, so k-space would stay empty.';
+    else if (st.enc === 3) a = hit.length === NZ
+      ? `Each line tips the whole slab. On top of G<sub>y</sub>, a G<sub>z</sub> step picks one of ${NZ} k<sub>z</sub> planes, ${NZ} &times; ${st.N} lines in all, and a 3D Fourier transform separates all five slices.`
+      : `Step 3 tips only ${where}, so the other slices will come out dark. Pick All in step 3 to image the whole slab.`;
+    else if (hit.length === NZ) a = `Each line tips the whole volume (G<sub>x</sub> and G<sub>y</sub> are set by the sequence). All five slices land in one image, on top of each other. Pick a slice in step 3, or switch to 3D encoding.`;
+    else a = `Each line tips ${hit.length > 1 ? 'slices' : 'the slice'} at ${where} (G<sub>z</sub> ${fmt(gz * 1000, 1)} mT/m during the pulse).`;
+    $('acqnote').innerHTML = a;
+  }
+}
+
+function updateProgress() {
+  const N = st.N, total = st.acq ? st.acq.parts * N : got.length / N;
+  let lines = 0;
+  for (let L = 0; L < total; L++) if (got[L * N + N - 1]) lines++;
+  $('prog').style.width = (100 * lines / total) + '%';
+  $('progv').textContent = st.acq ? `line ${Math.min(total, st.acq.line + 1)} of ${total}` : lines ? `${lines} of ${total} lines` : 'no lines yet';
+}
+
+function lock(on) {
+  document.querySelectorAll('[data-lock]').forEach(el => { el.disabled = on; });
+  $('skip').disabled = !on;
+}
+
+$('b0').addEventListener('input', e => { st.B0 = +e.target.value; updateTexts(); });
+['gx', 'gy', 'gz'].forEach((id, a) => $(id).addEventListener('input', e => { st.G[a] = +e.target.value / 1000; updateDf(); showG(); updateTexts(); }));
+$('gzero').addEventListener('click', () => { st.G = [0, 0, 0]; updateDf(); showG(); updateTexts(); });
+$('flip').addEventListener('input', e => { st.flip = +e.target.value; updateTexts(); });
+$('rfoff').addEventListener('input', e => { st.rfOff = +e.target.value * 1000; updateTexts(); });
+$('slices').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const s = +b.dataset.slice;
+  if (s < 0) { st.G[2] = 0; st.rfOff = 0; }
+  else {
+    st.G[0] = st.G[1] = 0;
+    if (st.G[2] === 0) st.G[2] = 0.010;
+    st.rfOff = GAMMA_BAR * st.G[2] * ZPOS[s];
+  }
+  $('rfoff').value = (st.rfOff / 1000).toFixed(1);
+  updateDf(); showG(); updateTexts();
+});
+$('fire').addEventListener('click', fireRF);
+$('resetSpins').addEventListener('click', () => {
+  const m = peq(st.B0); Mx.fill(0); My.fill(0); Mz.fill(m); st.exc.fill(0); st.kLive = false; st.rf = null;
+});
+const setFrame = lab => { st.lab = lab; $('frameLab').setAttribute('aria-pressed', lab); $('frameRot').setAttribute('aria-pressed', !lab); };
+$('frameLab').addEventListener('click', () => setFrame(true));
+$('frameRot').addEventListener('click', () => setFrame(false));
+$('resetView').addEventListener('click', () => { st.yaw = -0.5; st.pitch = 0.78; });
+$('phantom').addEventListener('change', e => { st.phantom = e.target.value; build(); updateProgress(); });
+$('matrix').addEventListener('change', e => { st.N = +e.target.value; build(); updateProgress(); });
+$('speed').addEventListener('change', e => { st.slowLines = +e.target.value; });
+$('acquire').addEventListener('click', startAcq);
+$('skip').addEventListener('click', () => { if (st.acq) finishAcq(true); });
+function clearK() {
+  const NN = st.N * st.N;
+  Kre = new Float32Array(NN); Kim = new Float32Array(NN); got = new Uint8Array(NN);
+  recon = null; reconLines = 0; kDirty = imgDirty = true; updateProgress();
+}
+$('clear').addEventListener('click', clearK);
+$('enc').addEventListener('change', e => { st.enc = +e.target.value; clearK(); updateTexts(); });
+$('recon').addEventListener('click', reconstruct);
+$('live').addEventListener('change', e => { st.live = e.target.checked; if (st.live && got.some(v => v)) reconstruct(); });
+
+let drag = null;
+cv3d.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; cv3d.setPointerCapture(e.pointerId); });
+cv3d.addEventListener('pointermove', e => {
+  if (!drag) return;
+  st.yaw += (e.clientX - drag[0]) * 0.008;
+  st.pitch = Math.max(0.05, Math.min(1.55, st.pitch + (e.clientY - drag[1]) * 0.008));
+  drag = [e.clientX, e.clientY];
+});
+const endDrag = () => { drag = null; };
+cv3d.addEventListener('pointerup', endDrag); cv3d.addEventListener('pointercancel', endDrag);
+
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+/* ---------- loop ---------- */
+let last = performance.now(), hudTick = 0;
+function frame(now) {
+  const dt = Math.min(0.05, Math.max(0, (now - last) / 1000)); last = now;
+  st.phiC = (st.phiC + TAU * LAB_RATE * st.B0 * dt) % TAU;
+  if (st.acq) acqStep(dt); else freeStep(dt);
+  tumble(dt);
+  draw3D(); drawSignal(); drawK(); drawImage();
+  if (++hudTick % 6 === 0) {
+    let mz = 0, re = 0, im = 0;
+    for (let n = 0; n < V; n++) { const r = rho[n]; if (r) { mz += r * Mz[n]; re += r * Mx[n]; im += r * My[n]; } }
+    $('hud').innerHTML = `<b>B₀</b> ${st.B0.toFixed(2)} T &nbsp;<b>f₀</b> ${(GAMMA_BAR * st.B0 / 1e6).toFixed(3)} MHz<br>` +
+      `<b>net M</b> along B₀ ${(mz / sumRho).toFixed(2)} &nbsp;tipped ${(Math.hypot(re, im) / sumRho).toFixed(2)}`;
+  }
+  requestAnimationFrame(frame);
+}
+
+readTheme();
+build();
+showG();
+updateProgress();
+// test hook for tools/headless checks: read-only access to the model
+window.spinsToImage = { st, get rho() { return rho; }, get M() { return [Mx, My, Mz]; }, get xs() { return xs; },
+  get recon() { return recon; }, get K() { return [Kre, Kim]; }, updateDf, fireRF, reconstruct, startAcq, finishAcq };
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
