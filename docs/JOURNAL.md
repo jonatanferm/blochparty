@@ -1306,3 +1306,11 @@ The parts of M5 that need no outside access, done while the user was away.
   Gx 12 / Gy −6 mT/m leaves Mxy = c·i·e^{−i2πk·r} with the tracked k, residual 3e-7 and c real
   positive, so the Bloch integrator and the k-space model agree in sign.
 - No core code changed, so no snapshot. Commit: 3a3a65c.
+- Follow-up the same day: 3D slab encoding. An "Encoding" choice adds k<sub>z</sub> phase encoding: 5
+  partitions (Δkz = 1/(5 × 40 mm) = 5 m⁻¹, Gz blip kz/(γ̄·1 ms)), 5 × N lines, reconstructed by an
+  inverse DFT along kz and then the 2D one. k-space and the image show as 3 × 2 mosaics, and the
+  reconstruction is painted back onto its slices in the 3D view (also a single-slice 2D scan).
+  Checks: 3D k-space vs. a brute-force 3D DFT at sampled points, relative error 2.9e-8; all five
+  slices from one whole-slab scan vs. the phantom, max abs error 4.9e-8; 2D single slice still
+  3.3e-8; the free-precession check unchanged (residual 3.1e-7). Also replaced fake Unicode
+  subscripts (ᵧ is gamma, ᵩ is phi) in the notes with <sub> markup.
