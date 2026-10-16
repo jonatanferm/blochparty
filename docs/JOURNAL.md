@@ -2527,3 +2527,25 @@ controls).
   pull toward smooth normal tissue, not by what the training set contained: the lever is the method (a loss that
   penalises losing small bright structure, or data consistency in k-space), not more lesion data. That is the first
   number the lesion generator has produced, and it says something about reconstruction, not about the generator.
+
+## 2026-10-16 — Sequence design by classification: lesions under an acquisition budget (exploratory)
+
+- The user's question: optimise a sequence jointly with a network that reads its raw output to classify something,
+  against a standard sequence read through an image. Built as `validation/design/lesion_slabs.py` (the data) and
+  `validation/design/lesion_design.py` (the arms), on the mini's 62 v17 heads.
+- **Data**: slabs of 5 mm at MNI z 10 / 20 / 30 mm, 64 x 64 over 220 mm (3.4 mm pixels), each head rendered twice
+  through the lesion stream, with 1-2 lesions of 6-15 mm placed within 2 mm of each imaged level (`add_lesions z_mm`)
+  and without, so pairs differ only by the lesion; the tissue table at 3 T, the subject's residual maps and the bound
+  pool, at 2 mm anatomy voxels (145-165 k spins a slab); 372 slabs (133 with a lesion of 2 or more pixels in the
+  slab), 50 training / 12 test subjects. 2.2 GB on the mini.
+- **The constraint**: every arm acquires at most a fraction f of k-space (K = f x 64 lines) through the same 8-element
+  receive ring (radius 0.14 m), with complex Gaussian noise at a fixed SNR (20, in units of each slab's mean sample of a
+  reference GRE) on every acquisition. A: the standard T2w TSE (ETL 16, TE 113 ms, TR 6 s) undersampled uniformly to
+  K lines with 4 centre lines, reconstructed by CG-SENSE with the exact coil maps (an upper bound for any ESPIRiT-style
+  calibration; adjoint checked to 1e-7, a phantom recovered to 24 % at K = 13), then a small CNN on the image. B: the
+  same lines, the CNN on the raw multi-coil samples. C: a spoiled GRE of K lines whose per-line flip angles, TE, TR
+  and k-space positions (continuous, not on the Cartesian grid) are learned together with the CNN on its raw
+  multi-coil samples, by Adam through the Metal adjoint (gradients reach all four groups; 0.07 s forward + 0.25 s
+  backward per slab on the laptop at K = 13), 300 steps of batches of 8, the flips in (2, 90) deg, TE in (2, 30) ms,
+  TR in (8, 120) ms by sigmoids. Reported: test AUC and accuracy per arm, the scan time (the TSE's kept shots; the
+  GRE's K + 8 dummies x TR), and C's learned sequence. The sweep f = 0.2, 0.1, 0.05 runs on the mini.

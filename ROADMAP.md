@@ -652,6 +652,10 @@ which physics (M6) the protocol families call for.
 - [ ] A benchmark task suite with scored targets (e.g. "T1w brain at 1 mm in < 2 min, maximize
       WM/GM CNR") so agent progress is a number; every scored sequence must pass Pulseq's checks
       and the M4 round trip.
+      *First task, 2026-10-16 (exploratory):* lesion detection in a slab under an acquisition
+      budget — a standard TSE + SENSE + CNN against a GRE whose flips, TE, TR and k-space lines are
+      learned jointly with a net on its raw multi-coil samples through the Metal adjoint
+      (`validation/design/lesion_design.py`); swept over 20 / 10 / 5 % of k-space (journal).
 
 ## M8. Other hardware (when machines exist)
 
