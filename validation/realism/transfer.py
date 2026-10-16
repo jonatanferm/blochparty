@@ -158,6 +158,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", type=Path, required=True, help="generate.py output directory")
     ap.add_argument("--sim2", type=Path, default=None, help="a second synthetic set for an ablation (trained and scored as synthetic2)")
+    ap.add_argument("--lesion-eval", type=Path, default=None,
+                    help="an evaluation-only synthetic set with many large lesions (never trained on) for the lesion test; "
+                         "without it the held-out tenth of --sim is used, which rarely holds enough lesion pixels")
     ap.add_argument("--fastmri", type=Path, default=R.FASTMRI)
     ap.add_argument("--cache", type=Path, default=Path.home() / "data" / "realism_cache")
     ap.add_argument("--out", type=Path, required=True)
@@ -219,17 +222,24 @@ def main():
     results["real_on_synthetic"], _ = evaluate(net_r, Xs[-hold:], Ys[-hold:], device)
     # the lesion test: on the held-out synthetic samples that carry lesions, each net's error inside the lesion pixels
     # against its error in the rest of the brain (does a reconstruction keep what is not in its training data?)
-    lesion = lesion_scores(nets, Xs[-hold:], Ys[-hold:], Ls[-hold:], device)
+    if args.lesion_eval is not None:
+        Xl, Yl, Ll, _ = load_sim(args.lesion_eval, args.accel, args.centre, rng)
+    else:
+        Xl, Yl, Ll = Xs[-hold:], Ys[-hold:], Ls[-hold:]
+    lesion = lesion_scores(nets, Xl, Yl, Ll, device)
     if lesion:
         results["lesion"] = lesion
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "results.json").write_text(json.dumps(results, indent=1))
+    for name, net in nets.items():  # 2 MB each: the nets are kept so a later evaluation set needs no retraining
+        if not isinstance(net, nn.Identity):
+            torch.save(net.state_dict(), args.out / f"net_{name}.pt")
     np.savez_compressed(args.out / "examples.npz", X=Xr_te[:8], Y=Yr_te[:8], synthetic=P_s[:8], real=P_r[:8], finetuned=P_f[:8])
     if lesion:
-        idx = [i for i in range(hold) if Ls[-hold:][i].max() > .5][:6]
+        idx = [i for i in range(len(Xl)) if (Ll[i] > .5).sum() >= 4][:6]
         with torch.no_grad():
-            P = {k: v(torch.tensor(Xs[-hold:][idx][:, None]).to(device)).cpu().numpy()[:, 0] for k, v in nets.items() if k != "zero_fill"}
-        np.savez_compressed(args.out / "lesion_examples.npz", X=Xs[-hold:][idx], Y=Ys[-hold:][idx], L=Ls[-hold:][idx], **P)
+            P = {k: v(torch.tensor(Xl[idx][:, None]).to(device)).cpu().numpy()[:, 0] for k, v in nets.items() if k != "zero_fill"}
+        np.savez_compressed(args.out / "lesion_examples.npz", X=Xl[idx], Y=Yl[idx], L=Ll[idx], **P)
     for k, v in results.items():
         if isinstance(v, dict) and "nmse" in v:
             print(f"{k:22s} NMSE {v['nmse']:.4f}  SSIM {v['ssim']:.3f}")
