@@ -2559,3 +2559,45 @@ controls).
   assumed in every slab's meta; the table's value is unchanged), which puts the lesion at 1.2-1.7 x the brain's
   median (peak 1.6-2.2 x) in the full TSE; the label needs 4 or more lesion pixels. The CNN pools an axis only while
   it has room. The cache is rebuilt and the sweep rerun with the full sampling first as the ceiling.
+
+## 2026-10-17 — The design experiment: why two sweeps were at chance, and the third
+
+- **The second sweep (conspicuous lesions, 372 slabs, 40 epochs, 300 steps)** was at chance too: f = 1.0 A 0.668
+  (accuracy 0.42), B 0.556, C 0.466; f = 0.2 A 0.507, B 0.463, C 0.528; f = 0.1 0.44-0.51; f = 0.05 0.48-0.51; C's
+  loss wandered 0.45-0.75 and its line positions drifted without a direction. Three diagnostics on the mini, in the
+  order run:
+  1. *Noise*: `--snr 20` as defined (sigma = mean |sample| of the reference GRE / 20) gave an image SNR of ~1200 in
+     the brain (k-space noise std 0.36 against a brain median of 6.5 and a pixel noise std of 0.006); the lesion
+     excess was 300-800 noise units. Both sweeps were effectively noiseless; the noise was not the cause.
+  2. *The training path*: the image CNN overfits the six local smoke slabs through arm A's pipeline (loss 0.004 in
+     300 steps), so inputs and labels agree.
+  3. *Learnability* (`design_diag.py`, 276 slabs after the 0 < lesion px < 4 ones are dropped, full sampling,
+     60-100 epochs): the lesions are 1.62 x the brain median (10-90 %: 1.32-1.93), peak 2.08 x, but the peak is
+     below the brain's 90th percentile in 16 % of the positives (sulcal CSF), so the task is context. Arm A's net as
+     run (mean pooling, no augmentation) reached train AUC 0.98 / test 0.62: it memorised the heads. Max-pooling
+     over space alone 0.59, with flip + shift augmentation 0.58 (underfits at 16-32-64 channels), with the
+     ambiguous slabs dropped 0.70 (two seeds 0.69-0.70), and 32-64-128 channels 0.79-0.88 at 60 epochs, 0.88-0.91 at
+     100. The raw path (`design_diag_raw.py`): a CNN on the raw multi-coil samples 0.58 (train loss 0.30: it
+     overfits); the same net behind the encoding's adjoint (a per-coil zero-filled inverse DFT, 1e-6 from `ifft2c`
+     on the grid, differentiable in continuous line positions) 0.89 as a root-sum-of-squares image and 0.84 as 16
+     real/imaginary coil channels; the full SENSE image 0.88.
+- **And a bug the diagnostics exposed**: the line mask was applied to the last k-space axis, which is the readout
+  (k-space is (coil, ky, kx); checked by blurring one axis' periphery and by the head's A-P extent along the rows). "20 %
+  of the lines" had dropped 80 % of the readout samples in arms A and B (no scan-time meaning, SENSE unfolding along x).
+  Fixed in all three places (the mask, CG-SENSE's operator, the raw lines). With phase-encode undersampling the picture
+  is stark (276 slabs, noiseless, 100 epochs): f = 1.0 SENSE 0.88 / adjoint-RSS 0.89 / adjoint-coils 0.84 / raw 0.58;
+  f = 0.2 (13 lines) 0.62 / 0.56 / 0.54 / 0.54 with the training loss stuck at 0.69; f = 0.1 all 0.55-0.58. Thirteen
+  uniformly spaced lines through an 8-element ring is R = 5 in one direction: SENSE cannot unfold it, and neither net
+  learns anything from it in 276 slabs. The regime where the baseline degrades rather than dies is 100 -> 20 %.
+- **Changes (c0bfaf1)**: phase-encode masks; `--snr` as the reference GRE's image SNR in the head (sigma = N x median
+  head pixel / snr); the CNN max-pools over space, 32-64-128 channels, flip + shift augmentation, 100 epochs, cosine
+  learning rate, three seeds for the fixed arms, accuracy at the train-best threshold; ambiguous slabs left out
+  (`--min-lesion-px 4`: 100 of 744); the raw arms read the encoding's adjoint (`--front rss|coils|raw`); a fixed-GRE
+  arm G (25 deg, TE 6, TR 15 ms, K lines evenly spread) as the ablation of what the design adds; arm C starts from G's
+  net and trains jointly for 400 simulated steps with a replay buffer (4 extra network updates per step on the last
+  256 acquisitions); TR = TE + the readout tail + an extra, so every design is feasible (the old independent (8, 120)
+  ms range allowed TR < TE). `lesion_slabs.py --draws 3` added two more lesion draws per head and level
+  (incremental, the index merged): 744 slabs, 449 with a lesion, 6.9 GB; 515 train / 129 test after the drop.
+- **The third sweep** (`design3.sh rss 0.5 0.3 0.2 1.0`, started 00:14): fractions 0.5, 0.3, 0.2 and 1.0, in that order,
+  front `rss`, SNR 20 (the TSE's image SNR is ~2.7 x that), 100 epochs x 3 seeds for A, B, G, 400 steps for C. Each
+  fraction is 1-2 h on the mini (the TSE acquisition of a slab is 0.45 s; a joint step with 8 slabs at 64 lines 10 s).

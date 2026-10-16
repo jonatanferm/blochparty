@@ -655,7 +655,11 @@ which physics (M6) the protocol families call for.
       *First task, 2026-10-16 (exploratory):* lesion detection in a slab under an acquisition
       budget — a standard TSE + SENSE + CNN against a GRE whose flips, TE, TR and k-space lines are
       learned jointly with a net on its raw multi-coil samples through the Metal adjoint
-      (`validation/design/lesion_design.py`); swept over 20 / 10 / 5 % of k-space (journal).
+      (`validation/design/lesion_design.py`). Two sweeps at chance (2026-10-16/17): lesions too
+      faint, the line mask on the readout axis, a noiseless "SNR 20", a net that memorised heads
+      (journal 2026-10-17). Fixed; at full sampling the baseline reads the task at AUC 0.88-0.89
+      on 276 slabs and nothing reads 13 uniform lines (R = 5). Third sweep: 50 / 30 / 20 / 100 % on
+      744 slabs, with a fixed-GRE arm as the ablation of what the design adds (running).
 
 ## M8. Other hardware (when machines exist)
 
