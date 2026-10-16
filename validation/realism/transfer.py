@@ -146,6 +146,17 @@ def lesion_scores(nets, X, Y, L, device):
     return out
 
 
+def spectra(Y, nbands=6):
+    """Mean radial power of the target images by band of Nyquist (the fine-content check: a higher zero-fill floor on
+    one side means its targets carry more energy where the mask takes it away)."""
+    n = Y.shape[-1]
+    f = np.fft.fftshift(np.fft.fftfreq(n)) * 2
+    rr = np.sqrt(f[:, None] ** 2 + f[None] ** 2)
+    P = np.mean([np.abs(np.fft.fftshift(np.fft.fft2(y - y.mean()))) ** 2 for y in Y], 0)
+    edges = np.linspace(0, 1, nbands + 1)
+    return [float(P[(rr >= a) & (rr < b)].mean()) for a, b in zip(edges[:-1], edges[1:])]
+
+
 def evaluate(net, X, Y, device):
     net.eval()
     with torch.no_grad():
@@ -200,6 +211,8 @@ def main():
           f"simulated: {len(Xs)} slices ({hold} held out)", flush=True)
     results = {"n": {"real_train": len(Xr_tr), "real_test": len(Xr_te), "sim": len(Xs), "sim_skipped": n_skipped}, "accel": args.accel}
     results["zero_fill"], _ = evaluate(nn.Identity(), Xr_te, Yr_te, device)
+    sr, ss_ = spectra(Yr_te), spectra(Ys)
+    results["target_power_sim_over_real"] = [round(b / a, 3) for a, b in zip(sr, ss_)]  # six bands of Nyquist
     torch.manual_seed(args.seed)
     net_s = train(UNet().to(device), Xs[:-hold], Ys[:-hold], args.epochs, device, seed=args.seed)
     results["synthetic"], P_s = evaluate(net_s, Xr_te, Yr_te, device)
@@ -243,6 +256,7 @@ def main():
     for k, v in results.items():
         if isinstance(v, dict) and "nmse" in v:
             print(f"{k:22s} NMSE {v['nmse']:.4f}  SSIM {v['ssim']:.3f}")
+    print("target power, synthetic / real, by sixth of Nyquist:", results["target_power_sim_over_real"])
     if lesion:
         print(f"lesion test on {lesion['n_samples']} held-out synthetic samples ({lesion['lesion_px']} lesion px): "
               + "; ".join(f"{k} lesion {v['lesion_nmse']:.3f} / brain {v['brain_nmse']:.3f} (level {v['lesion_mean_ratio']:.2f})"
