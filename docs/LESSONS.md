@@ -1224,6 +1224,11 @@ says where it came from so it can be re-checked.
   AXT2 subset, not every contrast), delete raw simulations once scored, prune old prepared-head versions, check
   `df -h` before anything that writes gigabytes, and keep whatever matters in the repo or on the laptop.
 
+- **Fine-tuning a model in place renames nothing** (2026-10-16): `train(net_s, real_data)` returned the same object, so
+  every later reference to the "synthetic" net (its in-domain score, the lesion test, the saved weights) was the
+  fine-tuned one, and two rows of a table agreed to the digit without anyone noticing for two days. Copy before
+  fine-tuning, and treat two identical rows as a bug, not a coincidence.
+
 ## Monte Carlo estimator audit — 2026-10-08
 
 - **Debiased power is not unbiased magnitude.** `nist.mc_magnitude` correctly subtracts

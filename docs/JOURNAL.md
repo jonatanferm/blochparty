@@ -2484,3 +2484,27 @@ controls).
   at 10-11 vs 9 mm), and a thinner scalp also concentrates the fat into a brighter peak. No relaxation value fixes a
   thickness; q56's dermis only moved the head-mask edge. The item is a scalp / skull thickness draw against the real
   profiles (population), on the roadmap under M5b item 4; the rim work stops here for today.
+- **night3: the lesion run** (60 training heads on 50 subjects with 1-4 lesions, 180 samples, 357 min; 20 evaluation
+  heads on 12 held-out subjects with 4-6 lesions of 6-15 mm, 60 samples; three seeds; sets and nets kept, 7.7 GB):
+  the transfer numbers repeat yesterday's (synthetic-only 0.055, real-only 0.039, synthetic then real 0.042; the
+  synthetic net on held-out synthetic 0.048-0.051, zero-fill on synthetic 0.158-0.159). The targets' power, synthetic
+  over real by sixth of Nyquist: 0.96 / **1.32** / 1.13 / 0.98 / 0.90 / 0.90: the mid-band excess (the rim) and a 10 %
+  deficit at the top, as read from r34 this morning.
+  **The lesion test** (held-out synthetic samples with lesion pixels; NMSE inside the lesion / in the rest of the
+  brain; the reconstructed lesion level over the true one), per seed: the synthetic net 0.055 / 0.045 (0.83), 0.101 /
+  0.046 (0.78), 0.084 / 0.043 (0.77); the real net 0.063 / 0.046 (0.80), 0.107 / 0.046 (0.79), 0.095 / 0.042 (0.73);
+  zero-fill 0.052-0.081 / 0.11 (0.86-0.97). Both nets err about twice as much inside lesions as elsewhere and dim them
+  by 17-27 %; the net that saw lesions in training is consistently a little better than the real-trained one (8-12 %
+  lower lesion error, 3-4 points of level) but far from keeping them; zero-filling keeps the level and loses the detail.
+  Only 15 of the 60 evaluation samples hit a lesion with 4 or more pixels (lesions anywhere in white matter against
+  three 5 mm slices of 1.72 mm pixels), and the numbers move with the mask: re-evaluated below with the saved nets on
+  the full set over several masks and by lesion size.
+- **Correction, the same evening**: transfer.py fine-tuned the synthetic net in place, so in every run so far the
+  in-domain "synthetic on synthetic" score, the lesion test's "synthetic" row and the saved `net_synthetic.pt` were the
+  **fine-tuned** net's (the synthetic-on-real headline was evaluated before fine-tuning and stands; the two lesion
+  rows above that agree to the digit are the same net). The claim that the net which saw lesions does a little better
+  is therefore unsupported; re-evaluating the saved nets on the full evaluation set over 8 masks gives real 0.070 /
+  0.081 / 0.074 and fine-tuned 0.066 / 0.081 / 0.091 inside lesions (brain 0.040), lesion levels 0.78-0.81 for both,
+  zero-fill 0.102 at level 0.98: so far the only firm lesion finding is that both trained nets dim lesions by ~20 % and
+  double their error there while zero-filling keeps the level. Fixed (a copy is fine-tuned), three seeds rerunning as
+  transfer_4 with the pure synthetic net.
