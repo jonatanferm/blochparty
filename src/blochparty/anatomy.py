@@ -1304,7 +1304,7 @@ LESION_REGIONS = ("any", "periventricular", "deep", "juxtacortical")
 
 
 def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), region: str = "any",
-                edge_mm: float = 1.0, spacing_mm: float = 10.) -> tuple[Anatomy, list[dict]]:
+                edge_mm: float = 1.0, spacing_mm: float = 10., z_mm=None, z_tolerance_mm: float = 3.) -> tuple[Anatomy, list[dict]]:
     """White-matter lesions as their own class (``lesion``; ROADMAP M7: "a brain with this kind of lesion there"): ``count``
     ellipsoidal blobs with soft edges, each replacing the white matter it covers (every voxel's total is conserved; grey
     matter, CSF and the rest keep their fractions), centred on white matter of ``region``: "periventricular" (within
@@ -1313,8 +1313,9 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
     ``size_mm`` (full lengths, mm), the two others 0.5-1 of it, the orientation uniform; the edge is a logistic ramp of
     ``edge_mm`` (partial volume); centres at least ``spacing_mm`` apart; ``rng`` a numpy Generator. Needs MNI
     coordinates for the ventricle region (a model before ``deform``). Returns the anatomy and one record per lesion
-    (centre [MNI mm], semi-axes [mm], rotation, volume [mL] actually placed). The shapes are synthetic (ellipsoids, no
-    mass effect, no rim); the tissue values of ``lesion`` are the measured ones (``DEFAULT_TISSUES``)."""
+    (centre [MNI mm], semi-axes [mm], rotation, volume [mL] actually placed). ``z_mm``: centres only within
+    ``z_tolerance_mm`` of these MNI z levels (lesions at the levels an experiment images). The shapes are synthetic
+    (ellipsoids, no mass effect, no rim); the tissue values of ``lesion`` are the measured ones (``DEFAULT_TISSUES``)."""
     from scipy import ndimage
 
     if region not in LESION_REGIONS:
@@ -1334,6 +1335,12 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
             vent = ventricle_mask(anatomy)
             d_vent = ndimage.distance_transform_edt(~vent, sampling=voxel)
             candidates &= (d_vent <= 10e-3) if region == "periventricular" else ((d_vent >= 10e-3) & (d_gm >= 5e-3))
+    if z_mm is not None:
+        zc = (anatomy.origin[2] + np.arange(anatomy.shape[0]) * voxel[0]) * 1e3
+        near = np.zeros(anatomy.shape[0], bool)
+        for z in np.atleast_1d(z_mm):
+            near |= np.abs(zc - float(z)) <= z_tolerance_mm
+        candidates &= near[:, None, None]
     idx = np.flatnonzero(candidates)
     if len(idx) == 0:
         raise ValueError(f"no white matter for region {region!r}")
