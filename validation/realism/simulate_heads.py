@@ -420,6 +420,9 @@ def main():
     ap.add_argument("--receive-scale", default="1.1,1.45",
                     help="with --receive-draw: the ring's semi-axes scale drawn uniformly in lo,hi (1.0,1.25 matched the "
                          "first 34 scans' scalp level 4.4 over WM; the 65-scan set reads 3.87 +- 1.02: 2026-10-15)")
+    ap.add_argument("--normalise-range", default="20,60",
+                    help="with --receive-draw: the normalisation length [mm] drawn uniformly in lo,hi (a longer length keeps "
+                         "more of the array's shading, as the real scans' broad shading suggests: journal 2026-10-16)")
     ap.add_argument("--coil-element-radius", type=float, default=None,
                     help="the receive elements' loop radius [m]: a loop's on-axis falloff instead of 1 / distance")
     ap.add_argument("--receive-normalise-mm", type=float, default=None,
@@ -466,6 +469,7 @@ def main():
     ap.add_argument("--spins", default=None, help="override: spins per voxel along z,y,x")
     args = ap.parse_args()
     args.receive_scale = tuple(float(v) for v in args.receive_scale.split(","))
+    args.normalise_range = tuple(float(v) for v in args.normalise_range.split(","))
     if args.train == "header" and args.ordering != "linear_full":
         ap.error("--train header needs --ordering linear_full (the real scans' 396-line linear order)")
     if args.preset == "realistic":
@@ -559,8 +563,9 @@ def main():
         if args.receive_draw:
             rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(15)[14])
             lo, hi = args.receive_scale
+            nlo, nhi = args.normalise_range
             draw = {"radius_scale": float(rng.uniform(lo, hi)), "gap_mm": float(rng.uniform(5., 30.)),
-                    "normalise_mm": float(rng.uniform(20., 60.))}
+                    "normalise_mm": float(rng.uniform(nlo, nhi))}
             coil_radius = coil_radius * draw["radius_scale"]
             coil_radius_lr = None if coil_radius_lr is None else coil_radius_lr * draw["radius_scale"]
             gap_mm = draw["gap_mm"]

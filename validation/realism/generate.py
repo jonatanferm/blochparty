@@ -19,7 +19,7 @@ The spec (JSON) says what the brain and the scan are; the seed fills in what it 
      "scanner": {"receive": "draw", "b1": "birdcage", "noise": "paired"},
      "quality": {"spins": [2, 3, 3]}}
 
-anatomy: an IXI head (``subject`` null: drawn from the prepared directory), the realism preset's anatomy options
+anatomy: an IXI head (``subject`` null: drawn from the prepared directory, or from ``subjects`` if the spec lists a pool), the realism preset's anatomy options
 (deep grey, falx, the fitted residual, native size, drawn yaw / pitch) and ``lesions`` (``anatomy.add_lesions``
 keywords; null for none; "count": [lo, hi] draws the count per head, 0 meaning none). protocol: ``fastmri_t2w`` pairs the sample with one real scan's header (TR, TE, refocusing
 angle, coil count, echo spacing: ``simulate_heads.real_protocols``) and plays its 21-echo train over 16 slices; ``n``
@@ -72,7 +72,11 @@ def head_for(spec: dict, seed: int, table) -> bp.DigitalPhantom:
     """The realism preset's anatomy (simulate_heads --preset realistic --source ixi --residual) for this seed."""
     a = spec["anatomy"]
     prepared = None if a.get("prepared") is None else Path(a["prepared"]).expanduser()
-    head = bp.sample_head(seed, subject=a.get("subject"), root=SH.ROOT, voxel=(1e-3,) * 3, table=table, scalp="brainweb",
+    subject = a.get("subject")
+    if subject is None and a.get("subjects"):  # a pool of subjects (e.g. a held-out set for evaluation), drawn by the seed
+        pool = list(a["subjects"])
+        subject = int(pool[int(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(17)[16]).integers(len(pool)))])
+    head = bp.sample_head(seed, subject=subject, root=SH.ROOT, voxel=(1e-3,) * 3, table=table, scalp="brainweb",
                           ixi_prepared=prepared, size="native", yaw_sd=3.8, age=None, deep_grey=True,
                           magnitude=a.get("deform_mm", 3.0) * 1e-3, ventricle_age=None, pitch=(-10., 5.), source=a["source"],
                           falx=True, interpolation=3, residual=True, dermis=False, lesions=a.get("lesions"), texture={})
