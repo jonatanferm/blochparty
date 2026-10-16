@@ -2458,3 +2458,12 @@ controls).
   q54 draws the normalisation length 40-120 mm instead of 20-60 (more of the array's shading left), both read by
   gap.py's band minimum, scalp levels and polar map. The no-lesion ablation set is dropped: it was null on real data
   and the lesion question compares the synthetic net against the real-trained one.
+- **Rim, first two variants** (v17 heads, quick quality, against q51; gap.py polar in units of each image's p99, sim /
+  real by radius band): q53 (skull T2 40 ms, PD 0.25) left the posterior band at 0.72 / 0.65 / 0.74 of real at
+  0.80-0.94 of the head radius (q51 0.75 / 0.71 / 0.73): at TE 113 a 40 ms T2 keeps 6 % of the signal, nothing to
+  see; q54 (normalisation length drawn 40-120 mm) improved W1 (0.0161 vs 0.0191) but brightened the scalp (4.34 vs
+  the real 3.90; q51 4.09) and the posterior scalp (0.52 vs 0.44) without touching the band. The maps put the rim's
+  excess in two places: the posterior band 30 % too dark (0.34 / 0.24 / 0.34 against the real 0.46 / 0.34 / 0.47) and
+  the posterior edge at 0.98-1.02 of the radius 38 % too bright (0.21 vs 0.15), with the sides' band also at 0.77-0.80.
+  Next: q55 with a skull signal that shows (T2 70 ms, PD 0.3: ~0.3 x WM, the diploe's worth, an experiment) and q56
+  with the dermis on (the outer 1.6 mm dark; on 2026-10-13 it over-sharpened the edge, before the receive changes).
