@@ -543,7 +543,12 @@ Items in the order of measured effect over cost; each has its own number to move
    5 mm slice (IXI's own T2 at 1.2 mm against the real partial volume), the residual's 1.5 mm
    smoothing (the missing fine texture), the slice profile. Verify: power by band within 10 % of
    real at matched CSF share; the caught heads' scores fall.
-4. **The posterior band** (1-2 days). 0.72-0.89 of real at 0.80-0.94 of the head radius behind
+4. **The posterior band** (1-2 days). *2026-10-16, read from the truth grids (`gap.py composition`):* our
+   dark valley sits ~4 mm nearer the brain than the real one and is deeper, because the clinical
+   population's posterior scalp + skull is thicker than the IXI volunteers' as segmented (6.6 vs
+   5.0 mm of soft tissue, the valley at 10-11 vs 9 mm); the fat is concentrated into a brighter
+   peak for the same reason. It is a thickness distribution to draw against the real 0.57 mm
+   profiles (the head on the pad, patients vs volunteers), not a tissue value. 0.72-0.89 of real at 0.80-0.94 of the head radius behind
    the brain, 1.31 at the posterior edge: deeper and darker than real. Known: not the labels, not
    the pitch, partly IXI's fat shift (journal 2026-10-12). Open: the occipital diploë (the real
    aligned profile reads 1.6 where ours is 0.8), the dura and CSF under the occiput. Verify with

@@ -4,6 +4,7 @@
     uv run python validation/realism/gap.py polar     --score ~/data/score_r27   # mean image in head polar coordinates
     uv run python validation/realism/gap.py structure --score ~/data/score_r27   # interior structure power, CSF components
     uv run python validation/realism/gap.py controls  --score ~/data/score_r27   # the benchmark's own resolution
+    uv run python validation/realism/gap.py composition --samples ~/data/gen_les2 --score ~/data/score_r34  # the rim's classes by radius
 
 features: head area, anterior-posterior length and left-right width [px], centroid row / column (rows run posterior
 to anterior), interior quartiles and p99, white-matter mode, CSF-bright share (> 2.5 x the mode), scalp (outer 6 px),
@@ -120,6 +121,58 @@ def structure(img):
         float((vals > 2.5 * wm_mode(vals)).mean())
 
 
+def composition(samples: Path, score: Path | None, n_files: int = 120):
+    """The rim's class composition by radius from generated samples' truth grids (generate.py's /truth/fractions and
+    image_clean), per sector and band: the simulated clean level (over p99), the real level at the same bands (from a
+    score directory's real images, else r34's 2026-10-16 values) and the classes' mean fractions. 2026-10-16: the
+    posterior band at 0.80-0.86 of the radius reads 0.46 in the real scans and 0.26 in ours, where ours already holds
+    21 % skull: the real scalp + skull is ~4 mm thicker at the back, the dark valley one band further out."""
+    import glob
+    import json as _json
+    import h5py
+    files = sorted(glob.glob(str(samples / "sample_*.h5")))[:n_files]
+    r = np.linspace(0, 1.15, 40)
+    if score is not None:
+        z = np.load(score / "examples.npz", allow_pickle=True)
+        pr = np.stack([polar(i) for i in z["real"]]).mean(0)
+        real = {name: [pr[[i % 72 for i in idx]][:, (r >= a) & (r < b)].mean() for a, b in RADII] for name, idx in SECTORS.items()}
+    else:
+        real = {"posterior": [0.36, 0.34, 0.48, 0.46, 0.34, 0.47, 0.54, 0.15, 0.07], "right": [0.34, 0.31, 0.42, 0.41, 0.27, 0.32, 0.51, 0.20, 0.06],
+                "anterior": [0.44, 0.31, 0.43, 0.51, 0.41, 0.36, 0.46, 0.21, 0.06], "left": [0.34, 0.31, 0.42, 0.41, 0.27, 0.32, 0.51, 0.20, 0.06]}
+    acc, n = None, 0
+    for f in files:
+        with h5py.File(f, "r") as h:
+            g = h["truth"]; img = g["image_clean"][()]; fr = g["fractions"][()]; classes = _json.loads(g.attrs["classes"])
+        img = img / np.percentile(img, 99)
+        m = head_mask(img)
+        yy, xx = np.nonzero(m); cy, cx = yy.mean(), xx.mean()
+        t = np.arange(0, 90, 0.5)
+        maps = {c: fr[i] for i, c in enumerate(classes) if c != "background"}
+        p = {k: np.zeros((72, 40)) for k in ["image", *maps]}
+        for a in range(72):
+            th = 2 * np.pi * a / 72; dy, dx = -np.cos(th), np.sin(th)
+            ys, xs = cy + t * dy, cx + t * dx
+            ok = (ys >= 0) & (ys < img.shape[0] - 1) & (xs >= 0) & (xs < img.shape[1] - 1)
+            inside = ndi.map_coordinates(m.astype(float), [ys[ok], xs[ok]], order=1) > 0.5
+            R = t[ok][np.nonzero(inside)[0].max()] if inside.any() else t[ok][-1]
+            coords = [cy + r * R * dy, cx + r * R * dx]
+            p["image"][a] = ndi.map_coordinates(img, coords, order=1)
+            for k, v in maps.items():
+                p[k][a] = ndi.map_coordinates(v, coords, order=1)
+        acc = p if acc is None else {k: acc[k] + p[k] for k in p}
+        n += 1
+    print(f"{n} samples; per sector and band of the head radius: simulated clean level (of p99) | real | class fractions > 0.03")
+    for sect, idx in SECTORS.items():
+        idx = [i % 72 for i in idx]
+        print("==", sect)
+        for (a, b), rv in zip(RADII, real[sect]):
+            k = (r >= a) & (r < b)
+            sim = acc["image"][idx][:, k].mean() / n
+            comp = {c: acc[c][idx][:, k].mean() / n for c in acc if c != "image"}
+            top = ", ".join(f"{c} {v:.2f}" for c, v in sorted(comp.items(), key=lambda kv: -kv[1]) if v > 0.03)
+            print(f"  {a:.2f}-{b:.2f}: sim {sim:.2f} real {rv:.2f} ({sim / rv:4.2f}) | {top}")
+
+
 def auc(a, b):
     a, b = np.asarray(a), np.asarray(b)
     return float((b[:, None] > a[None]).mean() + 0.5 * (b[:, None] == a[None]).mean())
@@ -127,12 +180,15 @@ def auc(a, b):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=("features", "polar", "structure", "controls"))
-    ap.add_argument("--score", type=Path, required=True, help="score.py output directory (examples.npz)")
+    ap.add_argument("mode", choices=("features", "polar", "structure", "controls", "composition"))
+    ap.add_argument("--score", type=Path, default=None, help="score.py output directory (examples.npz)")
+    ap.add_argument("--samples", type=Path, default=None, help="composition: a generate.py output directory (truth grids)")
     ap.add_argument("--fastmri", type=Path, default=None, help="fastMRI directory (controls; default realism.FASTMRI)")
     ap.add_argument("--cache", type=Path, default=Path.home() / "data" / "realism_cache")
     ap.add_argument("--slice", type=int, default=None, help="one slice index only")
     args = ap.parse_args()
+    if args.mode == "composition":
+        return composition(args.samples, args.score)
     z = np.load(args.score / "examples.npz", allow_pickle=True)
     keep_r = slice(None) if args.slice is None else z["real_slices"] == args.slice
     keep_s = slice(None) if args.slice is None else z["sim_slices"] == args.slice

@@ -2473,3 +2473,14 @@ controls).
   band minimum exactly on real (0.138) but the outer edge brighter still (1.55 at 0.98-1.02; sides 1.16-1.31). One
   class at a time does not converge because the p99 normalisation couples every change; the generated samples carry
   the tissue fractions on the image grid, so the rim's composition by radius is read directly (scratch rimcomp.py).
+- **The rim read from the truth grids** (`gap.py composition`, 30 generated v17 samples at 2 x 4 x 4, clean images over
+  p99, against the real polar levels; posterior sector by band of the head radius): 0.70-0.80: sim 0.43 / real 0.48
+  (cortex); **0.80-0.86: sim 0.26 / real 0.46**, where ours already holds skull 0.21, skin 0.13, muscle 0.08 beside
+  gm 0.29; 0.86-0.90: 0.28 / 0.34 (skull 0.32, skin 0.21); 0.90-0.94: 0.46 / 0.47 (fat 0.29); 0.94-0.98: 0.66 / 0.54
+  (fat 0.46: a thinner, brighter fat layer); 0.98-1.02: 0.20 / 0.15 (skin 0.49, the dim surface on both sides). The
+  sides: 0.80-0.86 0.28 / 0.41 with skull 0.29. So the dark valley sits one band (~4 mm of a 90 mm radius) nearer the
+  brain than in the real scans and the real valley is shallower: the clinical population's posterior scalp + skull is
+  thicker than the IXI volunteers' as segmented (the 0.57 mm profiles said 6.6 vs 5.0 mm of soft tissue and the valley
+  at 10-11 vs 9 mm), and a thinner scalp also concentrates the fat into a brighter peak. No relaxation value fixes a
+  thickness; q56's dermis only moved the head-mask edge. The item is a scalp / skull thickness draw against the real
+  profiles (population), on the roadmap under M5b item 4; the rim work stops here for today.
