@@ -75,9 +75,11 @@ class Design(nn.Module):
     """Arm C's parameters: flips in (2, 90) deg by a sigmoid, TE in ``te`` (s), TR = TE + the readout tail + an extra in
     ``tr_extra`` (so every design is feasible), ky in (-nx/2, nx/2) cycles by a tanh, all unconstrained underneath."""
 
-    def __init__(self, lines: int, nx=NX, te=(2e-3, 30e-3), tr_extra=(0.5e-3, 100e-3), init_flip=25., init_te=6e-3, init_tr=15e-3):
+    def __init__(self, lines: int, nx=NX, te=(2e-3, 80e-3), tr_extra=(0.5e-3, 100e-3), init_flip=25., init_te=6e-3, init_tr=15e-3):
         super().__init__()
         self.lines, self.nx, self.te_rng, self.tr_rng = lines, nx, te, tr_extra
+        if not (te[0] < init_te < te[1] and tr_extra[0] < init_tr - init_te - T_TAIL < tr_extra[1]):
+            raise ValueError(f"start TE {init_te * 1e3:.1f} / TR {init_tr * 1e3:.1f} ms outside the design's ranges")
         self.flip_raw = nn.Parameter(torch.full((lines,), math.log((init_flip - 2) / (90 - init_flip))))
         self.te_raw = nn.Parameter(torch.tensor(math.log((init_te - te[0]) / (te[1] - init_te))))
         extra = init_tr - init_te - T_TAIL
@@ -278,13 +280,18 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--fraction", type=float, default=0.2, help="the share of k-space every arm may acquire (K = fraction x 64 lines)")
     ap.add_argument("--snr", type=float, default=20., help="image SNR of the reference GRE in the head (snr_unit)")
-    ap.add_argument("--front", default="coils", choices=("rss", "coils", "raw"), help="what the CNN of arms B, G and C reads")
+    ap.add_argument("--front", default="rss", choices=("rss", "coils", "raw"), help="what the CNN of arms B, G and C reads (rss read best)")
     ap.add_argument("--epochs", type=int, default=100, help="arms A, B, G: epochs over the cached acquisitions")
     ap.add_argument("--seeds", type=int, default=3, help="arms A, B, G: repeats (initialisation, noise, order)")
     ap.add_argument("--steps", type=int, default=400, help="arm C: joint design + network steps, one simulated batch each")
     ap.add_argument("--batch", type=int, default=8, help="arm C: slabs per simulated step")
     ap.add_argument("--replay", type=int, default=4, help="arm C: extra network-only updates per step from the replay buffer")
     ap.add_argument("--design-lr", type=float, default=1e-2)
+    ap.add_argument("--starts", default="25:6:15,10:6:15,25:20:30,15:30:40,15:45:55,15:60:70",
+                    help="arm G / C's starting designs as flip_deg:TE_ms:TR_ms (K lines evenly spread): each is fitted with one seed and the "
+                         "best on the training set is arm G (refitted with --seeds) and arm C's start. A coarse search over the generic "
+                         "GRE contrasts first, because a joint gradient from a chance-level network has nothing to follow: from the "
+                         "25 deg / 6 ms / 15 ms start alone (a lesion 16 %% darker than white matter, like grey matter) the design did not move")
     ap.add_argument("--min-lesion-px", type=float, default=4.)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arms", default="A,B,G,C")
@@ -325,11 +332,11 @@ def main():
     unit = cached("snr_unit", snr_unit)
     sigma = {f: unit[f] / args.snr for f in unit}
 
-    def fit(name, make_input):
+    def fit(name, make_input, seeds=None):
         """Arms A, B, G: ``make_input(rec, gen)`` builds the CNN's input with fresh noise; ``--seeds`` repeats; the
         final-epoch network is scored (no selection on the test set)."""
         runs, nets = [], []
-        for s in range(args.seeds):
+        for s in range(args.seeds if seeds is None else seeds):
             torch.manual_seed(args.seed + s); gen = torch.Generator().manual_seed(args.seed + s)
             x0 = make_input(train[0], gen)
             net = Net(x0.shape[0], tuple(x0.shape[1:])).to(device)
@@ -378,13 +385,30 @@ def main():
             results["B_tse_" + args.front]["scan_s"] = scan_tse
             print("B", {k: v for k, v in results["B_tse_" + args.front].items() if k != "runs"}, flush=True)
     if "G" in arms or "C" in arms:
-        design = Design(lines)
-        with torch.no_grad():
-            flips0, ky0, te0, tr0 = design()
-            gre0 = learnable_gre(flips0, ky0, te0, tr0)
-        k_gre = cached(f"gre{lines}", lambda ph: simulate_metal(ph, gre0, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu())
-        results["G_gre_" + args.front], nets_g = fit("G", lambda r, g: front_input(args.front, add_noise(k_gre[r["file"]], sigma[r["file"]], g), ky0))
-        results["G_gre_" + args.front].update({"scan_s": float(gre0.dt.sum()), "design": design.describe()})
+        trials = []
+        for start in args.starts.split(","):
+            flip, te_ms, tr_ms = (float(v) for v in start.split(":"))
+            d = Design(lines, init_flip=flip, init_te=te_ms * 1e-3, init_tr=tr_ms * 1e-3)
+            with torch.no_grad():
+                flips0, ky0, te0, tr0 = d()
+                gre0 = learnable_gre(flips0, ky0, te0, tr0)
+            k0 = cached(f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}",
+                        lambda ph, seq=gre0: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu())
+            r, nets = fit(f"G[{flip:g} deg, TE {te_ms:g}, TR {tr_ms:g} ms]",
+                          lambda rec, g, k0=k0, ky0=ky0: front_input(args.front, add_noise(k0[rec["file"]], sigma[rec["file"]], g), ky0), seeds=1)
+            trials.append({"start": [flip, te_ms, tr_ms], "auc": r["auc"], "train_auc": r["train_auc"], "scan_s": float(gre0.dt.sum()),
+                           "design": d, "k": k0, "ky": ky0, "net": nets[0]})
+        best = max(trials, key=lambda t: t["train_auc"])  # chosen on the training set, never on the test set
+        results["G_starts"] = [{k: t[k] for k in ("start", "auc", "train_auc", "scan_s")} for t in trials]
+        design, k_gre, ky0 = best["design"], best["k"], best["ky"]
+        print(f"G starts (test AUC / train AUC): " + ", ".join(f"{t['start']}: {t['auc']:.3f} / {t['train_auc']:.3f}" for t in trials)
+              + f"; best on the training set {best['start']}", flush=True)
+        if args.seeds > 1:
+            results["G_gre_" + args.front], nets_g = fit("G", lambda r, g: front_input(args.front, add_noise(k_gre[r["file"]], sigma[r["file"]], g), ky0))
+        else:
+            results["G_gre_" + args.front] = {"auc": best["auc"], "train_auc": best["train_auc"], "accuracy": float("nan"), "runs": []}
+            nets_g = [best["net"]]
+        results["G_gre_" + args.front].update({"scan_s": best["scan_s"], "design": design.describe(), "start": best["start"]})
         print("G", {k: v for k, v in results["G_gre_" + args.front].items() if k not in ("runs", "design")}, flush=True)
     if "C" in arms:
         gen = torch.Generator().manual_seed(args.seed + 100)
