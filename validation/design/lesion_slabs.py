@@ -5,8 +5,10 @@ count and the lesion mask on the acquisition grid.
 
     uv run python validation/design/lesion_slabs.py --prepared validation/anatomy/data/ixi/prepared_v17 --out ~/data/slabs
 
-Writes ``<out>/slab_<subject>_<z>_<les|nol>.pt`` (a dict: phantom fields, label, lesion_px, lesion_mask (n, n), meta) and
-``<out>/index.json`` (subject, level, lesions, train / test split by subject: the last ``--test-subjects`` subjects).
+Writes ``<out>/slab_<subject>_<z>_<les|nol|les2|...>.pt`` (a dict: phantom fields, label, lesion_px, lesion_mask (n, n), meta)
+and ``<out>/index.json`` (subject, level, lesions, train / test split by subject: the last ``--test-subjects`` subjects).
+Incremental: existing slabs are kept and only missing ones built, so ``--draws 3`` on a finished folder adds two more
+lesion draws (``les2``, ``les3``: other lesions on the same anatomy, more positives for the same heads) per level.
 The phantoms carry the tissue table's 3 T values, the subject's residual maps and the bound pool (MT) and nothing else of
 the realism preset (no deformation, pose, receive or noise: the experiment compares sequences, not realism).
 """
@@ -66,8 +68,12 @@ def main():
                     "lesion (chronic plaques / gliosis read near CSF on T2w); the table's 0.111 (West 2014's mixed MS lesions) "
                     "is only ~20 % above the surrounding tissue after partial volume and the residual maps")
     ap.add_argument("--lesion-pd", type=float, default=0.85)
+    ap.add_argument("--draws", type=int, default=1, help="lesion draws per head (kinds les, les2, ...): more positives on the same anatomy")
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
+    index_path = args.out / "index.json"
+    index = {r["file"]: r for r in json.loads(index_path.read_text())} if index_path.exists() else {}
+    index = {f: r for f, r in index.items() if (args.out / f).exists()}
     ids = sorted(int(p.stem[3:]) for p in args.prepared.glob("IXI*.npz"))
     if args.subjects:
         ids = [int(s) for s in args.subjects.split(",")]
@@ -82,13 +88,16 @@ def main():
     levels = [float(v) * 1e-3 for v in args.levels_mm.split(",")]
     spins = tuple(int(v) for v in args.spins.split(","))
     lo, hi = (int(v) for v in args.lesions.split(","))
-    index = []
+    kinds = ["les", "nol"] + [f"les{d}" for d in range(2, args.draws + 1)]
     for sid in ids:
+        if all((args.out / f"slab_{sid:03d}_{round(z * 1e3):02d}_{kind}.pt").exists() for z in levels for kind in kinds):
+            continue
         an, meta = load_ixi(sid, IXI, prepared=args.prepared, voxel=(args.voxel_mm * 1e-3,) * 3, residual=True)
-        for kind in ("les", "nol"):
-            rng = np.random.default_rng(np.random.SeedSequence(sid).spawn(16)[15])
+        for kind in kinds:
+            draw = 1 if kind == "les" else int(kind[3:]) if kind.startswith("les") else 0
+            rng = np.random.default_rng(np.random.SeedSequence(sid).spawn(16)[15] if draw <= 1 else np.random.SeedSequence([sid, draw]))
             an_k, recs = an, []
-            if kind == "les":  # lesions at every imaged level, so each slab of this head holds some
+            if draw:  # lesions at every imaged level, so each slab of this head holds some
                 for z in levels:
                     count = int(rng.integers(lo, hi + 1))
                     an_k, more = add_lesions(an_k, rng, count=count, size_mm=(10., 20.), region="any", z_mm=[z * 1e3], z_tolerance_mm=2.)
@@ -102,7 +111,7 @@ def main():
                 half = max(round(THICKNESS / 2 / an.voxel[0]), 1)
                 ph = head.to_phantom(fov_region=(slice(k - half, k + half + 1), slice(None), slice(None)), spins_per_voxel=spins,
                                      sampling="proportional", jitter="inplane", mt=True)
-                mask, centre = lesion_mask(an_k, z, args.n) if kind == "les" else (np.zeros((args.n, args.n), np.float32), None)
+                mask, centre = lesion_mask(an_k, z, args.n) if draw else (np.zeros((args.n, args.n), np.float32), None)
                 if centre is None:
                     _, centre = lesion_mask(an, z, args.n) if "lesion" in an.fractions else (None, None)
                 # centre the field of view on the head's box and put the slab at z = 0
@@ -113,15 +122,16 @@ def main():
                 ph.pos = ph.pos - torch.tensor([cx, cy, z], dtype=ph.pos.dtype)
                 ph = ph.to(torch.float32)
                 lesion_px = float((mask > .5).sum())
-                torch.save({"phantom": ph, "label": int(kind == "les" and lesion_px >= 4), "lesion_px": lesion_px, "lesion_mask": torch.from_numpy(mask),
+                label = int(bool(draw) and lesion_px >= 4)
+                torch.save({"phantom": ph, "label": label, "lesion_px": lesion_px, "lesion_mask": torch.from_numpy(mask),
                             "meta": {"subject": sid, "z_mm": z * 1e3, "kind": kind, "lesions": recs, "spins": len(ph), "voxel_mm": args.voxel_mm,
                                      "lesion_t2": args.lesion_t2, "lesion_pd": args.lesion_pd}}, dest)
-                index.append({"file": dest.name, "subject": sid, "z_mm": z * 1e3, "kind": kind, "label": int(kind == "les" and lesion_px >= 4),
-                              "lesion_px": lesion_px, "split": "test" if sid in test else "train", "spins": len(ph)})
+                index[dest.name] = {"file": dest.name, "subject": sid, "z_mm": z * 1e3, "kind": kind, "label": label,
+                                    "lesion_px": lesion_px, "split": "test" if sid in test else "train", "spins": len(ph)}
                 print(f"{dest.name}: {len(ph):,} spins, lesion px {lesion_px:.0f}", flush=True)
-        (args.out / "index.json").write_text(json.dumps(index, indent=1))
-    print(f"{len(index)} slabs, {sum(i['label'] for i in index)} with a lesion in the slab; "
-          f"{sum(i['split'] == 'test' for i in index)} test")
+        index_path.write_text(json.dumps(sorted(index.values(), key=lambda r: r["file"]), indent=1))
+    print(f"{len(index)} slabs, {sum(i['label'] for i in index.values())} with a lesion in the slab; "
+          f"{sum(i['split'] == 'test' for i in index.values())} test")
 
 
 if __name__ == "__main__":
