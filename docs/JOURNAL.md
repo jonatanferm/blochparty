@@ -2467,3 +2467,9 @@ controls).
   the posterior edge at 0.98-1.02 of the radius 38 % too bright (0.21 vs 0.15), with the sides' band also at 0.77-0.80.
   Next: q55 with a skull signal that shows (T2 70 ms, PD 0.3: ~0.3 x WM, the diploe's worth, an experiment) and q56
   with the dermis on (the outer 1.6 mm dark; on 2026-10-13 it over-sharpened the edge, before the receive changes).
+- **Rim, second pair** (against q51): q55 (skull T2 70 ms, PD 0.3) brightened the posterior scalp (0.54 vs the real
+  0.44) and the brain's median over WM (1.34 vs 1.24) and left the inner band darker (0.68 / 0.61 at 0.80-0.90 of the
+  radius) while 0.90-0.94 rose to 0.82; W1 0.0151 (the best yet) with a worse histogram AUC. q56 (the dermis) put the
+  band minimum exactly on real (0.138) but the outer edge brighter still (1.55 at 0.98-1.02; sides 1.16-1.31). One
+  class at a time does not converge because the p99 normalisation couples every change; the generated samples carry
+  the tissue fractions on the image grid, so the rim's composition by radius is read directly (scratch rimcomp.py).
