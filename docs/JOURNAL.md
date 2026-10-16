@@ -2549,3 +2549,13 @@ controls).
   backward per slab on the laptop at K = 13), 300 steps of batches of 8, the flips in (2, 90) deg, TE in (2, 30) ms,
   TR in (8, 120) ms by sigmoids. Reported: test AUC and accuracy per arm, the scan time (the TSE's kept shots; the
   GRE's K + 8 dummies x TR), and C's learned sequence. The sweep f = 0.2, 0.1, 0.05 runs on the mini.
+- **First sweep at chance, and why**: at f = 0.2 every arm scored AUC 0.40-0.56 at the negative-class accuracy, and
+  f = 0.1 / 0.05 crashed the CNN's pooling on 6 and 3 lines. Rendering the slabs showed the task was not learnable
+  as posed: 6-15 mm lesions with the table's T2 (111 ms, West 2014's mixed MS lesions scaled from 1.5 T) came out as
+  one or two pixels at 3.4 mm, ~20 % above their surroundings after partial volume and the residual maps, under the
+  grain of one spin per 2 mm voxel; a mask check on the mirrored, transposed and flipped grids confirmed the mask's
+  frame and that the lesion simply was not bright. Changed: lesions of 10-20 mm, four in-plane spins per voxel
+  (~245 k a slab), and the task's lesion given T2 200 ms / PD 0.85 (a conspicuous T2-hyperintense lesion, recorded as
+  assumed in every slab's meta; the table's value is unchanged), which puts the lesion at 1.2-1.7 x the brain's
+  median (peak 1.6-2.2 x) in the full TSE; the label needs 4 or more lesion pixels. The CNN pools an axis only while
+  it has room. The cache is rebuilt and the sweep rerun with the full sampling first as the ceiling.
