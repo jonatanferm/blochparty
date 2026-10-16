@@ -2438,3 +2438,15 @@ controls).
   and say nothing. It needs an evaluation-only set with many, larger lesions (count 4-6, 6-15 mm) and nets saved
   (transfer.py did not keep them, and the chain deleted the raw samples by the disk rule, so the ablation cannot be
   rescored without regenerating; both are fixed in the code for the next run).
+- **Where the synthetic task's higher floor comes from** (r34's scored images, 434 synthetic at 2 x 3 x 3 against the
+  455 real, power along the phase axis as a share of each image's total): the always-sampled centre (0-8 % of
+  Nyquist) holds 0.714 of a real image's power and 0.656 of ours; 8-25 % holds 0.163 real / 0.205 ours; 25-50 %
+  0.093 / 0.111; the top two bands equal or lower in ours (0.022 / 0.021, 0.0086 / 0.0074). So it is not the grain:
+  our images carry ~25 % more mid-scale power (12-35 mm features) and less smooth large-scale shading than the real
+  crops, and a 4 x mask therefore removes more of them (zero-fill proxy on the magnitude images 0.167 vs 0.155, the
+  same direction as the k-space floors 0.170 vs 0.140). Inside the brain the isotropic bands are near 1 (gap.py), so
+  the excess sits at the head's rim: the scalp-fat / black-bone / cortex sequence is a stronger mid-frequency feature
+  in ours than in the real scans (the real bone band is never as dark, the real scalp smoother), and the real images
+  keep a broader shading our normalised receive flattens. That is a simulator question (the rim's rendering, the
+  shading the scanner's normalisation leaves), testable with quick runs and gap.py, not with another night of
+  generation.
