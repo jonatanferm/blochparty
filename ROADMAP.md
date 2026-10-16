@@ -638,10 +638,14 @@ which physics (M6) the protocol families call for.
       NMSE 0.133 / SSIM 0.569, synthetic-only 0.052 / 0.867, real-only 0.053 / 0.857, synthetic then
       real 0.044 / 0.887. *Three seeds with a fair real baseline, 2026-10-16 (180 + 180 samples, real
       trained on 308 slices):* zero-fill 0.140 / 0.56, synthetic-only 0.054 / 0.85, real-only 0.040 /
-      0.89, synthetic then real 0.041 / 0.89; cross-domain equals in-domain both ways (no domain shift
-      visible), the synthetic task's own floor is higher (zero-fill 0.170 vs 0.140). Next: the synthetic
-      images' fine content (grain, residual, the raw filter of a 320-line acquisition), a lesion
-      evaluation set with large lesions and saved nets, then 320 x 320.
+      0.89, synthetic then real 0.041 / 0.89 (confirmed on a second set, 2026-10-16). Domain shift
+      modest and asymmetric (the synthetic net loses ~12 % crossing to real, the real net ~28 %
+      crossing to synthetic, whose task is harder: more mid-band power at the rim). **Lesion test
+      (2026-10-16):** every trained net dims lesions ~20 % and doubles its error inside them;
+      training on synthetic lesions does not help (0.090 vs 0.075 inside lesions for the real-trained
+      net) — the lever is the reconstruction method (a structure-preserving loss, k-space data
+      consistency), not more lesion data. Next: that method change, measured by the same lesion
+      test; the posterior scalp thickness (M5b item 4); then 320 x 320 and a second contrast.
 - [ ] Sequence spec in: JSON → builder calls (`design.design_report` already produces the report
       out). Linter messages mapped to Pulseq blocks (M4 provenance). Parameterized sequence API
       (which tensors are free, bounds, reparameterizations), hardware projections.

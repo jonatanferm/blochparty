@@ -2508,3 +2508,22 @@ controls).
   zero-fill 0.102 at level 0.98: so far the only firm lesion finding is that both trained nets dim lesions by ~20 % and
   double their error there while zero-filling keeps the level. Fixed (a copy is fine-tuned), three seeds rerunning as
   transfer_4 with the pure synthetic net.
+- **transfer_4, the corrected three seeds** (the pure synthetic net kept apart from its fine-tuned copy; the same data as
+  night3). On real test slices (NMSE / SSIM, three seeds): zero-fill 0.140 / 0.56; synthetic only 0.056, 0.051, 0.057 /
+  0.86; real only 0.040, 0.037, 0.041 / 0.89; synthetic then real 0.042, 0.040, 0.043 / 0.88. In domain, now of the
+  right nets: the synthetic net on held-out synthetic 0.048, 0.048, 0.052 (mean 0.049) against its 0.055 on real; the
+  real net on synthetic 0.049, 0.048, 0.051 against its 0.039 on real; zero-fill on synthetic 0.159. So there is a
+  domain shift after all, modest and asymmetric: the synthetic net loses ~12 % crossing to real, the real net ~28 %
+  crossing to synthetic (the harder task: more mid-band power, the rim); the earlier "cross-domain equals in-domain"
+  rested on the fine-tuned net's score and is withdrawn.
+  **The lesion test, with statistics** (the full evaluation set's 15 lesion-bearing samples x 8 undersampling masks,
+  lesion NMSE / brain NMSE / reconstructed lesion level, three seeds): the pure synthetic net 0.099 / 0.045 / 0.75,
+  0.080 / 0.041 / 0.79, 0.091 / 0.044 / 0.80 (mean 0.090, level 0.78); the real-trained net 0.070 / 0.040 / 0.79,
+  0.081 / 0.039 / 0.78, 0.074 / 0.039 / 0.79 (0.075, 0.79); synthetic then real 0.066, 0.081, 0.091 (0.079, 0.79);
+  zero-fill 0.102 / 0.112 / 0.98. **Training on synthetic lesions does not help**: the net that saw them is worse
+  inside lesions than the one that never did (0.090 vs 0.075) and no better in level; every trained net dims lesions
+  by ~20 % (small and medium alike, 0.76-0.85 by size) and doubles its error there, while zero-filling keeps the level
+  and the noise. At 4 x with a 0.5 M-parameter image-domain U-Net, lesion fidelity is set by the reconstruction's
+  pull toward smooth normal tissue, not by what the training set contained: the lever is the method (a loss that
+  penalises losing small bright structure, or data consistency in k-space), not more lesion data. That is the first
+  number the lesion generator has produced, and it says something about reconstruction, not about the generator.
