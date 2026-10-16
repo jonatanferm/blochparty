@@ -227,7 +227,10 @@ def main():
     torch.manual_seed(args.seed)
     net_r = train(UNet().to(device), Xr_tr, Yr_tr, args.epochs, device, seed=args.seed)
     results["real"], P_r = evaluate(net_r, Xr_te, Yr_te, device)
-    net_f = train(net_s, Xr_tr, Yr_tr, args.finetune_epochs, device, lr=3e-4, seed=args.seed)
+    import copy
+    net_f = train(copy.deepcopy(net_s), Xr_tr, Yr_tr, args.finetune_epochs, device, lr=3e-4, seed=args.seed)  # a copy: until
+    # 2026-10-16 this fine-tuned net_s in place, so every later use of "synthetic" (its in-domain score, the lesion test,
+    # the saved net) was the fine-tuned net; the synthetic-on-real number above was taken before and is unaffected
     results["synthetic_then_real"], P_f = evaluate(net_f, Xr_te, Yr_te, device)
     nets |= {"real": net_r, "synthetic_then_real": net_f, "zero_fill": nn.Identity()}
     results["synthetic_on_synthetic"], _ = evaluate(net_s, Xs[-hold:], Ys[-hold:], device)
