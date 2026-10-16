@@ -29,8 +29,8 @@ FOV, THICKNESS = 0.22, 5e-3
 
 
 def lesion_mask(anatomy, z_m, n, fov=FOV):
-    """The lesion fraction averaged over the slab, on the n x n acquisition grid (rows posterior -> anterior,
-    columns the patient's left -> right, as generate.truth_on_grid), from the anatomy's own voxel grid."""
+    """The lesion fraction averaged over the slab, on the n x n acquisition grid in the slab image's frame (rows along
+    +y, columns along +x: ``kspace_grid`` + ``ifft2c`` of a phantom that is not turned), from the anatomy's voxel grid."""
     from scipy import ndimage
     fr = anatomy.fractions.get("lesion")
     if fr is None:
@@ -47,7 +47,7 @@ def lesion_mask(anatomy, z_m, n, fov=FOV):
     cy = anatomy.origin[1] + (ys.min() + ys.max()) / 2 * anatomy.voxel[1]
     cx = anatomy.origin[0] + (xs.min() + xs.max()) / 2 * anatomy.voxel[2]
     iy = (cy + rows - anatomy.origin[1]) / anatomy.voxel[1]
-    ix = (cx - cols - anatomy.origin[0]) / anatomy.voxel[2]
+    ix = (cx + cols - anatomy.origin[0]) / anatomy.voxel[2]  # the slab image's own frame (rows +y, columns +x: no turn)
     return ndimage.map_coordinates(slab, [iy.ravel(), ix.ravel()], order=1, mode="constant", cval=0.).reshape(n, n).astype(np.float32), (cx, cy)
 
 
@@ -58,17 +58,27 @@ def main():
     ap.add_argument("--levels-mm", default="10,20,30", help="MNI z of the slab centres")
     ap.add_argument("--n", type=int, default=64, help="acquisition matrix (for the lesion mask)")
     ap.add_argument("--voxel-mm", type=float, default=2.0, help="anatomy voxel the heads are resampled to")
-    ap.add_argument("--spins", default="1,1,1")
-    ap.add_argument("--lesions", default="1,2", help="count range per imaged level (with); size 6-15 mm, white matter within 2 mm of the level")
+    ap.add_argument("--spins", default="1,2,2", help="spins per anatomy voxel (z, y, x): 4 in plane keep the grain below the lesions")
+    ap.add_argument("--lesions", default="1,2", help="count range per imaged level (with); size 10-20 mm (3-6 pixels at 3.4 mm), white matter within 2 mm of the level")
     ap.add_argument("--test-subjects", type=int, default=12)
     ap.add_argument("--subjects", default=None, help="comma-separated ids (default: all prepared)")
+    ap.add_argument("--lesion-t2", type=float, default=0.2, help="the task's lesion T2 [s] at 3 T: a conspicuous T2-hyperintense "
+                    "lesion (chronic plaques / gliosis read near CSF on T2w); the table's 0.111 (West 2014's mixed MS lesions) "
+                    "is only ~20 % above the surrounding tissue after partial volume and the residual maps")
+    ap.add_argument("--lesion-pd", type=float, default=0.85)
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     ids = sorted(int(p.stem[3:]) for p in args.prepared.glob("IXI*.npz"))
     if args.subjects:
         ids = [int(s) for s in args.subjects.split(",")]
     test = set(ids[-args.test_subjects:]) if args.test_subjects > 0 else set()
+    from dataclasses import replace
+    from blochparty.anatomy import Distribution
     table = tissuedb.tissue_table(3.0)
+    les = table["lesion"]
+    table["lesion"] = replace(les, t2=Distribution(args.lesion_t2, None, f"design task: T2 {args.lesion_t2 * 1e3:.0f} ms assumed (lesion_slabs --lesion-t2)", True),
+                              t2star=Distribution(args.lesion_t2 * .8, None, "design task: 0.8 x T2", True),
+                              pd=Distribution(args.lesion_pd, None, "design task: PD assumed (lesion_slabs --lesion-pd)", True))
     levels = [float(v) * 1e-3 for v in args.levels_mm.split(",")]
     spins = tuple(int(v) for v in args.spins.split(","))
     lo, hi = (int(v) for v in args.lesions.split(","))
@@ -81,7 +91,7 @@ def main():
             if kind == "les":  # lesions at every imaged level, so each slab of this head holds some
                 for z in levels:
                     count = int(rng.integers(lo, hi + 1))
-                    an_k, more = add_lesions(an_k, rng, count=count, size_mm=(6., 15.), region="any", z_mm=[z * 1e3], z_tolerance_mm=2.)
+                    an_k, more = add_lesions(an_k, rng, count=count, size_mm=(10., 20.), region="any", z_mm=[z * 1e3], z_tolerance_mm=2.)
                     recs += more
             head = DigitalPhantom(an_k, table, 3.0)
             for z in levels:
@@ -103,9 +113,10 @@ def main():
                 ph.pos = ph.pos - torch.tensor([cx, cy, z], dtype=ph.pos.dtype)
                 ph = ph.to(torch.float32)
                 lesion_px = float((mask > .5).sum())
-                torch.save({"phantom": ph, "label": int(kind == "les" and lesion_px >= 2), "lesion_px": lesion_px, "lesion_mask": torch.from_numpy(mask),
-                            "meta": {"subject": sid, "z_mm": z * 1e3, "kind": kind, "lesions": recs, "spins": len(ph), "voxel_mm": args.voxel_mm}}, dest)
-                index.append({"file": dest.name, "subject": sid, "z_mm": z * 1e3, "kind": kind, "label": int(kind == "les" and lesion_px >= 2),
+                torch.save({"phantom": ph, "label": int(kind == "les" and lesion_px >= 4), "lesion_px": lesion_px, "lesion_mask": torch.from_numpy(mask),
+                            "meta": {"subject": sid, "z_mm": z * 1e3, "kind": kind, "lesions": recs, "spins": len(ph), "voxel_mm": args.voxel_mm,
+                                     "lesion_t2": args.lesion_t2, "lesion_pd": args.lesion_pd}}, dest)
+                index.append({"file": dest.name, "subject": sid, "z_mm": z * 1e3, "kind": kind, "label": int(kind == "les" and lesion_px >= 4),
                               "lesion_px": lesion_px, "split": "test" if sid in test else "train", "spins": len(ph)})
                 print(f"{dest.name}: {len(ph):,} spins, lesion px {lesion_px:.0f}", flush=True)
         (args.out / "index.json").write_text(json.dumps(index, indent=1))

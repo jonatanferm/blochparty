@@ -183,8 +183,11 @@ class RawNet(nn.Module):
         super().__init__()
         c = [channels, 16, 32, 64]
         layers = []
-        for i in range(3):
-            layers += [nn.Conv2d(c[i], c[i + 1], 3, padding=1), nn.BatchNorm2d(c[i + 1]), nn.ReLU(), nn.MaxPool2d(2)]
+        h, w = shape
+        for i in range(3):  # pool each axis only while it has room (a few k-space lines are a short axis)
+            pool = (2 if h >= 2 else 1, 2 if w >= 2 else 1)
+            h, w = h // pool[0], w // pool[1]
+            layers += [nn.Conv2d(c[i], c[i + 1], 3, padding=1), nn.BatchNorm2d(c[i + 1]), nn.ReLU(), nn.MaxPool2d(pool)]
         self.features = nn.Sequential(*layers)
         self.head = nn.Sequential(nn.Dropout(0.3), nn.Linear(c[-1], 1))
 
