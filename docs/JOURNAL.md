@@ -2450,3 +2450,11 @@ controls).
   keep a broader shading our normalised receive flattens. That is a simulator question (the rim's rendering, the
   shading the scanner's normalisation leaves), testable with quick runs and gap.py, not with another night of
   generation.
+- **Today's plan, agreed**: (1) the lesion run on the mini (`night3.sh`, started 11:26): the training set with lesions
+  regenerated on 50 subjects (60 heads x 3 slices, 2 x 4 x 4), an evaluation set of 20 heads x 3 slices on 12 held-out
+  subjects with 4-6 lesions of 6-15 mm each (`spec_leval.json`; the generator's spec now takes a `subjects` pool),
+  three seeds of the transfer test with `--lesion-eval`, nets and sets kept (~5 GB); (2) the rim through quick runs
+  against q51: q53 gives the skull a dim signal (T2 40 ms, PD 0.25: the diploe's worth, an experiment by override),
+  q54 draws the normalisation length 40-120 mm instead of 20-60 (more of the array's shading left), both read by
+  gap.py's band minimum, scalp levels and polar map. The no-lesion ablation set is dropped: it was null on real data
+  and the lesion question compares the synthetic net against the real-trained one.
