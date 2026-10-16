@@ -2412,3 +2412,29 @@ controls).
   Tonight on the mini (`night2.sh`): 60 v17 heads x 3 slices at 2 x 4 x 4 spins with 1-4 lesions each (`gen_les`)
   and the same heads without (`gen_nol`), one head per process with a retry, then three seeds of the transfer test
   against the 65 real scans (real-only now trains on ~300 slices); the raw samples are deleted afterwards.
+
+## 2026-10-16 — The transfer number with a fair real baseline, three seeds
+
+- `night2`: 60 v17 heads x 3 drawn slices at 2 x 4 x 4 spins with 1-4 lesions each (`gen_les`, 180 samples, 331 min)
+  and the same heads without lesions (`gen_nol`, 180), the receive drawn per head with the re-centred scale, the 65
+  real protocols and their noise; three seeds of the transfer test against the 65 compact scans: real-only now trains
+  on 308 slices of 44 people and is tested on 147 slices of 21 (4 x undersampling, 128 x 128, the 0.5 M-parameter
+  residual U-Net, 40 epochs). NMSE / SSIM, mean over the seeds (spread in NMSE +- 0.001-0.002):
+  zero-fill 0.140 / 0.56; **synthetic only 0.054 / 0.85**; synthetic without lesions 0.054 / 0.83; **real only 0.040 /
+  0.89**; synthetic then real 0.041 / 0.89; the synthetic net on held-out synthetic 0.052 / 0.88; zero-fill on synthetic
+  0.170 / 0.49; the real net on synthetic 0.052 / 0.87.
+- Reading: with twice the real training data the real-only net pulls ahead (0.040 against 0.054; on 2026-10-14 with
+  161 slices they tied at 0.053 / 0.052), and pre-training on synthetic no longer adds to it (0.041). The cross-domain
+  numbers are symmetric and equal to the in-domain ones (synthetic net: 0.054 on real, 0.052 on synthetic; real net:
+  0.040 on real, 0.052 on synthetic), so no domain shift is visible in either direction; what separates them is the
+  synthetic task itself: its zero-fill floor is 0.170 against the real 0.140, the synthetic images carry more
+  high-frequency energy than the real crops, and a net that learns to reconstruct them lands at ~0.052 wherever it is
+  tested. The question for the next round is therefore the synthetic images' fine content (grain at 2 x 4 x 4,
+  the 0.5 mm residual, the absence of the scanner's raw filter on a 320-line acquisition cropped to 128), not the
+  anatomy. Synthetic data still takes a reconstruction 90 % of the way from zero-fill to the real-trained net with no
+  real scan seen.
+- **The lesion test has no statistics yet**: of the 18 held-out synthetic samples only one carried 4 or more lesion
+  pixels (1-4 lesions of 3-12 mm rarely meet three 5 mm slices at 1.72 mm pixels), so its numbers swing seed to seed
+  and say nothing. It needs an evaluation-only set with many, larger lesions (count 4-6, 6-15 mm) and nets saved
+  (transfer.py did not keep them, and the chain deleted the raw samples by the disk rule, so the ablation cannot be
+  rescored without regenerating; both are fixed in the code for the next run).

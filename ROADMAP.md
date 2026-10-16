@@ -631,8 +631,12 @@ which physics (M6) the protocol families call for.
       U-Net trained on synthetic data on held-out real fastMRI k-space (zero-fill / synthetic / real
       / synthetic-then-real). *First number, 2026-10-14 (181 samples, 11 held-out people):* zero-fill
       NMSE 0.133 / SSIM 0.569, synthetic-only 0.052 / 0.867, real-only 0.053 / 0.857, synthetic then
-      real 0.044 / 0.887. Next: error bars (seeds), fastMRI-native 320 x 320, more heads from v17,
-      a second contrast; the lesion model's own test (does a synthetic-trained net keep real lesions?).
+      real 0.044 / 0.887. *Three seeds with a fair real baseline, 2026-10-16 (180 + 180 samples, real
+      trained on 308 slices):* zero-fill 0.140 / 0.56, synthetic-only 0.054 / 0.85, real-only 0.040 /
+      0.89, synthetic then real 0.041 / 0.89; cross-domain equals in-domain both ways (no domain shift
+      visible), the synthetic task's own floor is higher (zero-fill 0.170 vs 0.140). Next: the synthetic
+      images' fine content (grain, residual, the raw filter of a 320-line acquisition), a lesion
+      evaluation set with large lesions and saved nets, then 320 x 320.
 - [ ] Sequence spec in: JSON → builder calls (`design.design_report` already produces the report
       out). Linter messages mapped to Pulseq blocks (M4 provenance). Parameterized sequence API
       (which tensors are free, bounds, reparameterizations), hardware projections.
