@@ -487,7 +487,8 @@ def simulate(
     seed: int = 0,
     maps: FieldMaps | None = None,
 ) -> SimResult:
-    """Run ``seq`` on ``phantom``.
+    """Run ``seq`` on ``phantom``: the core engine, ``blochparty.simulate(..., engine="core")`` (whose docstring
+    has the other engines).
 
     coils: (N, C) complex receive sensitivities at the spin positions (default:
         one uniform coil).

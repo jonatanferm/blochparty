@@ -4,10 +4,11 @@ from . import design, epg, exchange, reference
 from .anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, DigitalPhantom, Distribution, TissueProperties,
                       anatomy_field_maps, deform, draw_tissues, random_deformation, sample_head, layer_scalp, add_dermis, label_deep_grey, add_falx, open_sulci, sulcal_width, sulcal_widening, gather_cortical_csf, head_dimensions, anthropometric_scaling, gaussian_random_field, load_ahead, estimate_macroscopic_r2prime, load_brainweb, load_ixi, ixi_subjects, load_qsm2,
                       to_phantom)
-from .bloch import SimResult, simulate
+from .bloch import SimResult
 from .builders import (bssfp_2d, cartesian_kspace, cartesian_recon, epi_2d, gre_2d, gre_3d, gre_cartesian,
                        readout_bandwidth_per_pixel, se_2d, tse_2d)
 from .chunked import simulate_chunked
+from .engines import simulate  # engine= picks the core (default), the chunked core or a GPU engine
 from .coils import add_noise, birdcage_b1, birdcage_sensitivities
 from .constants import GAMMA_BAR
 from .exchange import BoundPool, ExchangePool
