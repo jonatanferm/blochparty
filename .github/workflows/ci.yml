@@ -1,0 +1,26 @@
+# Every push and pull request: lint, format check, and the quick tests on CPU (the GPU tests skip here; the Mac mini
+# runs them on Metal and a Runpod pod on CUDA). CPU torch keeps the install small.
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: lint and format
+        run: |
+          uvx ruff@0.17.1 check .
+          uvx ruff@0.17.1 format --check .
+      - name: install (CPU torch)
+        run: |
+          uv venv
+          uv pip install torch --index-url https://download.pytorch.org/whl/cpu
+          uv pip install -e ".[pulseq,io,anatomy]" pytest scipy matplotlib finufft
+      - name: quick tests
+        run: .venv/bin/python -m pytest -m "not slow" -q -p no:cacheprovider

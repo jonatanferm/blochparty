@@ -14,7 +14,7 @@ io = ["ismrmrd>=1.14", "h5py>=3"]  # io.write_dataset / read_dataset (ISMRMRD HD
 
 [dependency-groups]
 # finufft: radial reconstruction in validation/real (benchmark 3)
-dev = ["pytest", "scipy", "matplotlib", "pypulseq>=1.5", "finufft>=2.5.1"]
+dev = ["pytest", "scipy", "matplotlib", "pypulseq>=1.5", "finufft>=2.5.1", "ruff==0.17.1"]
 
 [build-system]
 requires = ["hatchling"]
@@ -30,7 +30,10 @@ pythonpath = ["tests", "validation/mrzero", "validation/real", "validation/reali
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["validation/real/data", "validation/anatomy/data", "outputs"]
+extend-exclude = ["validation/real/data", "validation/anatomy/data", "outputs", ".claude"]
+
+[tool.ruff.format]
+exclude = ["*.md"]  # the documents' code blocks keep their hand alignment
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B"]

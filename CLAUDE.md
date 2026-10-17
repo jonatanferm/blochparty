@@ -36,10 +36,12 @@ Goal: the most physically realistic simulator, judged against real scanners
 ## Commands
 
 ```bash
-uv sync --extra pulseq --extra mrzero --extra io
+uv sync --extra pulseq --extra mrzero --extra io --extra anatomy   # a plain uv sync removes the extras
 uv run pytest                      # full suite (GPU tests skip without MPS)
 uv run pytest -m "not slow"        # quick subset (< 1 min) while iterating
 uv run pytest tests/engines        # one area (tests/<area>/: engines, physics, sequences, ...)
+uv run ruff check . && uv run ruff format --check .   # lint and format (CI runs both on every push)
+uv run python tools/layout.py      # regenerate README.md's layout table after changing a module docstring
 uv run pytest -m crosscheck        # opt-in MRzero agreement
 uv run python benchmarks/bench.py [--backend gpu] [--grad] [--record]   # gpu: CUDA if present, else Metal
 uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py
