@@ -62,7 +62,7 @@
   to water (air around +9.2 ppm), while challenge chi is brain-only with zero exterior;
   neither should inherit the absolute-air value +0.36 ppm blindly. Preserve a separate
   `chi_background` in the same reference through crop/resampling. A constant shift of
-  both chi and exterior must leave the field unchanged. (`anatomy.py`, QSM M3)
+  both chi and exterior must leave the field unchanged. (`anatomy/`, QSM M3)
 
 - **Measured M0 is already voxel density.** Multiplying it by a tissue/air fraction a
   second time underestimates partial-volume signal. Distribute M0 among signal-producing
@@ -81,7 +81,7 @@
   mixture signal. Jitter decouples spin positions from reconstruction, but a sharp
   boundary still needs an independently resolved anatomy grid. Volume-weighted
   resampling preserves sum(fraction) × voxel volume, not the unweighted sum.
-  (`anatomy.py`, mixed-voxel Ernst and shifted-box Fourier checks)
+  (`anatomy/phantom.py`, mixed-voxel Ernst and shifted-box Fourier checks)
 
 - **Observed T2* and susceptibility can double-count dephasing.** There is no universal
   linewidth to subtract from a macroscopic gradient. Require calibrated macroscopic
@@ -93,7 +93,7 @@
   Table 1 contains ex-vivo animal specimens (human blood), not a normal human atlas.
   Missing SD is unknown, not zero, and applying a 3 T T2 at 7 T is an assumption.
   Keep the older BrainWeb simulator priors separate from current tissue priors.
-  (`anatomy.py` provenance; `validation/anatomy/RESULTS.md`)
+  (`anatomy/tables.py` provenance; `validation/anatomy/RESULTS.md`)
 
 - **Normalize fat-peak weights before conserving tissue mass.** Existing rounded Ren
   amplitudes sum to 0.999; copying them directly loses 0.1% of PD. Normalize locally

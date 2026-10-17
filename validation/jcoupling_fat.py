@@ -1,7 +1,7 @@
 """Does J coupling explain bright fat at 3 T? The triglyceride fragment model (blochparty.jcoupling) against fat T2
 measured at 3 T with spin-echo trains of different echo spacing.
 
-Measured (src/blochparty/tissuedb): CPMG / multi-echo spin echo at 7.6-8.0 ms spacing, 17 echoes: 140-159 ms
+Measured (src/blochparty/anatomy/tissuedb): CPMG / multi-echo spin echo at 7.6-8.0 ms spacing, 17 echoes: 140-159 ms
 (Keene 2020, subcutaneous fat, four cohorts); single-echo spin echoes at TE 10-160 ms: 48 ms (Jordan 2013, knee),
 68 ms (de Bazelaire 2004, abdomen, multi-TE SE with HASTE readout).
 

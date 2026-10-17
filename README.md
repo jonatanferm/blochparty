@@ -350,7 +350,7 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `motion.py`, `restriction.py`, `rng.py` | flow, deformation and rigid motion; restricted diffusion; the counter-based random numbers every engine's walks share |
 | `maps.py` | `FieldMaps`: scanner-frame B0, B1⁺ and coil maps sampled where each spin is |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
-| `anatomy.py`, `susceptibility.py` | BrainWeb / QSM / AHEAD anatomies with cited tissue properties and texture, `DigitalPhantom`, the head sampler `sample_head`; susceptibility → B0, shimming |
+| `anatomy/`, `susceptibility.py` | anatomies on a grid (`grid`), cited tissue tables (`tables`, and the `tissuedb` database), the BrainWeb / QSM / AHEAD / IXI loaders, anatomy → spins (`phantom`), the generator's edits (`edits`), deformations and the head sampler `sample_head` (`sampler`); susceptibility → B0, shimming |
 | `io.py` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
 | `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |

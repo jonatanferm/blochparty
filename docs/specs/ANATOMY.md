@@ -113,7 +113,7 @@ Required checks (`tests/phantoms/test_susceptibility.py`):
 5. M3 cross-check: our field from the QSM 2.0 chi map against the field their published code
    produces from the same map (same padding / orientation conventions; report the difference).
 
-## 5. M2: anatomy and tissue properties (`src/blochparty/anatomy.py`)
+## 5. M2: anatomy and tissue properties (`src/blochparty/anatomy/`, a single `anatomy.py` until 2026-10-17)
 
 ### 5.1 Data model
 
@@ -281,7 +281,7 @@ realised SD and correlation length within 10 % of the request on a large grid; d
 
 ## 8. Coordination (two agents on one repo)
 
-- **You own**: `src/blochparty/susceptibility.py`, `src/blochparty/anatomy.py`,
+- **You own**: `src/blochparty/susceptibility.py`, `src/blochparty/anatomy/`,
   `tests/phantoms/test_susceptibility.py`, `tests/phantoms/test_anatomy.py`, `examples/anatomy_*.py`,
   `validation/anatomy*`, `docs/specs/ANATOMY.md` (update its status line), and exports in
   `src/blochparty/__init__.py`.
