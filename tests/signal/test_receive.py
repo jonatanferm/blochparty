@@ -6,9 +6,11 @@ column its frequency predicts."""
 
 
 import numpy as np
+import pytest
 import torch
 
 import blochparty as bp
+from blochparty.coils import coil_offset, normalised_sensitivities
 from blochparty.receive import (ReceiveChain, decimate, fir, oversample, quantise, response, spikes,
                                 thermal_noise)
 
@@ -80,3 +82,32 @@ def test_spikes_hit_isolated_samples():
     s = spikes(torch.zeros(2, 1000, dtype=torch.complex128), 5, 10.0, generator=g)
     hit = (s.abs() > 0).any(0)
     assert 1 <= int(hit.sum()) <= 5 and torch.allclose(s.abs()[:, hit], torch.full_like(s.abs()[:, hit], 10.0))
+
+def test_coil_offset_puts_the_ring_behind_the_occiput():
+    """A box head from y = -90 to +90 mm: the ring's back ``gap`` behind the head's back."""
+    n, h = (40, 46, 40), 4e-3
+    head = torch.zeros(n)
+    y = -0.092 + np.arange(n[1]) * h  # voxel centres
+    head[:, (y >= -0.09) & (y <= 0.09), 5:35] = 1
+    an = bp.Anatomy({"skin": head, "background": 1 - head}, voxel=(h,) * 3, origin=(-0.08, -0.092, -0.08))
+    back = y[(y >= -0.09)].min()
+    off = coil_offset(an, np.array([0.0]), 0.0, radius=0.14, gap=0.025)
+    assert off == pytest.approx(back - 0.025 + 0.14)
+    assert coil_offset(an, np.array([0.0]), 0.01, radius=0.14, gap=0.025) == pytest.approx(off - 0.01)
+
+
+
+def test_normalised_sensitivities_flatten_a_smooth_profile():
+    """The scanner's prescan normalisation divides by a smooth estimate of the array's RSS sensitivity: a profile that
+    varies slowly against the smoothing comes out flat inside the object (the edges keep some excess, by design)."""
+    g = torch.Generator().manual_seed(0)
+    pos = (torch.rand(40000, 3, generator=g, dtype=torch.float64) - 0.5) * torch.tensor([0.16, 0.16, 0.0], dtype=torch.float64)
+    pos = pos[(pos[:, :2] ** 2).sum(1) < 0.08 ** 2]
+    sens = torch.stack([torch.exp(pos[:, 0] / 0.1), 0.5 * torch.exp(-pos[:, 1] / 0.1)], 1).to(torch.complex128)
+    out = normalised_sensitivities(sens, pos, smooth_mm=30.0)
+    rss = out.abs().pow(2).sum(1).sqrt()
+    inner = (pos[:, :2] ** 2).sum(1) < 0.04 ** 2
+    raw = sens.abs().pow(2).sum(1).sqrt()[inner]
+    assert float(raw.max() / raw.min()) > 1.8  # the profile spans almost 2x over the inner disc
+    assert float(rss[inner].max() / rss[inner].min()) < 1.15
+    assert torch.allclose(out / out[:, :1], sens / sens[:, :1])  # every coil divided by the same estimate

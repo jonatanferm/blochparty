@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -92,3 +93,43 @@ def add_noise(signal: Tensor, sigma: float, cov: Tensor | None = None, generator
         chol = torch.linalg.cholesky(cov.to(signal.dtype))
         noise = (chol @ noise.reshape(c, -1)).reshape(signal.shape)
     return signal + noise
+
+
+# ---- the receive array as the realism preset places and normalises it
+
+
+def coil_offset(anatomy, zs, cy: float, radius: float, gap: float) -> float:
+    """Anterior offset [m] of the receive ring's centre from the field-of-view centre ``cy`` when the head
+    rests on the coil's posterior side: the ring's posterior-most point ``gap`` behind the head's most
+    posterior point (from 30 mm below slice 0 up: the occiput, not the neck). The real images are
+    brighter at the back than at the front (white matter at the front 0.89 of the back's, the outer
+    ring 0.71: validation/realism/orientation.py's display), as a head lying on the posterior elements
+    gives; a ring centred on the head gives 1.00 and 0.82."""
+    head = (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
+    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
+    rows = head[z >= zs[0] - 30e-3]
+    back = anatomy.origin[1] + np.nonzero(rows.any((0, 2)))[0][0] * anatomy.voxel[1]
+    return back - cy - gap + radius
+
+
+def normalised_sensitivities(sens: torch.Tensor, pos: torch.Tensor, smooth_mm: float, bin_mm: float = 4.0) -> torch.Tensor:
+    """The receive array as the scanner shows it after its intensity normalisation (Siemens "Prescan Normalize" and
+    its kin divide the image by a smooth estimate of the array's sensitivity): ``sens`` (N, C) divided by the
+    root-sum-of-squares sensitivity smoothed over ``smooth_mm`` (Gaussian sigma) in the slice plane. The estimate is
+    built from the spins themselves (binned at ``bin_mm``, normalised convolution over the head, bilinear back), so
+    where the sensitivity rises faster than the estimate can follow (the last centimetre or two under the elements)
+    the normalised image keeps the excess, as the real scans do (journal 2026-10-13: the outer 2 cm 1.3-2.7 x brighter
+    than a flat receive gives while the interior matches one). ``pos`` in the turned frame (x anterior-posterior, y
+    left-right)."""
+    from scipy import ndimage
+    rss = sens.abs().pow(2).sum(1).sqrt().cpu().numpy()
+    xy = pos[:, :2].cpu().numpy() / (bin_mm * 1e-3)
+    lo = np.floor(xy.min(0)) - 2
+    ij = np.floor(xy - lo).astype(int)
+    shape = tuple(ij.max(0) + 3)
+    num = np.zeros(shape); den = np.zeros(shape)
+    np.add.at(num, (ij[:, 0], ij[:, 1]), rss); np.add.at(den, (ij[:, 0], ij[:, 1]), 1.0)
+    sigma = smooth_mm / bin_mm
+    smooth = ndimage.gaussian_filter(num, sigma) / np.maximum(ndimage.gaussian_filter(den, sigma), 1e-9)
+    est = ndimage.map_coordinates(smooth, (xy - lo).T, order=1, mode="nearest")
+    return sens / torch.as_tensor(est, dtype=sens.real.dtype, device=sens.device)[:, None]
