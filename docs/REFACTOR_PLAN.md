@@ -2,9 +2,10 @@
 
 First written 2026-10-11 from a read of the tree at `f983c00` (draft PR #8, branch `claude/gracious-pasteur-taw1kb`).
 **Revised 2026-10-17 at `3663281`**, 222 commits later, for the tree as it is now; this version supersedes the one
-on the PR branch. Status: **proposal**. Two small pieces exist already, made for the CUDA port: the GPU driver's
+on the PR branch. Status: **agreed plan**; the author's seven decisions are recorded in section 9 (2026-10-17) and folded into the
+phases below. Two small pieces exist already, made for the CUDA port: the GPU driver's
 backend switch (`b8afd98`) and a GPU-engine test fixture (`b5cb509`). It is a plan for structure only: no physics
-changes, no public-API renames (one addition is proposed, phase 3), every default bit-identical
+changes, no public-API renames (one addition: `bp.simulate(..., engine=)`, phase 3), every default bit-identical
 (`tools/snapshot.py` before and after each phase, as `CLAUDE.md` requires).
 
 ## 0. What changed since the first version
@@ -71,15 +72,15 @@ What I propose, in order of payoff over risk:
 | phase | what | kind | risk | checks |
 |---|---|---|---|---|
 | 1 | GPU engines: shaders and kernels as files, one `gpu/` driver, Metal and CUDA backends | mechanical | low | text identity, mini, L40 |
-| 2 | tests: `conftest.py`, `cases.py`, one `rel`, a declared `pythonpath` | mechanical | low | collected items |
-| 3 | one GPU entry point (`simulate_gpu`); the 22 scripts stop naming Metal | small addition | low | mini, L40 |
+| 2 | tests: subfolders by area, `conftest.py`, `cases.py`, one `rel`, a declared `pythonpath` | mechanical | low | collected items |
+| 3 | `bp.simulate(..., engine="gpu")`; the 22 scripts stop naming Metal | small addition | low | mini, L40 |
 | 4 | the generator into the package (`blochparty.generate`), recon helpers into `recon` | structural | medium | sample identity, mini |
 | 5 | `anatomy/` subpackage | mechanical | low | snapshot, tests |
 | 6 | `engines/` with a shared `prepare` step and one capability table | structural | medium | snapshot, mini, L40 |
 | 7 | `sequences/` subpackage, Pulseq read / write split, `meta` keys in one module | mostly mechanical | low–medium | snapshot |
 | 8 | `validation/` as one study per folder; estimators and twix into the package | mechanical | low | scripts' cheapest runs |
-| 9 | docs and tooling: journal by month, lessons by topic, ruff, generated layout table, CI | hygiene | low | — |
-| 10 | `design/` subpackage | mechanical | low, optional | tests |
+| 9 | docs and tooling: journal one file per entry, lessons by topic, ruff, generated layout table, CI | hygiene | low | CI green |
+| 10 | `design/` subpackage with the three worked design problems | mechanical | low | tests |
 
 Phases 1–3 make the GPU code reviewable and every script portable to the L40, and need a day and a half together.
 Phase 4 serves the product direction (ROADMAP M7). Phase 6 is the one real design change of the core; it should land
@@ -153,7 +154,7 @@ phantom, checking a result); keep the shared data model flat at the top; keep ev
 
 ```
 src/blochparty/
-  __init__.py            the flat API (re-exports only), plus simulate_gpu (phase 3)
+  __init__.py            the flat API (re-exports only); bp.simulate gains engine= (phase 3)
   constants.py  rng.py
   phantom.py  sequence.py  maps.py  motion.py  restriction.py       ← the data model
   exchange.py  generalized_bloch.py  fields.py  result.py           (result.py: SimResult, out of bloch.py)
@@ -165,13 +166,14 @@ src/blochparty/
   reference.py  epg.py  jcoupling.py                                ← independent models for checks
 
   engines/                                                          ← how it is simulated
-      __init__.py        simulate, simulate_chunked, simulate_gpu, available()
+      __init__.py        simulate (engine="core" | "gpu" | "metal" | "cuda"), simulate_chunked, available()
       prepare.py         one normalized case every engine consumes (phase 6)
       capabilities.py    what each engine accepts; one NotImplementedError site (phase 6)
       core.py            today's bloch.py
       chunked.py
       gpu/
-          __init__.py    simulate_gpu: CUDA if available, else Metal; the backend protocol
+          __init__.py    the GPU dispatch behind simulate(engine="gpu"): CUDA if available, else Metal;
+                         the backend protocol
           driver.py      today's metal._forward, _simulate, _readout_runs, _reused_pulses, _cost_order, _take,
                          _field_model_buffer
           adjoint.py     today's _MetalSimulate, _simulate_grad, default_checkpoint_every
@@ -210,7 +212,9 @@ src/blochparty/
       sampler.py         DigitalPhantom, deformation, draw_tissues, anthropometric scaling, sample_head
       tissuedb/          moved here unchanged
 
-  design/                optional (phase 10)
+  design/                (phase 10) today's design.py split: hardware.py, metrics.py, estimation.py,
+                         optimize.py, report.py, parameters.py (learnable sequences); problems/ despot1.py,
+                         contrast_tr.py, tse_flips.py (today's examples' reusable parts)
 ```
 
 ```
@@ -223,9 +227,9 @@ validation/
   design/                the lesion-classification experiment
 ```
 
-Naming notes: `sequence.py` next to `sequences/` is the one near-collision (alternative: `builders/`); `engines/core.py`
-or `engines/bloch.py` (`bloch.py` is cited as "the reference" in `CLAUDE.md`, `ROADMAP.md`, `ENGINES.md`, the
-README); `generate/` or `datagen/` or `synth/`. All three are open (section 9).
+Naming (decided, section 9): `sequences/` beside `sequence.py` (the one-letter near-collision is accepted: users go
+through the flat `bp.` API); `engines/core.py`; `generate/`; `blochparty.metal` and `blochparty.cuda` stay as
+forwarding modules.
 
 ## 4. Phases
 
@@ -253,8 +257,26 @@ a lesson if anything surprised. GPU-touching phases also run the CUDA cells of t
 - Documents: `ROADMAP.md` rules that name `src/blochparty/metal/__init__.py`, `docs/ENGINES.md` entry column, the
   CUDA module docstring, README.
 
-### Phase 2. Tests: shared fixtures in one place, no path hacks (half a day)
+### Phase 2. Tests: subfolders by area, shared fixtures in one place, no path hacks (one day)
 
+- **Subfolders** (decided), `git mv` only, file names kept except the four GPU files, which test both engines now:
+  - `tests/engines/`: `test_engines`, `test_metal` → `test_gpu`, `test_metal_grad` → `test_gpu_grad`,
+    `test_metal_nufft` → `test_gpu_nufft`, `test_metal_reuse` → `test_gpu_reuse`, `test_chunked`, `test_gradients`,
+    `test_free_runs`, `test_merge_free`, `test_bloch_vs_ode`, `test_phantom_engines`, `test_integration` (12);
+  - `tests/physics/`: `test_analytic`, `test_epg`, `test_exchange`, `test_generalized_bloch`, `test_pools`,
+    `test_diffusion`, `test_restriction`, `test_motion`, `test_fields_concomitant`, `test_fields_nonlinearity`,
+    `test_jcoupling` (11);
+  - `tests/sequences/`: `test_sequences_contrast`, `_gradients`, `_imaging`, `_slice`, `test_pulseq`,
+    `test_pulseq_write`, `test_girf`, `test_drift`, `test_transmit`, `test_multislice` (10);
+  - `tests/phantoms/`: `test_phantom_b0`, `_b1`, `_fat`, `_subvoxel`, `_t2prime`, `test_anatomy`, `test_anatomy_ahead`,
+    `test_anatomy_qsm`, `test_head_sampler`, `test_tissuedb`, `test_susceptibility`, `test_maps`, `test_loops`,
+    `test_em` (14);
+  - `tests/signal/`: `test_imaging`, `test_3d`, `test_receive`, `test_io` (4);
+  - `tests/validation/`: `test_crosscheck_mrzero`, `test_nist_estimators`, `test_nist_twin`, `test_realism_compact`,
+    `test_realism_helpers` (5);
+  - `tests/design/`: `test_design` (1); `tests/generate/` arrives with phase 4.
+  `pytest tests/engines` then runs one area. `--import-mode=importlib` in `addopts` lets folders hold equal basenames
+  later; `docs/ENGINES.md` cites test files by basename, so only the four renamed GPU files change there.
 - `tests/conftest.py`: the `gpu` fixture (today pasted into four files), `f64`.
 - `tests/cases.py`: `random_case`, `busy_sequence`, `random_phantom`, `pgse`, `bm_case`, `pool_case`, `_maps_for`,
   `distortion`, `sgp`, `sphere`, `compare` (GPU gradients); the owning modules import them back. One `rel` in
@@ -262,16 +284,19 @@ a lesson if anything surprised. GPU-touching phases also run the CUDA cells of t
 - `pyproject.toml`: `pythonpath = ["tests", "examples", "validation", "validation/real", "validation/realism",
   "validation/anatomy"]` replaces the `sys.path.insert` calls in six tests and `tools/snapshot.py` (which then imports
   `cases`); phases 4 and 8 shrink the list.
-- Optional: test subfolders (`tests/engines/`, ...); the prefix names already group most files.
-- Check: `uv run pytest --collect-only -q | tail -1` gives 976 before and after.
+- Check: `uv run pytest --collect-only -q | tail -1` gives 976 before and after (the same test ids up to the folder
+  prefix and the four GPU renames).
 
-### Phase 3. One GPU entry point (half a day)
+### Phase 3. One entry point: `bp.simulate(..., engine=)` (half a day)
 
-- `simulate_gpu(phantom, seq, coils=None, *, engine="auto", **kw)`: `simulate_cuda` when a CUDA device is there,
-  else `simulate_metal`, else a clear error; `engine="metal" | "cuda"` to choose. Same arguments and results as both.
-  The one public addition of this plan (`bp.simulate_gpu` and `blochparty.engines.simulate_gpu`).
-- The 22 scripts in `validation/` and `examples/` that call `simulate_metal` call `simulate_gpu`; `bench.py` gains
-  `--backend gpu`; `CLAUDE.md`'s command block and the README name it.
+- **Decided**: `bp.simulate` gains `engine="core"` (default: today's behaviour, bit-identical, the snapshot proves it),
+  `"gpu"` (CUDA when a CUDA device is there, else Metal, else a clear error), `"metal"`, `"cuda"`. The GPU-only options
+  (`mma`, `readouts`, `pulses`, `chunk`, `nufft_width`, `nufft_terms`, `checkpoint_every` with the GPU's meaning) are
+  keyword arguments that the core rejects with a clear message; the docstring says what changes with a GPU engine:
+  float32 inputs and outputs, results on the CPU, the GPU's refusals (`docs/ENGINES.md`). `simulate_metal`,
+  `simulate_cuda` and `simulate_chunked` stay; `engine="chunked"` is the natural fifth value, added if it reads well.
+- The 22 scripts in `validation/` and `examples/` that call `simulate_metal` call `bp.simulate(..., engine="gpu")`;
+  `bench.py` gains `--backend gpu`; `CLAUDE.md`'s command block and the README show it.
 - Check: each script's cheapest run on the mini; the realism quick run and the lesion experiment's smoke run on an L40.
 
 ### Phase 4. The generator into the package (two days)
@@ -285,7 +310,7 @@ a lesson if anything surprised. GPU-touching phases also run the CUDA cells of t
    elliptical array of the realism preset; `b1_plus` into `transmit.py` if it is a transmit model. Tests in
    `test_receive.py`.
 3. **`generate/`**: `spec.py` (`DEFAULT_SPEC`, merging), `heads.py` (the preset's anatomy for a seed), `protocols.py`,
-   `sample.py` (`sample(spec, seed, engine="auto")` → k-space, noise, truth on the grid; `write` through `io`).
+   `sample.py` (`sample(spec, seed, engine="gpu")` → k-space, noise, truth on the grid; `write` through `io`).
    `validation/realism/generate.py` and `simulate_heads.py` become thin command-line drivers; `score.py`, `gap.py`,
    `transfer.py`, `orientation.py`, `echo_train.py` stay as the benchmark and import the package.
 - Check: **sample identity** — the same spec and seed written before and after give the same HDF5 datasets (one head,
@@ -303,8 +328,9 @@ generator adds to them more than to anything else in the package. Check: `test_a
 
 ### Phase 6. `engines/`: one preparation path, one capability table (two to three days)
 
-1. `git mv` `bloch.py` → `engines/core.py`, `chunked.py` → `engines/chunked.py`; `SimResult` → `result.py`;
-   re-exports so `bp.simulate` and `bp.simulate_chunked` keep working.
+1. `git mv` `bloch.py` → `engines/core.py` (decided), `chunked.py` → `engines/chunked.py`; `SimResult` →
+   `result.py`; re-exports so `bp.simulate` and `bp.simulate_chunked` keep working; `blochparty.bloch` as a forwarding
+   module only if a script outside the package imports it.
 2. `engines/prepare.py`: extract from `core.simulate` the pieces of section 2's duplication table, the core consuming
    the result; snapshot bit-identical (same expressions in the same order, only the enclosing function moves).
 3. The GPU driver consumes the same `Prepared` for the pieces it duplicates and keeps its float32 packing, cost
@@ -339,8 +365,11 @@ builders are in it).
 
 ### Phase 9. Docs and tooling (half a day, alongside any phase)
 
-- **Journal by month, now**: `docs/journal/2026-10.md` (today's file, moved), `docs/JOURNAL.md` an index of one line
-  per entry; `CLAUDE.md` points at the current month. At ~210 lines a day the single file is past use already.
+- **Journal, one file per entry (decided)**: `docs/journal/2026-10-17-cuda-port.md` and so on (date, then a short
+  slug), the 64 existing entries split out by their `## ` headings as they are; `docs/JOURNAL.md` becomes the index,
+  one line per entry (date, title, link). `CLAUDE.md`'s rule becomes "add an entry file and its index line". A test
+  checks that every file has an index line and every index line a file (as `test_engines.py` checks `ENGINES.md`).
+  Monthly files would not help: every entry so far is from October, which heads for ~6000 lines.
 - **Lessons by topic**: `docs/lessons/{physics,data,performance,process,gpu,design}.md`; the four dated sections
   fold into their topics; the 544-line "Pulseq, data and reference values" section splits into Pulseq and data.
 - One-off documents in dated folders: `docs/reviews/2026-10-08-monte-carlo.md` (today's `MONTE_CARLO_REVIEW.md`).
@@ -348,17 +377,24 @@ builders are in it).
   `test_engines.py` checks `ENGINES.md`).
 - `ruff`: `line-length = 120`, `select = ["E", "F", "I", "B"]`; one formatting commit per phase, never mixed with
   moves or logic; `uv run ruff check` and `ruff format --check` in `CLAUDE.md`'s commands.
-- CI: a GitHub Actions job running `ruff` and `pytest -m "not slow"` on CPU (GPU tests skip there; the mini and the
-  L40 stay the GPU runners). Only useful once `main` is pushed regularly: today local `main` is 222 commits ahead of
-  `origin/main`.
+- **CI (decided)**: a GitHub Actions job on every push running `ruff check`, `ruff format --check` and `pytest -m
+  "not slow"` on CPU (CPU torch from the PyTorch CPU index to keep the install small; GPU tests skip there; the mini and
+  the L40 stay the GPU runners). The repository is private: ~5-8 minutes a run against 2000 free minutes a month.
+- **Pushing (decided)**: `main` was pushed on 2026-10-17 (222 commits had been local only) and is pushed after every
+  finished phase; `CLAUDE.md` says so.
 
-### Phase 10. `design/` (half a day, optional)
+### Phase 10. `design/` (one day)
 
-`design.py` (617 lines: hardware limits and PNS, image metrics, CRB, `minimize`, `design_report`) splits only when
-ROADMAP M7's "parameterized sequence API" starts adding to it; the lesion experiment's `learnable_gre` and `Design`
-(flips, TE, TR and line positions as constrained parameters) are the first candidate for `design/parameters.py`.
-`tests/test_design.py` importing three example scripts is decided here: move their reusable parts into the package,
-or keep the declared `pythonpath`.
+- `design.py` (617 lines) becomes `design/`: `hardware.py` (limits, PNS), `metrics.py` (image metrics, PSF, and the
+  `auc` / bootstrap of phase 4), `estimation.py` (Jacobian, Fisher, CRB), `optimize.py` (`minimize`), `report.py`
+  (`design_report`), `parameters.py` (the lesion experiment's `learnable_gre` and `Design`: flips, TE, TR and line
+  positions as constrained parameters; ROADMAP M7's "parameterized sequence API" starts here).
+- **The worked design problems move into the package (decided)**: `design/problems/despot1.py`, `contrast_tr.py`,
+  `tse_flips.py` take the reusable parts of today's three example scripts (sequence and objective, closed form or
+  grid optimum, the optimizer call); the scripts keep `main()` as thin drivers; `tests/design/test_design.py` imports
+  the package and `examples` leaves the `pythonpath`. The three are the first entries of ROADMAP M7's benchmark task
+  suite (a problem, its scored target, its reference optimum).
+- Check: `tests/design`, the three scripts' runs, snapshot.
 
 ## 5. Design of the non-mechanical pieces
 
@@ -409,7 +445,7 @@ row names, so `test_engines.read_matrix()` checks the declaration against the do
 from blochparty import generate
 spec = generate.default_spec()                      # today's DEFAULT_SPEC: IXI v17 heads, the realism preset
 spec["anatomy"]["lesions"] = {"count": [2, 4], "region": "periventricular", "size_mm": [5, 12]}
-s = generate.sample(spec, seed=7, engine="auto")    # dict: kspace (C, n, n), noise floor, truth {class: (n, n)}, meta
+s = generate.sample(spec, seed=7, engine="gpu")     # dict: kspace (C, n, n), noise floor, truth {class: (n, n)}, meta
 generate.write(s, "sample_7.h5")                    # ISMRMRD with a /truth group, as today
 ```
 
@@ -440,33 +476,37 @@ rewritten; one line at the top of each says paths before the refactor refer to s
 ## 8. Rules for the refactor
 
 1. **No physics, no API removal.** Every public name stays importable from `blochparty` with the same signature;
-   `blochparty.metal` and `blochparty.cuda` stay import paths. The only addition is `simulate_gpu` (phase 3).
+   `blochparty.metal` and `blochparty.cuda` stay import paths. The only addition is `bp.simulate`'s `engine=` (phase 3).
 2. **Bit-identical defaults** per `CLAUDE.md`; for GPU code, identical generated source (section 6).
 3. **Moves and edits in separate commits**: `git mv` first, then the import fixes, then formatting; `git diff -M` of a
    move commit shows no logic change.
 4. **Commits on `main`, one phase at a time** (`CLAUDE.md`: commit finished, verified work directly on `main`), each
-   phase finished with the mini green and, for GPU phases, the L40 green. Phases 1, 2 and 9 are independent; 3 wants
-   1; 4 wants 2 and 3; 5 wants 2; 6 wants 1 and 2; 7 wants 2; 8 wants 4; 10 last.
+   phase finished with the mini green and, for GPU phases, the L40 green, then pushed (and CI green once it exists). Phases 1, 2 and 9 are independent; 3 wants
+   1; 4 wants 2 and 3; 5 wants 2; 6 wants 1, 2 and 3; 7 wants 2; 8 wants 4; 10 wants 2 and 4.
 5. **Parity rules still apply**: a phase that touches the GPU driver measures the plain kernel's speed before and after
    (ROADMAP's shader rule), even when the text only moved.
 6. **Journal every phase** with numbers (test count, snapshot result, bench delta, pod cost) and hashes.
 
-## 9. Not doing, and open decisions
+## 9. Not doing, and the decisions
 
 Not doing: renaming public functions; merging the core's and the GPU kernels' stepping (different algorithms for
 different hardware); an engine plugin registry (four engines, one table of declarations); a neutral shader dialect
 (section 5.1); moving `ROADMAP.md` or `CLAUDE.md`; touching `uv.lock` beyond adding `ruff`.
 
-Open for the author, in the order the phases need them:
+Decided by the author on 2026-10-17, in the order the phases need them:
 
-1. Phase 2: test subfolders, or keep the flat prefix names?
-2. Phase 3: is `simulate_gpu` the name (alternatives: `simulate_fast`, `bp.simulate(..., engine="gpu")`)?
-3. Phase 4: `generate/`, `datagen/` or `synth/`?
-4. Phase 6: `engines/core.py` or `engines/bloch.py`; keep the `blochparty.metal` / `.cuda` shims for good?
-5. Phase 7: `sequences/` (next to `sequence.py`) or `builders/`?
-6. Phase 9: retro-split the journal into months, or start the monthly files now and leave October whole? Add CI, and
-   start pushing `main` (222 commits are local only)?
-7. Phase 10: move the design examples' reusable code into the package, or keep importing scripts in tests?
+| # | question | decision |
+|---|---|---|
+| 1 | phase 2: test subfolders or flat prefix names | **subfolders by area** (engines, physics, sequences, phantoms, signal, validation, design; generate with phase 4) |
+| 2 | phase 3: the single GPU entry point | **`bp.simulate(..., engine="gpu")`** (also `"metal"`, `"cuda"`; default `"core"` unchanged) |
+| 3 | phase 4: the generator package's name | **`blochparty.generate`** |
+| 4a | phase 6: the reference engine's file | **`engines/core.py`** |
+| 4b | phase 6: `blochparty.metal` / `blochparty.cuda` | **kept as forwarding modules** |
+| 5 | phase 7: the sequence tools' package | **`sequences/`** beside `sequence.py` |
+| 6a | phase 9: splitting the journal | **one file per entry, `JOURNAL.md` as the index** |
+| 6b | phase 9: CI | **yes**: CPU job on every push (ruff, quick tests) |
+| 6c | pushing `main` | **now, then after every finished phase** |
+| 7 | phase 10: the design examples | **their reusable parts move into `blochparty.design.problems`** |
 
-Estimated total: about nine working days for phases 1–9, of which phases 1–3 (a day and a half) and 9 (half a day) pay
-off immediately.
+Estimated total: about ten working days for phases 1–10, of which phases 1–3 (two days) and 9 (half a day) pay off
+immediately.

@@ -2742,3 +2742,9 @@ controls).
   `blochparty.generate`, with CG-SENSE, the orthonormal FFT pair and line masks into `recon` and the receive-array
   model into `coils`; `anatomy/` gains an `edits.py` for the generator's anatomical edits; journal by month now rather
   than later. Ten phases, about nine working days, seven open decisions for the user (section 9).
+- **The author's decisions** (the plan's section 9, same day): tests in subfolders by area; one entry point
+  `bp.simulate(..., engine="gpu" | "metal" | "cuda")` with `"core"` the unchanged default (rather than a separate
+  `simulate_gpu`); the generator as `blochparty.generate`; `engines/core.py`; `blochparty.metal` / `.cuda` kept as
+  forwarding modules; `sequences/`; the journal as one file per entry with `JOURNAL.md` as the index; CI on every push;
+  `main` pushed now and after every finished phase (`CLAUDE.md` updated); the design examples' reusable parts into
+  `blochparty.design.problems`. Folded into the phases; the estimate is now about ten working days.
