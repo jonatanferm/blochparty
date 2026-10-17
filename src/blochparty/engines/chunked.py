@@ -23,6 +23,7 @@ from torch import Tensor
 from torch.autograd.function import once_differentiable
 
 from ..result import SimResult
+from .capabilities import check, features
 from .core import simulate
 from ..phantom import Phantom
 from ..sequence import Sequence
@@ -141,17 +142,7 @@ def simulate_chunked(
         kspace = simulate_chunked(phantom, seq, spin_chunk=512).signal
         kspace.abs().sum().backward()  # fills flip.grad and t1.grad
     """
-    if getattr(seq, "bound_only", None) is not None and any(seq.bound_only):
-        raise NotImplementedError("simulate_chunked: bound-pool-only RF segments (Sequence.bound_only); use simulate")
-    if getattr(phantom, "motion", None) is not None:
-        raise NotImplementedError("motion (Phantom.motion) is in blochparty.simulate and the Metal kernel")
-    if getattr(phantom, "diffusion", None) is not None:
-        raise NotImplementedError("diffusion (Phantom.diffusion) is in blochparty.simulate and the Metal kernel")
-    if phantom.bound is not None or phantom.pools:
-        raise NotImplementedError("exchange (Phantom.bound / pools) is not implemented here yet; use blochparty.simulate")
-    for name, value in (("m_init", m_init), ("scanner", scanner), ("maps", maps)):
-        if value is not None:
-            raise NotImplementedError(f"{name} is not implemented in simulate_chunked; use blochparty.simulate")
+    check("chunked", features(phantom, seq, m_init, scanner, maps))  # PD, T1, T2, dB0, B1+, coils only
 
     if spin_chunk < 1:
         raise ValueError(f"spin_chunk must be positive, got {spin_chunk}")

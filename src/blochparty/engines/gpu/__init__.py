@@ -26,6 +26,7 @@ from torch import Tensor
 from ...result import SimResult
 from ...phantom import Phantom
 from ...sequence import Sequence
+from ..capabilities import check, features
 from .adjoint import _simulate_grad
 from .driver import _forward
 
@@ -57,7 +58,9 @@ def _simulate(backend, phantom: Phantom, seq: Sequence, coils, m_init, chunk, gr
         raise ValueError(f"readouts must be 'direct' or 'nufft', not {readouts!r}")
     if pulses not in ("step", "reuse"):
         raise ValueError(f"pulses must be 'step' or 'reuse', not {pulses!r}")
-    if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
+    grad = torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps)
+    check(backend.name, features(phantom, seq, m_init, scanner, maps), grad=grad)
+    if grad:
         return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every, backend)
     with torch.no_grad():
         return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps,

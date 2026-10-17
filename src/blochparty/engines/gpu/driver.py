@@ -17,6 +17,7 @@ from ...result import SimResult
 from ...fields import spin_fields
 from ...phantom import Phantom
 from ...sequence import Sequence
+from ..prepare import prepare
 
 # limits and choices of the kernels, the same on both backends
 MAX_COILS = 32  # the direct (simd_sum) reduction; the matrix-product one has no limit
@@ -202,9 +203,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
                          nufft=nufft, reuse=reuse, backend=backend)
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv])
     pools = tuple(getattr(phantom, "pools", None) or ())
-    if pools:  # as bloch.simulate
-        if phantom.bound is not None and phantom.bound.model == "generalized":
-            raise NotImplementedError("free pools with the generalized Bloch bound pool are not implemented")
+    if pools:  # as the core (free pools with the generalized bound pool: capabilities.REFUSED)
         if len(pools) > MAX_POOLS:
             raise NotImplementedError(f"at most {MAX_POOLS} free pools on the GPU, got {len(pools)}")
         # moving spins keep their order: a walk's random numbers belong to the spin's index
@@ -218,17 +217,16 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv], r.m_pools[inv])
     dev, f32 = backend.device, torch.float32
     n = len(phantom)
+    prep = prepare(phantom, seq, coils, m_init, scanner, maps)  # the checks and what every engine derives alike
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
     # encoding positions (nonlinearity), concomitant coefficients
-    fields = fields_in if fields_in is not None else spin_fields(scanner, phantom.pos)
-    moving = phantom.diffusion is not None or phantom.motion is not None
+    fields = fields_in if fields_in is not None else prep.fields
+    moving = prep.moving
     db0 = phantom.db0
     mapped, map_bufs = 0, [torch.zeros(1, device=dev, dtype=f32), torch.zeros(9, device=dev, dtype=f32)]
     if maps is not None:  # scanner-frame fields: sampled once for static spins, per segment for moving ones
         from ...maps import sample
 
-        if maps.coils is not None and coils is not None:
-            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
         grid = maps.channels(torch.float64)
         origin = torch.as_tensor(maps.origin, dtype=torch.float64)
         spacing = torch.as_tensor(maps.spacing, dtype=torch.float64)
@@ -277,8 +275,6 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
              (torch.tensor(seq.spoil, dtype=torch.int32) << 2))
     bound_only = getattr(seq, "bound_only", None)
     if bound_only is not None and any(bound_only):  # RF only the bound pool feels (Sequence.bound_only)
-        if pools or (phantom.bound is not None and phantom.bound.model == "generalized"):
-            raise NotImplementedError("bound-pool-only RF segments with free pools or the generalized bound pool")
         bo = torch.tensor(bound_only, dtype=torch.int32)
         flags = flags | (bo << 4) if phantom.bound is not None else flags & ~bo  # no bound pool: free segments
     flags_cpu = flags
@@ -286,18 +282,12 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     rows = (torch.cumsum(adc, 0) - 1).clamp_min(0).to(torch.int32).to(dev)
     n_adc = int(adc.sum())
     # the state as float32 hi + lo (L), split exactly from float64: the kernels carry lo (two_sum) across dispatches
-    if m_init is None:
-        M64 = torch.stack([torch.zeros(n, dtype=torch.float64), torch.zeros(n, dtype=torch.float64),
-                           phantom.pd.detach().double().cpu()])
-    else:
-        M64 = m_init.detach().double().cpu().T
+    mx, my, mz, mb = prep.m0
+    M64 = torch.stack([mx, my, mz]).detach().double().cpu()
     mb64 = torch.zeros(n, dtype=torch.float64)
-    pool = None if phantom.bound is None else phantom.bound.expand(n, phantom.pd)
+    pool = prep.bound
     if pool is not None:  # magnetization transfer: the bound pool's Mz, parameters, RF frequency, lineshape
-        mb = pool.f * phantom.pd if m_init is None or m_init.shape[-1] == 3 else m_init[:, 3]
         mb64 = mb.detach().double().cpu()
-        if m_init is not None and m_init.shape[-1] == 4:
-            M64 = M64[:3]
         mt_bufs = [mb64.float().to(dev).contiguous(),
                    torch.stack([pool.f, pool.k, 1 / pool.t1, pool.t2, pool.dw]).detach().to(dev, f32).contiguous()]
         gen_bufs = None
@@ -329,8 +319,6 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
                                      float(len(lx))], dtype=f32)
             mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.reshape(-1).to(dev, f32).contiguous(), 1]
     else:
-        if m_init is not None and m_init.shape[-1] == 4:
-            raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
         dummy = torch.zeros(1, device=dev, dtype=f32)
         mt_bufs = [dummy, dummy, dummy, dummy, dummy, 0]
         gen_bufs = None
@@ -348,7 +336,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         dz = torch.zeros(1, device=dev, dtype=f32)
         gen_bufs = [dz, dz, torch.zeros(1, device=dev, dtype=torch.int32), 0]
     # moving spins under the field model move in true coordinates; the kernel encodes them per segment
-    fmove = moving and scanner is not None and bool(fields.mode or scanner.nonlinearity is not None)
+    fmove = prep.field_model is not None
     fm_buf = torch.zeros(1, device=dev, dtype=f32)
     if fmove:
         fm_buf = _field_model_buffer(scanner).to(dev)

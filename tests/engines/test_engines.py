@@ -543,6 +543,34 @@ def test_cell(feature, eng, kind, mark):
         assert a is not None and rel(a, b) < GRAD_TOL[eng], (i, rel(a, b))
 
 
+def test_capabilities_declare_the_matrix():
+    """engines/capabilities.py says what the document says, cell by cell, for every engine whether or not it runs
+    here: test_cell runs the engines that are present; this checks the declaration the engines refuse by."""
+    from blochparty.engines import capabilities as C
+
+    for feature, row in MATRIX.items():
+        for kind in ("forward", "gradients"):
+            case = build(feature, grad=kind == "gradients")
+            used = C.features(case.phantom, case.seq, case.kw.get("m_init"), case.kw.get("scanner"), case.kw.get("maps"))
+            for eng in ENGINES:
+                if row[(eng, kind)] == "–":
+                    continue
+                declared = "✗" if C.unsupported(eng, used, grad=kind == "gradients") else "✓"
+                assert declared == row[(eng, kind)], (feature, eng, kind, sorted(used))
+
+
+def test_refusals_name_the_engine_and_the_feature():
+    from blochparty.engines import capabilities as C
+
+    with pytest.raises(NotImplementedError, match=r"chunked engine: simulating with diffusion \(Phantom.diffusion\)"):
+        C.check("chunked", frozenset({"diffusion"}))
+    with pytest.raises(NotImplementedError, match="metal engine: gradients through motion .* torch.no_grad"):
+        C.check("metal", frozenset({"motion"}), grad=True)
+    with pytest.raises(NotImplementedError, match="the generalized Bloch bound pool with free exchanging pools"):
+        C.check("cuda", frozenset({"pools", "generalized"}))
+    C.check("core", frozenset(C.FEATURES) - {"bound_only"})  # everything but the one refused pair
+
+
 def test_dtypes():
     """Core and chunked compute in the phantom's dtype (float64 here)."""
     case = build("basic Bloch: PD, T1, T2, dB0, RF, gradients, ADC, spoils, coils", grad=False)

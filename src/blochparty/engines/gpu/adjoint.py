@@ -14,10 +14,10 @@ from torch.autograd.function import once_differentiable
 
 from ... import exchange
 from ...result import SimResult
-from ...fields import spin_fields
 from ...phantom import Phantom
 from ...sequence import Sequence
 from .driver import ADJOINT_COILS, _forward
+from ..prepare import prepare
 
 
 def default_checkpoint_every(n_segments: int) -> int:
@@ -159,22 +159,15 @@ class _GPUSimulate(torch.autograd.Function):
 
 
 def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps, mma, every, backend) -> SimResult:
-    """simulate_metal with gradients: the inputs as tensors of an autograd Function (_GPUSimulate)."""
-    for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
-                          ("free pools", bool(getattr(phantom, "pools", None))),
-                          ("the generalized Bloch bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
-                          ("bound-pool-only RF segments", seq.bound_only is not None and any(seq.bound_only))):
-        if present:
-            raise NotImplementedError(f"gradients through simulate_metal with {what} are not implemented; "
-                                      "use blochparty.simulate, or run under torch.no_grad()")
+    """simulate_metal with gradients: the inputs as tensors of an autograd Function (_GPUSimulate). What it
+    differentiates: capabilities.SUPPORTED (checked by the caller)."""
     n, pd = len(phantom), phantom.pd
-    fields = spin_fields(scanner, phantom.pos)
+    prep = prepare(phantom, seq, coils, m_init, scanner, maps)
+    fields = prep.fields
     db0, b1 = phantom.db0, phantom.b1
     if maps is not None:  # static spins: the maps sampled at the true positions, differentiably
         from ...maps import sample
 
-        if maps.coils is not None and coils is not None:
-            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
         v = sample(maps.channels(pd.dtype), torch.as_tensor(maps.origin, dtype=pd.dtype),
                    torch.as_tensor(maps.spacing, dtype=pd.dtype), phantom.pos)
         db0 = db0 + v[:, 0]
@@ -185,21 +178,13 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
         coils = torch.ones(n, 1, dtype=torch.complex64 if pd.dtype == torch.float32 else torch.complex128)
     bound, rf_freq, lineshape, cutoff, memory = None, None, "superlorentzian", None, 300.0
     if phantom.bound is not None:
-        pool = phantom.bound.expand(n, pd)
+        pool = prep.bound
         bound = torch.stack([pool.f, pool.k, pool.t1, pool.t2, pool.dw], -1)
         rf_freq = exchange.rf_frequency(seq)
         lineshape, memory = pool.lineshape, float(pool.memory)
         cutoff = None if pool.cutoff is None else float(pool.cutoff)
-    if m_init is None:
-        m0 = torch.stack([torch.zeros_like(pd), torch.zeros_like(pd), pd], -1)
-        if bound is not None:
-            m0 = torch.cat([m0, (bound[:, 0] * pd)[:, None]], -1)
-    else:
-        m0 = m_init
-        if bound is not None and m0.shape[-1] == 3:
-            m0 = torch.cat([m0, (bound[:, 0] * pd)[:, None]], -1)
-        elif bound is None and m0.shape[-1] == 4:
-            raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
+    mx, my, mz, mb = prep.m0  # mb: the bound pool's Mz (default f PD), None without one
+    m0 = torch.stack([mx, my, mz] + ([] if mb is None else [mb]), -1)
     every = every or default_checkpoint_every(len(seq))
     if every % 64:
         raise ValueError(f"checkpoint_every must be a multiple of 64, got {every}")
