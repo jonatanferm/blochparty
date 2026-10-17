@@ -1,6 +1,6 @@
 """Bloch simulation on the Apple GPU (Metal), forward and adjoint.
 
-The same physics as the core (``bloch.py``) and the retired fused C++ kernel (``fused/kernel.h``,
+The same physics as the core (``engines/core.py``) and the retired fused C++ kernel (``fused/kernel.h``,
 removed 2026-10-09 and kept in the git history; the comments below cite it where code was ported
 from it): per segment exact
 free precession and relaxation (relaxation in the ``m += (m - m0) * expm1(-dt/T)`` form, which
@@ -26,7 +26,7 @@ longitudinal relaxation the exact exchange step of ``exchange.py``, saturated du
 +15 % on a 3D GRE).
 
 Free exchanging pools (``Phantom.pools``, up to ``MAX_POOLS``, with or without the rate-model bound
-pool): the Bloch-McConnell system of ``bloch._simulate_exchange``, one kernel per pool count
+pool): the Bloch-McConnell system of the core's ``_simulate_exchange``, one kernel per pool count
 (``_bm1`` ...). Each segment applies exp(A dt) to the state by a Taylor series on sub-steps, the
 common precession of free segments factored out exactly, increments added by two-sum; a float32
 matrix exponential per segment was 1e-2 off over a CEST saturation train. A segment costs sub-steps

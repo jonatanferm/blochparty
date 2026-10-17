@@ -15,7 +15,7 @@ Tissue properties (PD, T1, T2, dB0, coil sensitivities) move with the spin here;
 field maps sampled at the moving position are a separate step. Under the scanner field model
 (gradient nonlinearity, concomitant fields) positions are true positions, and every segment
 evaluates the encoding position f(r) and the concomitant coefficients where the spin is
-(``bloch._moving_fields``); the concomitant field being quadratic in r, its phase for a constant
+(the core's ``_moving_fields``); the concomitant field being quadratic in r, its phase for a constant
 velocity is second order in the segment length.
 """
 

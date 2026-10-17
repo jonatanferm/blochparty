@@ -24,7 +24,7 @@ class Phantom:
     b1: Tensor | None = None  # (N,) relative transmit (B1+) scale of every RF pulse; None = 1
     bound: BoundPool | None = None  # magnetization transfer: a bound pool per spin (``exchange.py``)
     pools: tuple[ExchangePool, ...] | None = None  # free pools exchanging with the water (CEST, myelin water)
-    # diffusion: (N,) isotropic diffusivity or (N, 3, 3) tensor [m^2/s]; spins random-walk (bloch._walk)
+    # diffusion: (N,) isotropic diffusivity or (N, 3, 3) tensor [m^2/s]; spins random-walk (the core's _walk)
     diffusion: Tensor | None = None
     # restricted diffusion: each spin walks in its own impermeable compartment (restriction.py)
     restriction: Restriction | None = None

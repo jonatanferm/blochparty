@@ -279,7 +279,7 @@ def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat, modes=None):
     bound pool, its modes' (Re u_j, Im u_j) (``modes``: (J,) complex poles [1 / T2b] and weights,
     as ``pool_modes``), then 1. Generalized: no saturation rate; the RF rotates (S = sum u_j, Mzb)
     like a Bloch pool, each mode taking c_j of dS/dt, and mode j decays and precesses as
-    exp(-(p_j / T2b + i 2 pi (bz + dw)) t) (bloch._rf_segment_generalized, without splitting)."""
+    exp(-(p_j / T2b + i 2 pi (bz + dw)) t) (the core's _rf_segment_generalized, without splitting)."""
     n, p = bz.shape[0], len(pools)
     nb = 1 if bound is not None else 0
     nj = 0 if modes is None else 2 * modes[0].shape[0]

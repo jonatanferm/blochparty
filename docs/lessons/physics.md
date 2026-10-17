@@ -167,7 +167,7 @@
 
 - **Closed-form free runs work for any piecewise-constant gradients**, not only constant ones:
   phase = 2π(k·r + dB0·t) with cumulative k and t. Terms quadratic in g (concomitant fields)
-  need cumulative ∫gᵢgⱼ dt, still exact. (`bloch.py`, PR #6)
+  need cumulative ∫gᵢgⱼ dt, still exact. (`engines/core.py`, then `bloch.py`; PR #6)
 
 - **Strang splitting of relaxation inside RF segments is second order** (error ↓ 4× per halving
   of the RF step), but the coarsest steps are pre-asymptotic (ratios 4.5–9). Without

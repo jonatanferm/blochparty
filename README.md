@@ -343,8 +343,8 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 |---|---|
 | `sequence.py` | `Sequence` (flat piecewise-constant segments), `kspace_trajectory`, `flip_angle` |
 | `sequences/` | `builder` (`SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks), `library` (ready-made sequences: `gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`), `meta` (the `Sequence.meta` keys), `pulseq` (`read_pulseq()`: `.seq` / pypulseq → `Sequence`; `write_pulseq()`: `Sequence` → `.seq`, lossless), `girf` (`apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents incl. B0 terms), `drift` (B0 drift and respiratory fields as sequence transforms), `transmit` (the RF amplifier). `blochparty.builders`, `.pulseq`, `.girf`, `.drift` and `.transmit` are these modules |
-| `bloch.py` | the simulator core: `simulate()` |
-| `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
+| `engines/` | `simulate(..., engine=)`; `core.py` (the simulator core), `chunked.py` (`simulate_chunked()`: same results, spin-chunked memory-bounded backward), `prepare.py` (the input checks and what every engine derives alike), `capabilities.py` (what each engine runs, forward and with gradients: the matrix of `docs/ENGINES.md`), `gpu/` |
+| `result.py` | `SimResult` |
 | `engines/gpu/` | the engine: one driver and adjoint over two backends, `metal/` (Apple GPU, `simulate_metal`) and `cuda/` (NVIDIA, `simulate_cuda`); device code in `shaders/*.metal`, compiled at run time; float32; 5.8× the retired fused CPU kernel on the real NIST TSE workload. `blochparty.metal` and `blochparty.cuda` are these modules |
 | `exchange.py` | magnetization transfer: the bound pool (rate model), free exchanging pools (Bloch–McConnell), lineshapes |
 | `generalized_bloch.py` | the generalized Bloch model of the bound pool |

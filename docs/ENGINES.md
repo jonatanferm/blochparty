@@ -5,13 +5,17 @@ Which simulator does what. The capability matrix below is checked cell by cell b
 
 | engine | entry point | device, precision | gradients | role |
 |---|---|---|---|---|
-| core | `blochparty.simulate(..., engine="core")`, the default (`src/blochparty/bloch.py`) | any torch device; float32 or float64 | autograd (`checkpoint_every` bounds memory over segments) | the readable reference: new physics lands here first |
+| core | `blochparty.simulate(..., engine="core")`, the default (`src/blochparty/engines/core.py`) | any torch device; float32 or float64 | autograd (`checkpoint_every` bounds memory over segments) | the readable reference: new physics lands here first |
 | metal | `engine="metal"`, or `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`, Metal backend) | Apple GPU; float32 only (inputs are cast, results come back float32 on the CPU) | hand-written adjoint on the GPU, checkpointed (`checkpoint_every`); not for moving spins, free pools or the generalized bound pool (raises) | the engine for imaging-scale work |
 | cuda | `engine="cuda"`, or `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/`, CUDA backend) | NVIDIA GPU; float32 only, as Metal | the same hand-written adjoint, as Metal | the Metal kernels ported: the same device code and Python driver, CUDA kernels (warp shuffles for the coil sums), compiled at run time by NVRTC |
-| chunked | `engine="chunked"`, or `blochparty.simulate_chunked` (`src/blochparty/chunked.py`) | as the core | autograd, recomputed one spin chunk at a time | the core with a memory-bounded backward over spins |
+| chunked | `engine="chunked"`, or `blochparty.simulate_chunked` (`src/blochparty/engines/chunked.py`) | as the core | autograd, recomputed one spin chunk at a time | the core with a memory-bounded backward over spins |
 
 `engine="gpu"` is CUDA where an NVIDIA GPU is, else Metal (`blochparty.engines.resolve`); the scripts use it, so they
 run on either machine. Another engine's options (`readouts=`, `spin_chunk=`, ...) raise TypeError.
+
+What the engines refuse is declared once, in `src/blochparty/engines/capabilities.py` (features per engine and
+direction, refused combinations, one `NotImplementedError` wording); `tests/engines/test_engines.py` checks that
+declaration against every cell below, for every engine whether or not it runs on the machine.
 
 The fused C++ CPU kernel (`blochparty.fused.simulate_fused`: float32 / float64, hand-written
 adjoint) was retired on 2026-10-09 after the Metal adjoint (ROADMAP M2) passed its checks; it is in

@@ -6,7 +6,7 @@ the dephasing caused by gradients (Weigel, JMRI 41:266, 2015; Hennig 1988).
 It captures stimulated echoes and gradient / RF spoiling exactly, so it is the
 reference for realism work that ideal spoiling (``Sequence.spoil``) cannot check.
 
-Conventions (identical to ``bloch.py``): dM/dt = gamma * M x B, so an RF pulse
+Conventions (identical to the core, ``engines/core.py``): dM/dt = gamma * M x B, so an RF pulse
 along +x tips +z to +y; RF phase phi gives Mxy = i*exp(i*phi)*sin(alpha), and
 Mxy = Mx + i*My evolves as exp(-i*2*pi*f*t) at offset f. One unit of
 dephasing gradient (area 1/L over a voxel of length L) multiplies Mxy(x) by

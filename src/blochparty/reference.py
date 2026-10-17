@@ -1,6 +1,6 @@
 """Reference models used to validate the Bloch simulator.
 
-These are deliberately written differently from ``bloch.py``: closed-form
+These are deliberately written differently from the core (``engines/core.py``): closed-form
 expressions and an explicit signal equation instead of incremental rotations,
 so agreement is meaningful evidence that both are right.
 """

@@ -42,7 +42,7 @@ Three conditions, each testable. The core is done when all three hold.
 
 | engine | role | gradients | policy |
 |---|---|---|---|
-| `blochparty.simulate` (`src/blochparty/bloch.py`) | readable reference; every new effect lands here first, checked on small cases | autograd, `simulate_chunked` | keep small and readable; float64 |
+| `blochparty.simulate` (`src/blochparty/engines/core.py`) | readable reference; every new effect lands here first, checked on small cases | autograd, `simulate_chunked` | keep small and readable; float64 |
 | `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`: driver, adjoint, `shaders/`, `metal/`) | the engine; all imaging-scale work | hand-written adjoint (M2) | must agree with the core; float32 |
 | `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/cuda/`) | the same engine on NVIDIA GPUs (cloud pods) | the same adjoint | the same driver and device code; must agree with the core |
 | `blochparty.fused.simulate_fused` (was `src/blochparty/fused/`) | CPU kernel with a hand-written adjoint | adjoint | retired 2026-10-09 after M2; in the git history |
@@ -61,7 +61,7 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
   default on `Phantom`, `Sequence`, `Scanner` or a builder keyword) and must not change the
   snapshot. If an item needs the snapshot to grow (new engine, new default inputs), add to
   `tools/snapshot.py` in a separate commit and say so in the journal.
-- **Core, then Metal, then parity test.** Physics goes into `bloch.py` with a test against the
+- **Core, then Metal, then parity test.** Physics goes into `engines/core.py` with a test against the
   reference, then into the GPU device code (`src/blochparty/engines/gpu/shaders/*.metal`, which CUDA
   shares; kernel-side changes in both `metal/*.metal.in` and `cuda/*.cu.in`), then a test in
   `tests/engines/test_gpu.py` (run on every GPU engine present) comparing the two on the same inputs. Float32 tolerance for parity is ~1e-5 relative on signals (what the
@@ -126,7 +126,7 @@ one small matrix-vector product.
 
 The original plan:
 
-The core (`bloch._simulate_exchange`) builds one augmented Bloch–McConnell matrix per segment
+The core (`engines/core.py`, `_simulate_exchange`) builds one augmented Bloch–McConnell matrix per segment
 (`exchange._bm_matrix`, size d = 3(P+1) + nb + 1 for P free pools and nb ∈ {0, 1} bound pools)
 and applies `matrix_exp(A dt)` to the state. Reproduce that on the GPU.
 
@@ -155,7 +155,7 @@ the float32 budget (the core is at 5.8e-7); benchmarks 8 and 9 reproduce their t
 
 Done as planned, diffusion included: moving spins under the field model live in true coordinates
 (motion and walks), and every segment maps them to encoding positions and concomitant
-coefficients (core: `bloch._moving_fields`; Metal: `nl_displacement`, `conc_at` in the `_diff`
+coefficients (core: `engines/core.py`, `_moving_fields`; Metal: `nl_displacement`, `conc_at` in the `_diff`
 kernels). Static spins untouched (snapshot bit-identical). A moving spin equals the chain of static
 one-segment simulations at each segment's position to 4e-15 (core) and 1e-5 per spin (Metal);
 in a Maxwell-compensated echo a moving spin keeps the exact path integral of Bernstein's field,

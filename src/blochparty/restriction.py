@@ -6,7 +6,7 @@ with normal ``axis``), "cylinder" (radius ``size``, axis ``axis``) or "sphere" (
 compartment is centred at the spin's position; the walker starts uniformly inside it (from
 ``rng.uniforms``, so every engine starts it at the same place).
 
-Walls make the free Brownian segment of ``bloch._walk`` inexact, so a segment is cut into
+Walls make the free Brownian segment of the core's ``_walk`` inexact, so a segment is cut into
 sub-steps of at most ``tau_max = min(size^2 / (200 D))`` (rms step <= size / 10 per axis);
 each sub-step moves by sqrt(2 D h) n1, reflects off the walls (exactly for planes,
 specularly at the crossing point for cylinders and spheres) and contributes its midpoint

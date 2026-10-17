@@ -1,6 +1,6 @@
 # Bloch Party
 
-Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
+Differentiable MRI simulator: PyTorch core (`src/blochparty/engines/core.py`, the reference
 implementation) and a GPU engine with a hand-written adjoint (`src/blochparty/engines/gpu/`, the fast
 engine: one driver, Metal on Apple GPUs and CUDA on NVIDIA), both behind `bp.simulate(..., engine=)`.
 The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
