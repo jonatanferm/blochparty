@@ -83,3 +83,4 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-17 [Refactor: one entry point, bp.simulate(..., engine=) (plan phase 3)](journal/2026-10-17-08-refactor-one-entry-point-engine.md)
 - 2026-10-17 [Refactor: the anatomy package (plan phase 5)](journal/2026-10-17-09-refactor-the-anatomy-package.md)
 - 2026-10-17 [Refactor: the sequences package (plan phase 7)](journal/2026-10-17-10-refactor-the-sequences-package.md)
+- 2026-10-17 [Refactor: engines/ with one preparation step and one capability table (plan phase 6)](journal/2026-10-17-11-refactor-engines-prepare-capabilities.md)

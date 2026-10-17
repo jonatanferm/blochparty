@@ -61,3 +61,11 @@
   resolved when the function runs. After `blochparty/metal/` became `blochparty/engines/gpu/`, four such imports
   pointed at `blochparty.engines.maps`; the forward ran, and the first gradient failed. After a move, grep for
   indented `from .` imports and run one call through every path (forward, gradient, each option).
+
+- **A pod's CPU count is the host's, not the container's** (2026-10-17): on a secure-cloud L40 pod `nproc` said 256
+  and torch started 128 threads, while the container's quota (`/sys/fs/cgroup/cpu.max`) was 27 CPUs; the CPU-bound
+  float64 references of the CUDA tests crawled (39 % in 12 minutes, against 9 minutes for the whole run on a
+  32-core 4090 pod). Set `OMP_NUM_THREADS` to the quota before running anything CPU-heavy on a pod. And never
+  `pkill -f` a pattern that the ssh command itself contains: it kills the command's own shell. The same run left the pod
+  idle for an hour after its tests ended, because removing it waited on a laptop that had gone to sleep ($1.22
+  instead of ~$0.40): a pod job should end by stopping its own pod, not by waiting for the machine that started it.

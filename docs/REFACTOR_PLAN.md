@@ -17,6 +17,7 @@ changes, no public-API renames (one addition: `bp.simulate(..., engine=)`, phase
 | 3. `bp.simulate(..., engine=)` | done 2026-10-17 | `07b8d5e` `0011a8e` `17b1905` |
 | 5. `anatomy/` | done 2026-10-17 | `40fac53` `d0a634a` `a4d2e0a` |
 | 7. `sequences/` | done 2026-10-17 | `02d6fac` `0f4e3a8` `b3b26a3` `a336632` |
+| 6. `engines/`: prepare, capabilities | done 2026-10-17 | `4dc3c6c` `f918ab5` `597c116` `ef50840` `8b0b984` `a142473` |
 | 9. docs and tooling | journal and lessons split done (`68d91e3`); ruff, CI, layout check to do | |
 
 ## 0. What changed since the first version

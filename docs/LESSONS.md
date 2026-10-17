@@ -6,7 +6,7 @@ figure out, in the topic file it belongs to (newest at the top of a section); ea
 so it can be re-checked. `tests/docs/test_docs.py` checks this index lists every topic file.
 
 - [Physics and numerics](lessons/physics.md) (59): relaxation, rotations, exchange, diffusion, float32, estimators
-- [GPU engines](lessons/gpu.md) (11): Metal and CUDA kernels, the port, GPU processes
+- [GPU engines](lessons/gpu.md) (12): Metal and CUDA kernels, the port, GPU processes
 - [Performance](lessons/performance.md) (27): what makes the simulators fast or slow
 - [Pulseq and sequences](lessons/pulseq.md) (22): Pulseq files, pypulseq, rasters, GIRF and gradient delays
 - [Reference data, datasets, formats and other simulators](lessons/reference-data.md) (49): NIST, published values, the tissue database, MRzero, KomaMRI, BMCTool
