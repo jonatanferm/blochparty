@@ -663,8 +663,12 @@ which physics (M6) the protocol families call for.
 
 ## M8. Other hardware (when machines exist)
 
-- [ ] CUDA port of the Metal kernel (forward and adjoint), verified against the core and the
-      Metal results in float32.
+- [x] CUDA port of the Metal kernel (forward and adjoint), verified against the core and the
+      Metal results in float32. *Done 2026-10-17:* `blochparty.cuda.simulate_cuda` — Metal's device
+      code turned into CUDA by text rules, CUDA kernels (warp-shuffle coil sums), Metal's driver with a
+      backend switch, NVRTC at run time. On an RTX 4090 (Runpod): all 68 CUDA cells of the engine matrix
+      and the four GPU test files pass at Metal's tolerances; 3d-64 forward 0.51 s (M4 Metal 2.40 s),
+      3d-96 (0.24 M spins) 3.4 s at 6.5e10 spin-segments/s, forward + backward 3d-64 2.2 s.
 - [ ] CPU fallback for users without a GPU: the PyTorch core is it; `simulate_chunked` for memory.
 - [ ] KomaMRI crosscheck and phantom export, if cross-simulator agreement becomes a question
       again.

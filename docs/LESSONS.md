@@ -1364,3 +1364,32 @@ says where it came from so it can be re-checked.
   `ifft2c` on the grid and differentiable in continuous line positions) put the same net at 0.75-0.83. The raw arms
   keep "no reconstruction" (no iterations, no maps, no regulariser) by reading the adjoint, which is the first layer any
   sensible raw network would learn anyway.
+
+## The CUDA port — 2026-10-17
+
+- **Port a shader by sharing its device code, not by copying it** (`src/blochparty/cuda/`): Metal Shading Language is
+  C++14 with address-space qualifiers, vector types and a few built-ins. Dropping `thread` / `device` /
+  `threadgroup`, mapping `constant float*` to `const float*`, renaming `float3` & co. onto small structs with the
+  operators the code uses, and `precise::sin` & co. onto `sinf` turned the whole device library (~1000 lines: steps,
+  exchange, lineshapes, walks, field model, reverse sweep) into CUDA that compiled at the first try and agreed with
+  the core at Metal's tolerances in all 68 matrix cells. Only the kernels were written anew, because that is where
+  the two GPUs differ (simdgroup matrices, threadgroup memory, atomics). NVRTC's `-default-device` makes every
+  unannotated function a device function, so the shared text needs no `__device__`.
+- **Map scalar math to the float functions explicitly**: CUDA resolves `sqrt(x)` for a float through overloads that
+  may land on the double version, and double runs at 1/64 rate on consumer GPUs (an RTX 4090). The port rewrites
+  `sqrt`, `fabs`, `ceil`, `exp`, ... to their `f` forms in the shared text (`floor` stays overloaded: it is also
+  called on a vector).
+- **Check the C++ before renting a GPU**: no NVIDIA compiler runs on macOS, but the generated CUDA compiles as host
+  C++ against a page of stubs (`__shfl_xor_sync`, `atomicAdd`, `__syncthreads`, `blockIdx`, `__shared__` as `static`):
+  `clang++ -fsyntax-only` over all 49 kernel variants caught the type and overload errors locally; NVRTC then compiled
+  each in ~1 s on the pod.
+- **Runpod**: community-cloud RTX 4090s with a public IP (needed for plain SSH, rsync and `--wait`) were all taken
+  on a Saturday midday; a secure-cloud 4090 ($0.89/h against $0.34) was there at once. `pod create` without
+  `--ports 22/tcp` publishes no SSH port (`--wait` then times out after 10 min); `pod update --ports 22/tcp` fixes
+  it. A secure 4090 for 45 minutes of verification and benchmarks cost $0.59. Reuse the image's PyTorch
+  (`uv venv --system-site-packages`): the project ran on torch 2.8 there, nothing to download.
+- **Know what a GPU test run measures**: the engine tests compare tiny cases (6-300 spins) with the float64 core on
+  the CPU, so a 28-minute GPU test run kept the GPU at 0 % and 17 CPU cores busy (the user saw no GPU use and asked).
+  Log `nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv -l 1` under `setsid` from the start, and show
+  load with a case big enough to fill the GPU (3d-96: 100 % and ~387 W for 3.4 s per run; between runs the GPU waits
+  4-5 s for the CPU to build the phantom and sequence).
