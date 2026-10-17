@@ -55,3 +55,9 @@
   Log `nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv -l 1` under `setsid` from the start, and show
   load with a case big enough to fill the GPU (3d-96: 100 % and ~387 W for 3.4 s per run; between runs the GPU waits
   4-5 s for the CPU to build the phantom and sequence).
+
+- **Moving a package down a level breaks relative imports that no linter sees** (2026-10-17): ruff's
+  undefined-name check resolves module-level imports, but `from ..maps import sample` inside a function is only
+  resolved when the function runs. After `blochparty/metal/` became `blochparty/engines/gpu/`, four such imports
+  pointed at `blochparty.engines.maps`; the forward ran, and the first gradient failed. After a move, grep for
+  indented `from .` imports and run one call through every path (forward, gradient, each option).
