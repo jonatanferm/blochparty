@@ -1,5 +1,5 @@
 """Undersampled reconstruction (recon.py): the orthonormal FFT pair, the line masks, CG-SENSE; and the AUC and its
-bootstrap (design.py). Each is checked against a property it must have, not against its own formula."""
+bootstrap (design/metrics.py). Each is checked against a property it must have, not against its own formula."""
 
 import numpy as np
 import torch

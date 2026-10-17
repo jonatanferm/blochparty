@@ -361,7 +361,7 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
 | `fields.py` | `Scanner` field model: concomitant fields, gradient nonlinearity (solid harmonics, coefficient files) |
-| `design.py` | hardware / safety constraints and penalties, image metrics (and a classifier's AUC with its bootstrap), Cramér–Rao bound, `minimize`, `design_report()` |
+| `design/` | `hardware` (constraints, PNS, penalties), `metrics` (image quality, PSF, a classifier's AUC and its bootstrap), `estimation` (Jacobian, Fisher information, Cramér–Rao bound), `optimize` (`minimize`), `report` (`design_report()`), `parameters` (sequences with learnable flips, TE, TR and line positions); `problems/` the worked design problems with their reference optima (DESPOT1, contrast per scan time, TSE refocusing trains) |
 | `generate/` | training data (ROADMAP M7): `spec` (the sample specification), `heads` (the realism preset's head per seed), `protocols` (the paired real protocols), `sample` (`samples()`: spec + seed → simulated, noised slices with their truth; `write()`: ISMRMRD HDF5 with a `/truth` group); `validation/realism/generate.py` is its command line |
 
 Tests live in `tests/<area>/`: `engines`, `physics`, `sequences`, `phantoms`, `signal`, `validation`, `design` and

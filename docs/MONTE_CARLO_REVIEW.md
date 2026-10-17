@@ -79,7 +79,7 @@ recorded GPU results below are historical project evidence.
 | Free diffusion | `bloch.py:_walk`, lines 210–233; Metal lines 307–342 | Exact joint endpoint and integrated-position sampling for free Brownian motion under a segment's constant linear gradient. Includes anisotropic D through Cholesky factors. |
 | Restricted diffusion | `restriction.py`; Metal lines 344–382 | Uniform starts, Gaussian substeps, specular reflection, approximate phase integration. Equilibrium and analytic-limit tests already catch important boundary mistakes. |
 | Random streams | `rng.py`; Metal Philox | Counter-based Philox4x32-10 and Box–Muller. Excellent for replay, checkpointing and matching engines without maintaining a huge RNG-state array. |
-| Thermal noise replicas | `coils.py:add_noise`; `design.py:image_noise_sigma` | Simulates physical receiver noise through reconstruction. This is a different uncertainty from numerical spin-integration error. |
+| Thermal noise replicas | `coils.py:add_noise`; `design/metrics.py:image_noise_sigma` | Simulates physical receiver noise through reconstruction. This is a different uncertainty from numerical spin-integration error. |
 
 The NIST code correctly adds sphere and water signals **in the complex domain**, reconstructs
 linearly, then averages seed images before taking magnitude. Averaging already-magnituded
