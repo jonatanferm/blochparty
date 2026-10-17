@@ -2,7 +2,8 @@
 
 Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
 implementation) and a GPU engine with a hand-written adjoint (`src/blochparty/engines/gpu/`, the fast
-engine: one driver, Metal on Apple GPUs and CUDA on NVIDIA). The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
+engine: one driver, Metal on Apple GPUs and CUDA on NVIDIA), both behind `bp.simulate(..., engine=)`.
+The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
 Goal: the most physically realistic simulator, judged against real scanners
 (`docs/REALISM.md`); roadmap in `ROADMAP.md`.
 
@@ -40,7 +41,7 @@ uv run pytest                      # full suite (GPU tests skip without MPS)
 uv run pytest -m "not slow"        # quick subset (< 1 min) while iterating
 uv run pytest tests/engines        # one area (tests/<area>/: engines, physics, sequences, ...)
 uv run pytest -m crosscheck        # opt-in MRzero agreement
-uv run python benchmarks/bench.py [--backend metal] [--grad] [--record]
+uv run python benchmarks/bench.py [--backend gpu] [--grad] [--record]   # gpu: CUDA if present, else Metal
 uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py
 ```
 

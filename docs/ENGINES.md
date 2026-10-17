@@ -5,10 +5,13 @@ Which simulator does what. The capability matrix below is checked cell by cell b
 
 | engine | entry point | device, precision | gradients | role |
 |---|---|---|---|---|
-| core | `blochparty.simulate` (`src/blochparty/bloch.py`) | any torch device; float32 or float64 | autograd (`checkpoint_every` bounds memory over segments) | the readable reference: new physics lands here first |
-| metal | `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`, Metal backend) | Apple GPU; float32 only (inputs are cast, results come back float32 on the CPU) | hand-written adjoint on the GPU, checkpointed (`checkpoint_every`); not for moving spins, free pools or the generalized bound pool (raises) | the engine for imaging-scale work |
-| cuda | `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/`, CUDA backend) | NVIDIA GPU; float32 only, as Metal | the same hand-written adjoint, as Metal | the Metal kernels ported: the same device code and Python driver, CUDA kernels (warp shuffles for the coil sums), compiled at run time by NVRTC |
-| chunked | `blochparty.simulate_chunked` (`src/blochparty/chunked.py`) | as the core | autograd, recomputed one spin chunk at a time | the core with a memory-bounded backward over spins |
+| core | `blochparty.simulate(..., engine="core")`, the default (`src/blochparty/bloch.py`) | any torch device; float32 or float64 | autograd (`checkpoint_every` bounds memory over segments) | the readable reference: new physics lands here first |
+| metal | `engine="metal"`, or `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`, Metal backend) | Apple GPU; float32 only (inputs are cast, results come back float32 on the CPU) | hand-written adjoint on the GPU, checkpointed (`checkpoint_every`); not for moving spins, free pools or the generalized bound pool (raises) | the engine for imaging-scale work |
+| cuda | `engine="cuda"`, or `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/`, CUDA backend) | NVIDIA GPU; float32 only, as Metal | the same hand-written adjoint, as Metal | the Metal kernels ported: the same device code and Python driver, CUDA kernels (warp shuffles for the coil sums), compiled at run time by NVRTC |
+| chunked | `engine="chunked"`, or `blochparty.simulate_chunked` (`src/blochparty/chunked.py`) | as the core | autograd, recomputed one spin chunk at a time | the core with a memory-bounded backward over spins |
+
+`engine="gpu"` is CUDA where an NVIDIA GPU is, else Metal (`blochparty.engines.resolve`); the scripts use it, so they
+run on either machine. Another engine's options (`readouts=`, `spin_chunk=`, ...) raise TypeError.
 
 The fused C++ CPU kernel (`blochparty.fused.simulate_fused`: float32 / float64, hand-written
 adjoint) was retired on 2026-10-09 after the Metal adjoint (ROADMAP M2) passed its checks; it is in
@@ -109,9 +112,9 @@ segments (slice-selective sincs, `tests/engines/test_integration.py`) 8.9e-4 on 
 core itself in float32 is 5.4e-3 off. Gradients are bit-identical for any `checkpoint_every` and
 from run to run (no atomics; per-spin sums flushed every 64 segments). CUDA's adjoint (the same code) against the
 core, worst over the matrix on an RTX 4090: 1.3e-4 (`rf_freq`), 5.3e-5 with the bound pool, ≤ 1.4e-5 elsewhere. Optimizing through it: the
-WM/GM flip optimum to 0.001° (`examples/optimize_contrast.py --metal`), the Ernst angle to 0.01°,
+WM/GM flip optimum to 0.001° (`examples/optimize_contrast.py --gpu`), the Ernst angle to 0.01°,
 the DESPOT1 pair to 0.0003°–0.03° depending on the finite-difference step, its closed-form bound
-within 3e-6 of the optimum (`examples/design_despot1.py --metal`: fourth-order differences of
+within 3e-6 of the optimum (`examples/design_despot1.py --gpu`: fourth-order differences of
 float32 signals; the core in float64 reaches 0.0002°). Constrained designs whose constraint must
 hold to better than ~1e-4 (`examples/design_contrast_tr.py`) need the core.
 

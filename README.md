@@ -12,12 +12,11 @@ uv sync
 uv run pytest                              # ~685 verification tests, ~4 min on an M4
 uv run pytest -m "not slow"                # the quick subset, under a minute
 uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
-uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--metal: the GPU adjoint)
+uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--gpu: the GPU adjoint)
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
-uv run python benchmarks/bench.py --backend metal  # same, on the Apple GPU
-uv run python benchmarks/bench.py --grad --backend metal  # forward + backward through the GPU adjoint
-uv run python benchmarks/bench.py --backend cuda   # same, on an NVIDIA GPU (blochparty.cuda)
-uv run python examples/gre3d_128.py        # full 3D 128^3 on the Apple GPU, ~3 min
+uv run python benchmarks/bench.py --backend gpu    # same, on the GPU (CUDA where an NVIDIA GPU is, else Metal)
+uv run python benchmarks/bench.py --grad --backend gpu  # forward + backward through the GPU adjoint
+uv run python examples/gre3d_128.py        # full 3D 128^3 on the GPU, ~3 min on an M4
 ```
 
 ```python
@@ -38,23 +37,25 @@ Anything numeric in a sequence or phantom can be a tensor with `requires_grad=Tr
 
 ## Engines
 
-Three entry points with the same arguments and result, one physics. Which features each one runs,
-with forward and gradients, is the matrix in [docs/ENGINES.md](docs/ENGINES.md), checked cell by
-cell by `tests/engines/test_engines.py`.
+One entry point, `bp.simulate(phantom, seq, coils, ..., engine=)`, with the same arguments and result for
+every engine, and one physics. Which features each engine runs, with forward and gradients, is the matrix in
+[docs/ENGINES.md](docs/ENGINES.md), checked cell by cell by `tests/engines/test_engines.py`;
+`bp.engines.available(engine)` says what runs on this machine.
 
-- `bp.simulate`: the reference. Plain PyTorch on any device, float32 or float64, differentiable
-  by autograd. Every new effect lands here first.
-- `blochparty.metal.simulate_metal`: the engine for imaging-scale work, on the Apple GPU. Float32.
+- `engine="core"` (the default): the reference. Plain PyTorch on any device, float32 or float64,
+  differentiable by autograd. Every new effect lands here first.
+- `engine="metal"` (`blochparty.metal.simulate_metal`): the engine for imaging-scale work, on the Apple GPU. Float32.
   Runs everything the core runs, free exchanging pools (CEST, up to five) included, except free
   pools together with the generalized Bloch bound pool. For CEST / MT saturation that combination is
   not needed: the rate model with `BoundPool(cutoff=None)` (the generalized model's own lineshape,
   no near-resonance cut) equals the generalized model to 5e-5 on 50 ms pulses and runs on the GPU
   (ROADMAP M1c). Differentiable through a hand-written adjoint on the GPU (sequence, phantom, coils,
   `m_init`, rate-model bound pool, scanner field model; not moving spins or free pools).
-- `blochparty.cuda.simulate_cuda`: the Metal engine on an NVIDIA GPU, with the same arguments,
+- `engine="cuda"` (`blochparty.cuda.simulate_cuda`): the Metal engine on an NVIDIA GPU, with the same arguments,
   results, adjoint and limits (the same device code and driver; kernels compiled at run time by
   NVRTC). An RTX 4090 runs the 3D 64^3 GRE benchmark in 0.5 s, against 2.4 s for Metal on an M4.
-- `bp.simulate_chunked`: the core with a backward pass that holds one chunk of spins at a time,
+- `engine="gpu"`: CUDA where an NVIDIA GPU is, else Metal. Scripts use this, so they run on either machine.
+- `engine="chunked"` (`bp.simulate_chunked`): the core with a backward pass that holds one chunk of spins at a time,
   for gradients on large phantoms (no exchange, diffusion, motion, scanner model, `FieldMaps` or
   `m_init`).
 
@@ -62,9 +63,7 @@ The fused C++ CPU kernel (`simulate_fused`, float32 / float64 with a hand-writte
 retired on 2026-10-09 once the Metal adjoint passed its checks; it is in the git history.
 
 ```python
-from blochparty.metal import simulate_metal
-
-kspace = simulate_metal(phantom, seq, coils).signal   # (coils, n_adc) complex64, back on the CPU
+kspace = bp.simulate(phantom, seq, coils, engine="gpu").signal   # (coils, n_adc) complex64, back on the CPU
 ```
 
 ## Realistic phantoms
@@ -125,14 +124,12 @@ in three contrasts ([figure](validation/anatomy/sampled_heads.png)).
 ```python
 from blochparty.io import write_dataset
 
-from blochparty.metal import simulate_metal
-
 head = bp.sample_head(7, root="validation/anatomy/data", voxel=(1e-3,) * 3)
 k = round(-head.anatomy.origin[2] / head.anatomy.voxel[0])  # the z = 0 plane, where the slice is
 ph = head.to_phantom(fov_region=(slice(k - 4, k + 5), slice(None), slice(None)))  # B0 from the whole head
 seq = bp.gre_2d(64, ramps=True, spoiling="rf", slice_thickness=5e-3)
 coils = bp.birdcage_sensitivities(ph.pos, 8)
-write_dataset("head7.h5", simulate_metal(ph, seq, coils), seq, phantom=head, seed=7, engine="metal",
+write_dataset("head7.h5", bp.simulate(ph, seq, coils, engine="gpu"), seq, phantom=head, seed=7, engine="gpu",
               coils={"model": "birdcage", "n": 8})
 ```
 
@@ -277,15 +274,13 @@ loss(kspace).backward()            # same gradients as with simulate (to ~1e-12 
   so for long sequences that floor, not the chunk, sets the minimum memory.
 - First-order gradients only (no double backward).
 
-## Fast gradients: the Metal adjoint
+## Fast gradients: the GPU adjoint
 
-`blochparty.metal.simulate_metal` is differentiable through a hand-written adjoint on the GPU
-instead of autograd (float32):
+The GPU engines (`engine="gpu"`, `"metal"`, `"cuda"`) are differentiable through a hand-written adjoint
+on the GPU instead of autograd (float32):
 
 ```python
-from blochparty.metal import simulate_metal
-
-kspace = simulate_metal(phantom, seq, coils).signal   # compiles the shader on first use
+kspace = bp.simulate(phantom, seq, coils, engine="gpu").signal   # compiles the kernels on first use
 loss(kspace).backward()            # the core's gradients to ~1e-6 .. 1e-4 (float32)
 ```
 
@@ -333,7 +328,7 @@ report["violations"]  # ["slew x exceeded at 128 boundaries (128 ranges); worst 
 - `design_report`: JSON-serialisable timing, constraints with margins, PSF and image metrics.
 
 Optimizations with independently known answers (each is also a test; they run through the core
-in float64, DESPOT1 also through the Metal adjoint with `--metal`):
+in float64, DESPOT1 also through the GPU adjoint with `--gpu`):
 
 ```bash
 uv run python examples/design_despot1.py     # VFA T1 mapping: CRB-optimal flips give 70.71 % of Ernst (Deoni 2003)
