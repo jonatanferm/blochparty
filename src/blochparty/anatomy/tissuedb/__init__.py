@@ -18,7 +18,8 @@ from dataclasses import dataclass, fields, replace
 from functools import lru_cache
 from pathlib import Path
 
-from ..anatomy import DEFAULT_TISSUES, Distribution, TissueProperties
+from ..grid import Distribution, TissueProperties
+from ..tables import DEFAULT_TISSUES
 
 ROOT = Path(__file__).resolve().parent
 

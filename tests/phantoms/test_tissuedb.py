@@ -1,4 +1,4 @@
-"""The tissue-property database (src/blochparty/tissuedb): schema, plausibility checks that catch
+"""The tissue-property database (src/blochparty/anatomy/tissuedb): schema, plausibility checks that catch
 transcription and unit errors, the round trip to the values anatomy.DEFAULT_TISSUES uses, and a
 candidate table that assembles a phantom. The independent checks of a literature table are these
 cross-checks; the values themselves keep their source and location per row."""
@@ -157,7 +157,7 @@ def test_human_in_vivo_sources_agree_within_a_factor_of_two():
     assert compared > 20
 
 
-# Rows that reproduce what anatomy.py's tables use: (class, field, TissueProperties field) -> query.
+# Rows that reproduce what anatomy/tables.py's tables use: (class, field, TissueProperties field) -> query.
 ROUND_TRIP = {
     ("wm", 1.5, "t1"): ("brain.wm", "t1", "stanisz2005"), ("wm", 1.5, "t2"): ("brain.wm", "t2", "stanisz2005"),
     ("wm", 3., "t1"): ("brain.wm", "t1", "stanisz2005"), ("wm", 3., "t2"): ("brain.wm", "t2", "stanisz2005"),
@@ -205,7 +205,7 @@ def test_round_trip_to_default_tissues(key):
         rows = [m for m in rows if m.region not in ("peripheral (subarachnoid) CSF",)]
     assert len(rows) == 1, rows
     used = getattr(DEFAULT_TISSUES[strength][cls], attr)
-    rel = 5e-4 if source == "itis_v4_2" else 1e-12  # anatomy.py rounds the IT'IS means to 4 digits
+    rel = 5e-4 if source == "itis_v4_2" else 1e-12  # anatomy/tables.py rounds the IT'IS means to 4 digits
     assert rows[0].value == pytest.approx(used.mean, rel=rel, abs=1e-15)
     if used.sd is not None:
         assert rows[0].sd == pytest.approx(used.sd, rel=max(rel, 2e-3 if source == "itis_v4_2" else 0))

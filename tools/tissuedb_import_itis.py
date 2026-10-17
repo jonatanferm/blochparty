@@ -1,4 +1,4 @@
-"""Import the IT'IS Foundation tissue database into src/blochparty/tissuedb/measurements.csv.
+"""Import the IT'IS Foundation tissue database into src/blochparty/anatomy/tissuedb/measurements.csv.
 
 Two IT'IS tables, served as JSON cell dictionaries ({"B16": "Brain (Grey Matter)", "BZ16": 1260.8, ...}):
 
@@ -15,7 +15,7 @@ Many IT'IS tissues are proxies for others (Eye Retina = Brain GM, Eye Iris = Mus
 value tuples are copies. A tuple that appears under more than one IT'IS name is kept only for the
 name listed in OWNERS (whose own data it is) and dropped everywhere else; a duplicated tuple without
 an owner is dropped for all. Every IT'IS row and block is logged, taken or skipped with the reason,
-in src/blochparty/tissuedb/itis_import_log.csv, with the SHA-256 of the two downloads.
+in src/blochparty/anatomy/tissuedb/itis_import_log.csv, with the SHA-256 of the two downloads.
 
     uv run python tools/tissuedb_import_itis.py            # download and rewrite the IT'IS rows
     uv run python tools/tissuedb_import_itis.py --relax a.json --water b.json   # from saved files
@@ -34,7 +34,7 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB = ROOT / "src" / "blochparty" / "tissuedb"
+DB = ROOT / "src" / "blochparty" / "anatomy" / "tissuedb"
 BASE = "https://itis.swiss/_resources/vendor/oetiker/spreadbutler/fcgi/sb.fcgi/fetch?file="
 RELAX_FILE, WATER_FILE = "materialparameterdatabasecurrent20240604.xls", "watercontent20250821.xls"
 RELAX_KEY, WATER_KEY = "itis_v4_2", "itis_water_v5_0"
