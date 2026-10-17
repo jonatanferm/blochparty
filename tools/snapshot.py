@@ -49,6 +49,24 @@ def snapshot() -> dict:
     maps = bp.shepp_logan_maps(32)
     ph = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], 0.22)
     out["phantom"] = (ph.pos, ph.pd, ph.t1, ph.t2, ph.db0)
+    out.update(matrix_cases())
+    return out
+
+
+def matrix_cases() -> dict:
+    """The core on every case of the engine matrix (tests/engines/test_engines.py: maps, bound and free pools,
+    diffusion, motion, the scanner field model, m_init, ...): its outputs and the gradients of the matrix test's
+    loss with respect to the case's leaves."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests" / "engines"))
+    import test_engines as te
+
+    out = {}
+    for name in te.CASES:
+        case = te.build(name, grad=True)
+        r = bp.simulate(case.phantom, case.seq, **case.kw)
+        grads = torch.autograd.grad(te.loss(r), case.leaves, allow_unused=True)
+        values = [v.detach() for v in te.outputs(r).values()] + [g for g in grads if g is not None]
+        out[f"matrix: {name}"] = tuple(values)
     return out
 
 
