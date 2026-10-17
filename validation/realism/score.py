@@ -29,6 +29,7 @@ import torch
 from torch import nn
 
 from blochparty.design import auc, bootstrap  # noqa: F401 (gap.py uses them as score.auc, score.bootstrap)
+from blochparty.generate.sample import unit_floor  # noqa: F401 (moved there; gap.py uses score.unit_floor)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
@@ -84,16 +85,6 @@ def noise_covariances(cache: Path, root: Path = R.FASTMRI) -> dict:
         out[R.manifest_key(f)] = cov
     path.write_text(json.dumps({k: {"re": v.real.tolist(), "im": v.imag.tolist()} for k, v in out.items()}))
     return out
-
-
-def unit_floor(coils, n=128, rng=None, chol=None):
-    """Background median of the RSS image of unit-sigma complex noise in ``coils`` channels, coloured by ``chol`` (the
-    Cholesky factor of a coil covariance scaled to mean variance 1) if given."""
-    rng = rng or np.random.default_rng(0)
-    k = (rng.standard_normal((coils, n, n)) + 1j * rng.standard_normal((coils, n, n)))
-    if chol is not None:
-        k = np.tensordot(chol, k, 1)
-    return float(np.median(R.recon(k)))
 
 
 def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES, covariances=None):

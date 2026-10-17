@@ -41,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import gc
-import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
@@ -50,312 +49,20 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from scipy import ndimage
 
 import blochparty as bp
 import realism as R  # noqa: E402
 from blochparty.anatomy import Distribution
-from blochparty.sequences.builder import System
 
 ROOT = Path(__file__).resolve().parents[2] / "validation" / "anatomy" / "data"
-FOV, THICKNESS, SLICES = 0.22, 5e-3, 16
-ACQUIRED_LINES = 396  # phase-encode lines of the real AXT2 scans (encodedSpace y in all 21 headers)
-# the real AXT2 echo trains (validation/realism/echo_train.py): their k-space energy steps every 19 lines (ky -161,
-# -142, ..., -28, -9.5 | +9.5): 396 lines over 21 echoes in linear order, ky = 0 in echo 11 = TE / the header's echo
-# spacing (113 / 10.26 ms and 105 / 9.56 ms)
-REAL_ETL = 21
-
-
-def real_protocols(manifest: Path) -> list[dict]:
-    m = json.loads(manifest.read_text())
-    return [{"file": k, "TR": v["TR_ms"] * 1e-3, "TE": v["TE_ms"] * 1e-3, "coils": v["kspace_shape"][1],
-             "refocus_deg": v.get("flip_deg") or 180.,
-             "esp": None if v.get("echo_spacing_ms") is None else v["echo_spacing_ms"] * 1e-3}
-            for k, v in sorted(m.items()) if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2]
-
-
-PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
-MONRO_BELOW_BODIES = 10e-3  # the foramen of Monro / basal-ganglia level below the ventricle bodies
-
-
-def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES, prior_z: float | None = None) -> np.ndarray:
-    """z [m] of slices 0..15. "landmarks": slice 0 at the largest lateral-ventricle cross-section, the
-    brain top at slice 13.5. "protocol": slice 0 ``MONRO_BELOW_BODIES`` below that (the real slice 0
-    shows frontal horns, caudate heads, thalami and the third ventricle), then ``PROTOCOL_SPACING``
-    apart whatever the head's size; fitted to the real stacks' head-area profile (area / slice-0 area
-    1.0 to slice 7, 0.53 at 12, 0.23 at 15; the fit alone trades offset against spacing)."""
-    csf = anatomy.fractions["csf"].numpy()
-    brain = sum(v for k, v in anatomy.fractions.items() if k in ("wm", "gm", *bp.anatomy.DEEP_GREY)).numpy()
-    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
-    inside = ndimage.binary_erosion((brain + csf) > 0.5, iterations=round(15e-3 / anatomy.voxel[1]))
-    deep = (csf * inside).reshape(len(z), -1).sum(1)
-    if prior_z is not None:  # within 12 mm of where MNI's ventricle bodies landed (segmented heads such as IXI's
-        # keep wide fissure and sulcal CSF inside the eroded brain near the vertex: it took one head's landmark 25 mm up)
-        deep = np.where(np.abs(z - prior_z) <= 12e-3, deep, 0)
-    top = z[np.nonzero(brain.reshape(len(z), -1).sum(1) * np.prod(anatomy.voxel[1:]) > 50e-6)[0].max()]
-    z0 = z[np.argmax(deep)]
-    if mode == "protocol":
-        return z0 - offset + np.arange(SLICES) * PROTOCOL_SPACING
-    return z0 + np.arange(SLICES) * (top - z0) / 13.5
-
-
-def flow_void(head) -> None:
-    """BrainWeb's vessel class holds the dural sinuses and large vessels; their blood flows at
-    ~10-30 cm/s, and through a 5 mm slice a TSE echo at 113 ms keeps < 3 % of static blood's signal
-    from 10 cm/s up (the engine's moving spins, tests/physics/test_motion.py::test_tse_flow_void). Their
-    spins are left out (PD 0 after the draw, so no other draw moves); susceptibility stays."""
-    p = head.tissues["vessels"]
-    head.tissues["vessels"] = replace(p, pd=Distribution(0., None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True))
-
-
-def drop_detached(head) -> None:
-    """Tissue not attached to the head becomes air: BrainWeb subject 38 has a 0.4 mL blob of "skin"
-    20 mm in front of the forehead (a marker in its source scan), subject 42 hundreds of faint
-    "skin" pieces (fractions 0.05-0.5) around the neck and head, and several have voxel specks; in
-    the simulated slices they showed as dashes and lines outside the head. Everything more than 3
-    voxels from the head mask's largest component (tissue > 0.5) is dropped, whatever its fraction,
-    and so are thin protrusions on it (more than 2 voxels outside its opening by ~3 mm)."""
-    an = head.anatomy
-    fr = an.fractions
-    total = sum(v for k, v in fr.items() if k != "background").numpy()
-    lab, n = ndimage.label(total > .5)
-    if n == 0:
-        return
-    sizes = np.bincount(lab.ravel())
-    sizes[0] = 0
-    head_mask = lab == np.argmax(sizes)
-    # and thin protrusions on its surface (subject 18 has a marker blob attached to the right side):
-    # what an opening by ~3 mm removes, beyond 2 voxels of the opened head
-    opened = ndimage.binary_opening(head_mask, structure=np.ones((3, 3, 3)), iterations=2)
-    keep = ndimage.binary_dilation(opened, iterations=2) & ndimage.binary_dilation(head_mask, iterations=3)
-    drop = torch.from_numpy(~keep & (total > 0))
-    if not bool(drop.any()):
-        return
-    moved = sum(torch.where(drop, v, torch.zeros_like(v)) for k, v in fr.items() if k != "background")
-    out = {k: torch.where(drop, torch.zeros_like(v), v) for k, v in fr.items() if k != "background"}
-    if "background" in fr:
-        out["background"] = torch.where(drop, (fr["background"] + moved).clamp(max=1), fr["background"])
-    head.anatomy = replace(an, fractions=out)
-
-
-def trace_sulci(head, smooth=0.75e-3, ratio=0.8, curvature=0.0006, min_voxels=30, width=1e-3, fill=0.7) -> float:
-    """Experimental: open BrainWeb's closed sulci where its own faint CSF trace runs (its fuzzy CSF is
-    0.02-0.15 along their midlines, LESSONS). Hessian of the CSF fraction smoothed by ``smooth`` [m]
-    inside grey matter; sheet-like where the most negative eigenvalue (< -``curvature``) dominates the
-    other two by 1 / ``ratio``; thinned by non-maximum suppression along its eigenvector; connected
-    sheets of >= ``min_voxels``; widened to ``width`` [m] and filled to ``fill`` CSF from grey matter.
-    Returns the CSF added [m^3]."""
-    an = head.anatomy
-    fr = an.fractions
-    h = float(np.mean(an.voxel))
-    csf, gm = fr["csf"].numpy().astype(np.float32), fr["gm"].numpy().astype(np.float32)
-    cs = ndimage.gaussian_filter(csf, smooth / h)
-    g = np.gradient(cs)
-    region = (gm > .5) & ~ndimage.binary_dilation(csf > .4, iterations=1)
-    idx = np.nonzero(region)
-    H = np.empty((len(idx[0]), 3, 3), np.float32)
-    for i in range(3):
-        gi = np.gradient(g[i])
-        for j in range(i, 3):
-            H[:, i, j] = H[:, j, i] = gi[j][idx]
-    del g, gi
-    ev, evec = np.linalg.eigh(H)
-    del H
-    l1 = ev[:, 0]
-    sheet = (l1 < -curvature) & (np.abs(ev[:, 1]) < ratio * np.abs(l1)) & (np.abs(ev[:, 2]) < ratio * np.abs(l1))
-    z, y, x = (a[sheet] for a in idx)
-    nz, ny, nx = (evec[sheet, k, 0] for k in range(3))
-    c0 = cs[z, y, x]
-    up = ndimage.map_coordinates(cs, [z + nz, y + ny, x + nx], order=1)
-    down = ndimage.map_coordinates(cs, [z - nz, y - ny, x - nx], order=1)
-    keep = (c0 >= up) & (c0 >= down)
-    thin = np.zeros(cs.shape, bool)
-    thin[z[keep], y[keep], x[keep]] = True
-    lab, _ = ndimage.label(thin, structure=np.ones((3, 3, 3)))
-    sizes = np.bincount(lab.ravel())
-    sizes[0] = 0
-    thin = np.isin(lab, np.nonzero(sizes >= min_voxels)[0])
-    band = ndimage.distance_transform_edt(~thin, sampling=an.voxel) <= width / 2
-    move = torch.from_numpy(np.minimum(gm, fill) * band).to(fr["gm"].dtype)
-    head.anatomy = replace(an, fractions=fr | {"gm": fr["gm"] - move, "csf": fr["csf"] + move})
-    return float(move.sum()) * float(np.prod(an.voxel))
-
-
-def thin_convexity_csf(head, thickness: float) -> None:
-    """A calibration to the fastMRI scans, not measured anatomy: CSF within ``thickness`` [m] of the
-    calvarium (skull and marrow) and outside the brain's hull (closed by 3 mm: the subarachnoid layer, not the
-    sulci) becomes inner table. Real profiles aligned at the bone (frontal: 0.16 at the bone, then
-    0.28-0.44) show a thinner, dimmer layer under the calvarium than BrainWeb's (0.29, then up to
-    0.64), and 0.57 mm reconstructions a thin line at most; 1-2 mm brackets them."""
-    an = head.anatomy
-    fr = an.fractions
-    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *bp.anatomy.DEEP_GREY)).numpy() > .5
-    hull = ndimage.binary_fill_holes(ndimage.binary_closing(brain, iterations=round(3e-3 / an.voxel[1])))
-    bone = (fr["skull"] + fr["marrow"]).numpy() > .5  # the calvarium, not the falx and tentorium
-    d = ndimage.distance_transform_edt(~bone, sampling=an.voxel)
-    w = torch.from_numpy(np.clip((thickness + an.voxel[1] / 2 - d) / an.voxel[1], 0, 1) * ~hull).to(fr["csf"].dtype)
-    move = fr["csf"] * w
-    head.anatomy = replace(an, fractions=fr | {"csf": fr["csf"] - move, "skull": fr["skull"] + move})
-
-
-def centre(anatomy, zs) -> tuple[float, float]:
-    """(x, y) [m] of the head's bounding-box centre over the slice stack's z range: where an
-    operator puts the field of view on the localiser (and the head sits in the coil).
-    ``anatomy.origin`` is (x, y, z), ``voxel`` (z, y, x)."""
-    head = (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
-    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
-    rows = head[(z >= zs[0] - 2.5e-3) & (z <= zs[-1] + 2.5e-3)]
-    ys, xs = np.nonzero(rows.any((0, 2)))[0], np.nonzero(rows.any((0, 1)))[0]
-    return (anatomy.origin[0] + (xs[0] + xs[-1]) / 2 * anatomy.voxel[2],
-            anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1])
-
-
-def coil_offset(anatomy, zs, cy: float, radius: float, gap: float) -> float:
-    """Anterior offset [m] of the receive ring's centre from the field-of-view centre ``cy`` when the head
-    rests on the coil's posterior side: the ring's posterior-most point ``gap`` behind the head's most
-    posterior point (from 30 mm below slice 0 up: the occiput, not the neck). The real images are
-    brighter at the back than at the front (white matter at the front 0.89 of the back's, the outer
-    ring 0.71: validation/realism/orientation.py's display), as a head lying on the posterior elements
-    gives; a ring centred on the head gives 1.00 and 0.82."""
-    head = (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
-    z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
-    rows = head[z >= zs[0] - 30e-3]
-    back = anatomy.origin[1] + np.nonzero(rows.any((0, 2)))[0][0] * anatomy.voxel[1]
-    return back - cy - gap + radius
-
-
-B1_MAP = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "em" / "body.npz"
-_B1 = {}
-
-
-def normalised_sensitivities(sens: torch.Tensor, pos: torch.Tensor, smooth_mm: float, bin_mm: float = 4.0) -> torch.Tensor:
-    """The receive array as the scanner shows it after its intensity normalisation (Siemens "Prescan Normalize" and
-    its kin divide the image by a smooth estimate of the array's sensitivity): ``sens`` (N, C) divided by the
-    root-sum-of-squares sensitivity smoothed over ``smooth_mm`` (Gaussian sigma) in the slice plane. The estimate is
-    built from the spins themselves (binned at ``bin_mm``, normalised convolution over the head, bilinear back), so
-    where the sensitivity rises faster than the estimate can follow (the last centimetre or two under the elements)
-    the normalised image keeps the excess, as the real scans do (journal 2026-10-13: the outer 2 cm 1.3-2.7 x brighter
-    than a flat receive gives while the interior matches one). ``pos`` in the turned frame (x anterior-posterior, y
-    left-right)."""
-    from scipy import ndimage
-    rss = sens.abs().pow(2).sum(1).sqrt().cpu().numpy()
-    xy = pos[:, :2].cpu().numpy() / (bin_mm * 1e-3)
-    lo = np.floor(xy.min(0)) - 2
-    ij = np.floor(xy - lo).astype(int)
-    shape = tuple(ij.max(0) + 3)
-    num = np.zeros(shape); den = np.zeros(shape)
-    np.add.at(num, (ij[:, 0], ij[:, 1]), rss); np.add.at(den, (ij[:, 0], ij[:, 1]), 1.0)
-    sigma = smooth_mm / bin_mm
-    smooth = ndimage.gaussian_filter(num, sigma) / np.maximum(ndimage.gaussian_filter(den, sigma), 1e-9)
-    est = ndimage.map_coordinates(smooth, (xy - lo).T, order=1, mode="nearest")
-    return sens / torch.as_tensor(est, dtype=sens.real.dtype, device=sens.device)[:, None]
-
-
-def b1_plus(head, pos: torch.Tensor) -> torch.Tensor:
-    """Relative B1+ at spin positions [m, anatomy frame] of a generated head: the full-wave 3 T body
-    birdcage map of BrainWeb subject 04 (validation/em/run_brainweb.py; mean 1 over its brain, 0.86-1.19
-    p5-p95), sampled where each spin came from before ``sample_head`` resized and turned the head
-    (BrainWeb's heads share MNI space). Ignores the small random deformation and the weaker dielectric
-    effect of smaller heads."""
-    from blochparty import em
-    from blochparty.maps import sample
-
-    if "fm" not in _B1:
-        fm = em.field_maps(transmit=em.read_mariepy_maps(B1_MAP))
-        ref = bp.load_brainweb(4, ROOT, voxel=(5e-3,) * 3, dtype=torch.float64)
-        brain = (ref.fractions["gm"] + ref.fractions["wm"]) > 0.5
-        p = torch.tensor(ref.origin, dtype=torch.float64) + brain.nonzero().double().flip(-1) * torch.tensor(ref.voxel[::-1], dtype=torch.float64)
-        grid = fm.b1[None].double(), torch.tensor(fm.origin, dtype=torch.float64), torch.tensor(fm.spacing, dtype=torch.float64)
-        _B1["fm"], _B1["norm"] = grid, float(sample(*grid, p)[:, 0].mean())
-    pose = head.meta.get("pose")
-    q = pos.double()
-    if pose is not None:  # back to the source head: x -> c + S^-1 R^-1 (x - c), (z, y, x) grid-relative
-        an = head.anatomy
-        o = torch.tensor(an.origin, dtype=torch.float64)  # (x, y, z)
-        c = torch.tensor(pose["centre"][::-1], dtype=torch.float64) + o  # (x, y, z)
-        s = torch.tensor(pose["factors"][::-1], dtype=torch.float64)
-        yaw = math.radians(pose["yaw_deg"])
-        v = q - c
-        v = torch.stack([math.cos(yaw) * v[:, 0] - math.sin(yaw) * v[:, 1], math.sin(yaw) * v[:, 0] + math.cos(yaw) * v[:, 1],
-                         v[:, 2]], -1)
-        tilt = math.radians(pose.get("pitch_deg", 0.))
-        if tilt:  # pitch^-1 in the (y, z) plane, as sample_head's pull-back
-            v = torch.stack([v[:, 0], -math.sin(tilt) * v[:, 2] + math.cos(tilt) * v[:, 1],
-                             math.cos(tilt) * v[:, 2] + math.sin(tilt) * v[:, 1]], -1)
-        q = c + v / s
-    return sample(*_B1["fm"], q)[:, 0] / _B1["norm"]
-
-
-def turn(ph: bp.Phantom) -> bp.Phantom:
-    """(x, y, z) -> (y, -x, z): anterior-posterior becomes the readout axis."""
-    pos = torch.stack([ph.pos[:, 1], -ph.pos[:, 0], ph.pos[:, 2]], -1)
-    ph.pos = pos
-    return ph
-
-
-def to_real_orientation(img: np.ndarray) -> np.ndarray:
-    """Simulated (y', x') image -> fastMRI display: rows posterior to anterior (fastMRI's stored images
-    show the head posterior up: validation/realism/orientation.py), columns from the patient's right
-    (+x) to left (left-right is not established against the real data)."""
-    return img.T
-
-
-def interleaved(count=SLICES) -> list[int]:
-    """Siemens' default interleaved order: slices 1, 3, 5, ... then 2, 4, ... (0-based 0, 2, ..., 1, 3, ...)."""
-    return list(range(0, count, 2)) + list(range(1, count, 2))
-
-
-QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF raster [s], jitter
-    "full": ((2, 2, 2), "categorical", 3, 1e-4, "stratified"),
-    "fast": ((1, 2, 2), "categorical", 3, 1e-4, "stratified"),
-    "legacy": ((2, 2, 2), "per_tissue", 4, 1e-5, "stratified"),
-    # each voxel's composition exact, z a quadrature through the slice profile: no visible grain
-    "real": ((4, 2, 2), "proportional", 3, 1e-4, "inplane"),
-    # 4x4x4 in-plane-jittered: the random positions' grain (Immerkaer sigma in flat brain, of p99) falls as
-    # 1 / sqrt(spins): 0.026 at 4x2x2, 0.017 at 4x3x3, 0.0136 here; real scans 0.014 with their noise
-    "real_fine": ((4, 4, 4), "proportional", 3, 1e-4, "inplane"),
-}
-
-
-def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1,
-             refocus_deg=180., ordering="linear", etl=16, esp=None) -> bp.Sequence:
-    """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
-    the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
-    oversampling (the real scans: 2). ``refocus_deg``: the refocusing flip angle (the headers'
-    ``flipAngle_deg``: 180 in 11 of the 21 3 T scans, 140-179 in the rest). ``ordering``: "linear" (ky = 0 in
-    echo 9 of 16), "linear_full" (the n lines take the echoes they have in the real scans' 396-line linear
-    acquisition, ``ACQUIRED_LINES``: echoes 6-11, 25 shots) or "reverse_centric" (ky = 0 in echo 16; echo
-    spacing te / 16). ``etl`` / ``esp`` (default 16 / None: te / 9, te / 16 reverse-centric): the echo train, e.g.
-    the real scans' (``REAL_ETL`` at the header's echo spacing: 19 shots of "linear_full")."""
-    multi = {} if slice_order is None else dict(bound_only_beyond=1.5 * spacing)
-    if readout_os != 1:
-        multi["readout_oversampling"] = readout_os
-    if esp is None:
-        esp = round(te / (16 if ordering == "reverse_centric" else 9), 5)
-    full = dict(acquired_lines=ACQUIRED_LINES) if ordering == "linear_full" else {}
-    return bp.tse_2d(n, FOV, etl=etl, esp=esp, ordering="linear" if full else ordering, tr=tr, n_dummy=1, slice_thickness=THICKNESS,
-                     refocus_flip_deg=refocus_deg, spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
-                     **multi, **full)
-
-
-def kspace_on_fov(signal, seq) -> np.ndarray:
-    """(C, n, n) k-space on the field of view: an oversampled readout is cropped to the central n
-    pixels after the inverse FFT, as the real reconstruction crops the scanner's 2x readout."""
-    k = bp.cartesian_kspace(signal, seq).numpy()
-    n, m = k.shape[-2], k.shape[-1]
-    if m != n:  # centred, orthonormal transforms as realism.centred_ifft / centred_fft
-        img = np.fft.fftshift(np.fft.ifft(np.fft.ifftshift(k, axes=-1), axis=-1, norm="ortho"), axes=-1)
-        img = img[..., (m - n) // 2:(m - n) // 2 + n]
-        k = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(img, axes=-1), axis=-1, norm="ortho"), axes=-1)
-    return k
-
-
-def simulate(ph, seq, coils):
-    if bp.engines.available("gpu"):
-        out = bp.simulate(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64), engine="gpu",
-                          readouts="nufft", pulses="reuse")  # PERFORMANCE 2.1 and 2.3 (exact)
-        return out.signal.to(torch.complex128), bp.engines.resolve("gpu")
-    return bp.simulate(ph, seq, coils).signal, "core"
+# the realism preset's building blocks live in blochparty.generate (imported here for this script's command line
+# and for the scripts that use them through this module)
+from blochparty.coils import coil_offset, normalised_sensitivities  # noqa: E402,F401
+from blochparty.generate.heads import (MONRO_BELOW_BODIES, PROTOCOL_SPACING, b1_plus, centre, drop_detached,  # noqa: E402,F401
+                                       flow_void, stack, thin_convexity_csf, trace_sulci, turn)
+from blochparty.generate.protocols import (ACQUIRED_LINES, FOV, QUALITY, REAL_ETL, SLICES, THICKNESS,  # noqa: E402,F401
+                                           interleaved, real_protocols, sequence)
+from blochparty.generate.sample import kspace_on_fov, simulate, to_real_orientation  # noqa: E402,F401
 
 
 def main():
@@ -582,7 +289,7 @@ def main():
             ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
                                  mt=args.mt)
             if args.b1 == "birdcage":
-                ph.b1 = b1_plus(head, ph.pos).to(ph.pos.dtype)
+                ph.b1 = b1_plus(head, ph.pos, ROOT).to(ph.pos.dtype)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP

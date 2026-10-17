@@ -14,35 +14,15 @@ from pathlib import Path
 
 import numpy as np
 
+from blochparty.generate.sample import centred_fft, centred_ifft, crop_centre  # noqa: E402,F401 (moved there)
+from blochparty.generate.sample import rss_image as recon  # noqa: E402
+
 FASTMRI = Path.home() / "data" / "fastmri_c"  # the compact real set (fetch_fastmri --compact); fastmri_brain until 2026-10-14
-
-
-def centred_fft(x, axes):
-    return np.fft.fftshift(np.fft.fftn(np.fft.ifftshift(x, axes=axes), axes=axes, norm="ortho"), axes=axes)
-
-
-def centred_ifft(k, axes):
-    return np.fft.fftshift(np.fft.ifftn(np.fft.ifftshift(k, axes=axes), axes=axes, norm="ortho"), axes=axes)
-
-
-def crop_centre(x, shape, axes=(-2, -1)):
-    sl = [slice(None)] * x.ndim
-    for ax, n in zip(axes, shape):
-        start = (x.shape[ax] - n) // 2
-        sl[ax] = slice(start, start + n)
-    return x[tuple(sl)]
 
 
 def lowres_kspace(coil_images, n):
     """(C, N, N) coil images on the final field of view -> (C, n, n) central k-space."""
     return crop_centre(centred_fft(coil_images, (-2, -1)), (n, n))
-
-
-def recon(kspace, n=None):
-    """(C, n, n) centred k-space (k = 0 at index n/2) -> (n, n) RSS magnitude image."""
-    if n is not None and kspace.shape[-1] != n:
-        kspace = crop_centre(kspace, (n, n))
-    return np.sqrt((np.abs(centred_ifft(kspace, (-2, -1))) ** 2).sum(0))
 
 
 def normalise(img):
