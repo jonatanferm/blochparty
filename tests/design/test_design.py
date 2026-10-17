@@ -21,9 +21,8 @@ from blochparty.phantom import LABELS
 from blochparty.reference import spoiled_gre_signal
 from blochparty.sequences.builder import System
 
-import design_contrast_tr as contrast_tr
-import design_despot1 as despot1
-import design_tse_flips as tse
+from blochparty.design.problems import contrast_tr, despot1
+from blochparty.design.problems import tse_flips as tse
 from helpers import rel
 
 G = d.GAMMA_BAR

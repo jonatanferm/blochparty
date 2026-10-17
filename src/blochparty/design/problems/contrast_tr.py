@@ -11,6 +11,8 @@ adjoint the flip is found but the constraint only to ~1e-4) and is checked again
 brute-force grid over the closed-form steady state.
 
     uv run python examples/design_contrast_tr.py
+
+A worked design problem: contrast per scan time (``examples/design_contrast_tr.py`` runs it).
 """
 
 import math
@@ -91,21 +93,3 @@ def grid_optimum(budget):
     fine = angles[j] + torch.arange(-100, 101, dtype=torch.float64) * 1e-4
     k = int(c(trs[i], fine).argmax())
     return float(fine[k]), float(trs[i]), float(c(trs[i], fine[k]))
-
-
-def main():
-    for tr_budget in (10e-3, 25e-3):
-        budget = (N_DUMMY + N) * tr_budget
-        res = optimize(budget)
-        print(f"budget {budget:.3f} s (TR <= {tr_budget * 1e3:g} ms):")
-        print(f"  gradient descent (core):  flip {res['flip']:.3f} deg, TR {res['tr'] * 1e3:.4f} ms, "
-              f"scan time {res['duration']:.4f} s, contrast {res['contrast']:.5f} "
-              f"({res['n_evals']} evaluations, {res['seconds']:.1f} s)")
-        flip, tr, c = grid_optimum(budget)
-        print(f"  closed-form grid:         flip {flip:.3f} deg, TR {tr * 1e3:.4f} ms, contrast {c:.5f}")
-        assert abs(res["flip"] - flip) < 0.01 and abs(res["tr"] - tr) < 1e-6
-        assert res["duration"] <= budget * (1 + 1e-6)
-
-
-if __name__ == "__main__":
-    main()
