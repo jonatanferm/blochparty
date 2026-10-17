@@ -77,3 +77,4 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-17 [The CUDA port (ROADMAP M8): `blochparty.cuda.simulate_cuda`](journal/2026-10-17-02-the-cuda-port-roadmap-m8-blochparty-cuda.md)
 - 2026-10-17 [The refactoring plan, revised for the current tree](journal/2026-10-17-03-the-refactoring-plan-revised-for-the-current.md)
 - 2026-10-17 [Refactor: the journal and the lessons split (plan phase 9, documents)](journal/2026-10-17-04-refactor-the-journal-and-lessons-split.md)
+- 2026-10-17 [Refactor: tests in area folders, shared cases, one GPU fixture, the tautology audit (plan phase 2)](journal/2026-10-17-05-refactor-tests-in-area-folders.md)
