@@ -25,7 +25,6 @@ Everything is plain tensor arithmetic, so autograd reaches the sequence
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 from typing import NamedTuple
 
 import numpy as np
@@ -33,15 +32,16 @@ import torch
 from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
-from .exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
-from .fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, spin_fields,
+from ..exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
+from ..fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, spin_fields,
                      transverse_coefficients)
-from .maps import FieldMaps, sample
-from .motion import positions
-from .restriction import n_sub, start_offsets, tau_max, walk_segment
-from .rng import normals
-from .phantom import Phantom
-from .sequence import Sequence
+from ..maps import FieldMaps, sample
+from ..motion import positions
+from ..restriction import n_sub, start_offsets, tau_max, walk_segment
+from ..rng import normals
+from ..phantom import Phantom
+from ..result import SimResult
+from ..sequence import Sequence
 
 TWO_PI = 2.0 * math.pi
 
@@ -65,14 +65,6 @@ class _Spins(NamedTuple):
     # moving spins under the field model: (nonlinearity or None, f0, z_asymmetry); positions are then true
     # positions, mapped to encoding positions and concomitant coefficients per segment (_moving_fields)
     field: tuple | None = None
-
-
-@dataclass
-class SimResult:
-    signal: Tensor  # (C, n_adc) complex, in ADC order
-    m: Tensor  # (N, 3) magnetization after the last segment
-    m_bound: Tensor | None = None  # (N,) bound-pool Mz after the last segment (with ``Phantom.bound``)
-    m_pools: Tensor | None = None  # (N, P, 3) free exchanging pools after the last segment (``Phantom.pools``)
 
 
 def _relax(mx, my, mz, dt, spins: _Spins):

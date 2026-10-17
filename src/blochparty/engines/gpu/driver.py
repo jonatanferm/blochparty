@@ -13,7 +13,7 @@ import torch
 from torch import Tensor
 
 from ... import exchange
-from ...bloch import SimResult
+from ...result import SimResult
 from ...fields import spin_fields
 from ...phantom import Phantom
 from ...sequence import Sequence

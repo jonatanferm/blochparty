@@ -22,9 +22,10 @@ import torch
 from torch import Tensor
 from torch.autograd.function import once_differentiable
 
-from .bloch import SimResult, simulate
-from .phantom import Phantom
-from .sequence import Sequence
+from ..result import SimResult
+from .core import simulate
+from ..phantom import Phantom
+from ..sequence import Sequence
 
 
 class _Static(NamedTuple):  # everything that is not a differentiable tensor

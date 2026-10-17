@@ -23,7 +23,7 @@ from importlib.resources import files
 import torch
 from torch import Tensor
 
-from ...bloch import SimResult
+from ...result import SimResult
 from ...phantom import Phantom
 from ...sequence import Sequence
 from .adjoint import _simulate_grad

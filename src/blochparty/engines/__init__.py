@@ -1,6 +1,6 @@
 """How a simulation is run: ``simulate(..., engine=)``, which is ``blochparty.simulate``.
 
-Engines: the core (``bloch.py``, the PyTorch reference and the default), the core with a spin-chunked backward
+Engines: the core (``core.py``, the PyTorch reference and the default), the core with a spin-chunked backward
 (``chunked.py``), and the GPU engines (``engines.gpu``: one driver, Metal on Apple GPUs and CUDA on NVIDIA GPUs).
 What each engine supports, and how closely it agrees with the core: ``docs/ENGINES.md``. The core, the chunked
 engine, the shared preparation and the capability table move into this package in phase 6 of
@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from ..bloch import SimResult
-from ..bloch import simulate as _core
-from ..chunked import simulate_chunked as _chunked
+from ..result import SimResult
+from .chunked import simulate_chunked as _chunked
+from .core import simulate as _core
 from ..fields import Scanner
 from ..maps import FieldMaps
 from ..phantom import Phantom

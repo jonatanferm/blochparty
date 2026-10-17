@@ -348,7 +348,7 @@ def magnitude_image(signal: Tensor, seq: Sequence) -> Tensor:
 
 
 def _default_simulate():
-    from .bloch import simulate
+    from .engines.core import simulate
 
     return simulate
 

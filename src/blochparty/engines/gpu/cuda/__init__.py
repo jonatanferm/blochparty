@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import torch
 
-from ....bloch import SimResult
+from ....result import SimResult
 from ....phantom import Phantom
 from ....sequence import Sequence
 from .. import _simulate
