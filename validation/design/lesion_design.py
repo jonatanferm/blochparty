@@ -18,7 +18,9 @@ the image SNR of a reference GRE in the head, see ``snr_unit``):
      through the Metal adjoint (``simulate_metal``), with a replay buffer of recent acquisitions for extra network
      updates.
 The adjoint is a fixed, parameter-free linear map of the raw samples, differentiable in the line positions (``--front
-raw`` feeds the samples to the CNN as they are, which fails: a CNN cannot read a small lesion out of k-space). Reports
+raw`` feeds the samples to the CNN as they are, which fails: a CNN cannot read a small lesion out of k-space). The K
+lines are evenly spaced (``--sampling uniform``, SENSE's case) or drawn from a Gaussian density (``gauss``: incoherent
+aliasing in the zero-filled image), the same set for every arm; arms G and C start from the best of ``--starts``. Reports
 the test AUC per arm (A, B, G over ``--seeds`` seeds, accuracy at the threshold that is best on the training set), the
 scan time and arm C's learned sequence; run at 1.0, 0.2, 0.1 and 0.05 to see where each arm fails.
 """
@@ -75,7 +77,8 @@ class Design(nn.Module):
     """Arm C's parameters: flips in (2, 90) deg by a sigmoid, TE in ``te`` (s), TR = TE + the readout tail + an extra in
     ``tr_extra`` (so every design is feasible), ky in (-nx/2, nx/2) cycles by a tanh, all unconstrained underneath."""
 
-    def __init__(self, lines: int, nx=NX, te=(2e-3, 80e-3), tr_extra=(0.5e-3, 100e-3), init_flip=25., init_te=6e-3, init_tr=15e-3):
+    def __init__(self, lines: int, nx=NX, te=(2e-3, 80e-3), tr_extra=(0.5e-3, 100e-3), init_flip=25., init_te=6e-3, init_tr=15e-3,
+                 ky_init: torch.Tensor | None = None):
         super().__init__()
         self.lines, self.nx, self.te_rng, self.tr_rng = lines, nx, te, tr_extra
         if not (te[0] < init_te < te[1] and tr_extra[0] < init_tr - init_te - T_TAIL < tr_extra[1]):
@@ -84,8 +87,9 @@ class Design(nn.Module):
         self.te_raw = nn.Parameter(torch.tensor(math.log((init_te - te[0]) / (te[1] - init_te))))
         extra = init_tr - init_te - T_TAIL
         self.tr_raw = nn.Parameter(torch.tensor(math.log((extra - tr_extra[0]) / (tr_extra[1] - extra))))
-        start = torch.linspace(-nx / 2 + nx / lines / 2, nx / 2 - nx / lines / 2, lines)  # evenly spread lines
-        self.ky_raw = nn.Parameter(torch.atanh((start / (nx / 2)).clamp(-.999, .999)))
+        if ky_init is None:
+            ky_init = torch.linspace(-nx / 2 + nx / lines / 2, nx / 2 - nx / lines / 2, lines)  # evenly spread lines
+        self.ky_raw = nn.Parameter(torch.atanh((ky_init.float() / (nx / 2)).clamp(-.999, .999)))
 
     def forward(self):
         flips = 2 + 88 * torch.sigmoid(self.flip_raw)
@@ -140,6 +144,22 @@ def uniform_mask(n: int, lines: int, centre: int = 4) -> torch.Tensor:
         cand = torch.nonzero(~keep).squeeze(1)
         pick = torch.linspace(0, len(cand) - 1, rest).round().long()
         keep[cand[pick]] = True
+    return keep
+
+
+def sampled_lines(n: int, lines: int, sampling: str, centre: int = 4, seed: int = 0) -> torch.Tensor:
+    """(n,) bool: the phase-encode lines every arm acquires. ``uniform``: ``uniform_mask`` (evenly spaced, SENSE-style;
+    arms G and C then start from evenly spread continuous positions). ``gauss``: the central ``centre`` lines and the
+    rest drawn without replacement from a Gaussian density of width n/5 over the grid (variable density: a zero-filled
+    image shows incoherent aliasing instead of folded copies of the head), deterministic in ``seed``; arms G and C
+    start from the same lines."""
+    if sampling == "uniform":
+        return uniform_mask(n, lines, centre)
+    keep = uniform_mask(n, centre, centre)
+    k = torch.arange(n, dtype=torch.float32) - n / 2
+    w = torch.exp(-k ** 2 / (2 * (n / 5) ** 2)) * (~keep)
+    g = torch.Generator().manual_seed(seed)
+    keep[torch.multinomial(w, max(lines - centre, 0), replacement=False, generator=g)] = True
     return keep
 
 
@@ -296,6 +316,7 @@ def main():
                          "GRE contrasts first, because a joint gradient from a chance-level network has nothing to follow: from the "
                          "25 deg / 6 ms / 15 ms start alone (a lesion 16 %% darker than white matter, like grey matter) the design did not move")
     ap.add_argument("--min-lesion-px", type=float, default=4.)
+    ap.add_argument("--sampling", default="uniform", choices=("uniform", "gauss"), help="which K lines every arm acquires (sampled_lines)")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arms", default="A,B,G,C")
     args = ap.parse_args()
@@ -307,11 +328,12 @@ def main():
     print(f"slabs: {len(train)} train / {len(test)} test ({dropped} ambiguous left out); positives {sum(y_train)} / {sum(y_test)}", flush=True)
     args.out.mkdir(parents=True, exist_ok=True)
     lines = max(int(round(args.fraction * NX)), 2)
-    mask = uniform_mask(NX, lines)
+    mask = sampled_lines(NX, lines, args.sampling, seed=args.seed)
     cols = torch.nonzero(mask).squeeze(1)
     results = {"n": {"train": len(train), "test": len(test)}, "snr": args.snr, "fraction": args.fraction, "lines": lines, "coils": N_COILS,
-               "front": args.front, "epochs": args.epochs, "seeds": args.seeds, "steps": args.steps}
-    print(f"fraction {args.fraction}: {lines} of {NX} lines; the TSE keeps ky indices {cols.tolist()}; front {args.front}; device {device}", flush=True)
+               "front": args.front, "sampling": args.sampling, "epochs": args.epochs, "seeds": args.seeds, "steps": args.steps}
+    print(f"fraction {args.fraction}: {lines} of {NX} lines, {args.sampling}; the TSE keeps ky indices {cols.tolist()}; front {args.front}; "
+          f"device {device}", flush=True)
 
     def load_ph(rec):
         return torch.load(args.slabs / rec["file"], weights_only=False)["phantom"]
@@ -391,11 +413,12 @@ def main():
         trials = []
         for start in args.starts.split(","):
             flip, te_ms, tr_ms = (float(v) for v in start.split(":"))
-            d = Design(lines, init_flip=flip, init_te=te_ms * 1e-3, init_tr=tr_ms * 1e-3)
+            d = Design(lines, init_flip=flip, init_te=te_ms * 1e-3, init_tr=tr_ms * 1e-3,
+                       ky_init=None if args.sampling == "uniform" else cols.float() - NX / 2)
             with torch.no_grad():
                 flips0, ky0, te0, tr0 = d()
                 gre0 = learnable_gre(flips0, ky0, te0, tr0)
-            k0 = cached(f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}",
+            k0 = cached(f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}" + ("" if args.sampling == "uniform" else f"_{args.sampling}{args.seed}"),
                         lambda ph, seq=gre0: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu())
             r, nets = fit(f"G[{flip:g} deg, TE {te_ms:g}, TR {tr_ms:g} ms]",
                           lambda rec, g, k0=k0, ky0=ky0: front_input(args.front, add_noise(k0[rec["file"]], sigma[rec["file"]], g), ky0), seeds=1)
