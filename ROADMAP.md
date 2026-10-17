@@ -75,8 +75,9 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
 - **Tests run on this Mac.** `uv run pytest` (about 3.5 min with GPU access). Mark anything over
   ~30 s with a marker and keep the default suite under 5 min. GPU tests skip without MPS, so
   check `blochparty.metal.available()` and do not let a skipped test pass for a GPU change.
-- **Record.** `docs/LESSONS.md` for anything that took more than a few minutes to understand.
-  `docs/JOURNAL.md`, dated, after each session: what, why, numbers, dead ends, commit hashes.
+- **Record.** `docs/lessons/<topic>.md` (index `docs/LESSONS.md`) for anything that took more than a few
+  minutes to understand. A journal entry file in `docs/journal/` and its index line in `docs/JOURNAL.md` after each
+  session: what, why, numbers, dead ends, commit hashes.
   Results tables live in the `RESULTS.md` next to the script that produced them; the roadmap
   gets one line and a link.
 - **Scripts never overwrite tracked outputs by default** (figures only with `--figure`).
