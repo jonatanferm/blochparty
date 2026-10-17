@@ -6,7 +6,7 @@ Full suite with Apple GPU access: **449 passed, 4 opt-in crosschecks deselected*
 
 ## Independent synthetic checks
 
-`tests/test_anatomy.py` contains 21 tests including parameterized cases.
+`tests/phantoms/test_anatomy.py` contains 21 tests including parameterized cases.
 
 | Check | Result |
 |---|---|
@@ -143,7 +143,7 @@ database, 2 studies). The 1.5 T CSF T2 is the 3 T value, flagged as an assumptio
 
 ## M4: within-tissue variability
 
-`tests/test_anatomy.py::test_variability_statistics_and_defaults`, 96^3 voxels at 1 mm,
+`tests/phantoms/test_anatomy.py::test_variability_statistics_and_defaults`, 96^3 voxels at 1 mm,
 L = 4 mm: realised mean 1.0006 / 1.0020 / 1.0006, SD 0.966 / 0.954 / 0.995 of the requested
 0.10 / 0.05 / 0.02 (T1 / T2 / PD), correlation at lag L 1.011 / 0.993 / 1.014 x exp(-1/2);
 T1 and PD fields uncorrelated (|r| < 0.05); same texture for another spin seed, another
@@ -151,7 +151,7 @@ texture for another variability seed, crops identical to the full realisation; d
 
 ## M3 alternative: AHEAD v3 loader (`load_ahead`, `validation/anatomy_ahead.py`)
 
-Synthetic RPS files (`tests/test_anatomy_ahead.py`): every voxel's encoded world position
+Synthetic RPS files (`tests/phantoms/test_anatomy_ahead.py`): every voxel's encoded world position
 survives the reorientation exactly; ppm -> SI; mask; PD volume conserved by resampling (1e-12).
 Real templates at 1 mm (2,111,978 brain voxels):
 
@@ -183,7 +183,7 @@ long-TE GRE 8.2 s; 44.2 s in total.
 
 ## T2* from measured R2* without double counting (2026-10-07)
 
-`tests/test_anatomy.py::test_measured_r2star_round_trip_without_double_counting`: a WM voxel
+`tests/phantoms/test_anatomy.py::test_measured_r2star_round_trip_without_double_counting`: a WM voxel
 (table T2* 48.4 ms, R2* 20.66 /s) in a linear field gradient, "acquired" as its T2* was (1 mm,
 8 echoes 5-40 ms, log-linear magnitude fit) with 8192 spins:
 

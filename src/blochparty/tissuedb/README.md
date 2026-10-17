@@ -105,7 +105,7 @@ count as two sources: the pooling cannot see shared subjects.
    abstracts via PubMed efetch, with location "abstract".
 2. Convert to SI, keep the original in `note`; say "secondary" or "derived" when it is.
 3. Add the source to `sources.csv` (DOI without the https://doi.org/ prefix) and any new tissue id to `tissues.csv`.
-4. `uv run pytest tests/test_tissuedb.py`: schema, unit magnitudes, T2 < T1 and T2* <= T2, T1 rising
+4. `uv run pytest tests/phantoms/test_tissuedb.py`: schema, unit magnitudes, T2 < T1 and T2* <= T2, T1 rising
    with field within a source, human in-vivo sources within a factor of two, and the round trip to
    `DEFAULT_TISSUES`.
 

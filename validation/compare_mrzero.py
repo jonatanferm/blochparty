@@ -508,7 +508,7 @@ NOTES = [
     "rotates the other way from blochparty) and multiplies the signal by exp(i(π/2 − ADC phase)); "
     "with `convention=\"mrzero\"` that is the constant −i, fitted above to 1e-5 or better. "
     "blochparty's default (\"physical\") reading conjugates RF and ADC phases so that a frequency "
-    "offset excites the slice at +f/G; `tests/test_pulseq.py` checks that the two readings are exact "
+    "offset excites the slice at +f/G; `tests/sequences/test_pulseq.py` checks that the two readings are exact "
     "mirror images. MRzero ignores ADC frequency offsets, so none are used here.",
     "- **Ordering.** Both return samples in time order; the trajectory column shows MRzero's own "
     "k-space at its samples equals pypulseq's to its float32 precision.",

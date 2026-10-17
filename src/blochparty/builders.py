@@ -372,7 +372,7 @@ def tse_2d(
     raster step, and no 30 kHz ramp to resolve. Against every pulse exact (white
     matter with MT, 16 slices 4.7 mm apart, TR 6.5 s, ETL 16, spins every 0.05 mm over +-3.5 mm):
     all RF on 100 us, the neighbours exact, the rest bound-only: 0.71 % of the signal (0.73 % with
-    slices within 2.5 spacings on 50 us; ``tests/test_multislice.py``), at 1/13-1/27 of the time;
+    slices within 2.5 spacings on 50 us; ``tests/sequences/test_multislice.py``), at 1/13-1/27 of the time;
     the white matter loses 31-39 % against one slice. Such a sequence simulates, but is not a
     scanner sequence (``write_pulseq`` refuses ``bound_only``).
 

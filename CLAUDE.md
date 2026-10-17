@@ -16,7 +16,7 @@ Goal: the most physically realistic simulator, judged against real scanners
   (the readable reference, checked on small cases) and the Metal kernel (forward, and the adjoint
   where calibration or design needs it), which must agree with it. Other engines and the CPU+GPU
   hybrid come later.
-- **`docs/ENGINES.md` is the capability matrix**, checked cell by cell by `tests/test_engines.py`:
+- **`docs/ENGINES.md` is the capability matrix**, checked cell by cell by `tests/engines/test_engines.py`:
   when an engine gains or refuses a feature, change its cell (and add a row and a case for a new
   feature).
 - **Record what you learn in `docs/lessons/<topic>.md`** (index: `docs/LESSONS.md`): anything that took more
@@ -37,6 +37,7 @@ Goal: the most physically realistic simulator, judged against real scanners
 uv sync --extra pulseq --extra mrzero --extra io
 uv run pytest                      # full suite (GPU tests skip without MPS)
 uv run pytest -m "not slow"        # quick subset (< 1 min) while iterating
+uv run pytest tests/engines        # one area (tests/<area>/: engines, physics, sequences, ...)
 uv run pytest -m crosscheck        # opt-in MRzero agreement
 uv run python benchmarks/bench.py [--backend metal] [--grad] [--record]
 uv run python validation/real/fetch_data.py && uv run python validation/real/nist_irse.py

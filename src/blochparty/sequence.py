@@ -167,7 +167,7 @@ def kspace_trajectory(seq: Sequence) -> Tensor:
     last excitation, negated at each refocusing pulse. Pulses are runs of RF segments centred at
     their midpoints; excitations flip less than 90.01 deg about their own frequency
     (``pulseq.flip_angle``), as in pypulseq's ``calculate_kspace``, which it equals on written
-    files (tests/test_pulseq_write.py). NaN before the first excitation."""
+    files (tests/sequences/test_pulseq_write.py). NaN before the first excitation."""
     from .pulseq import flip_angle
 
     dt = seq.dt.detach().cpu().double().numpy()

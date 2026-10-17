@@ -14,10 +14,10 @@ eps_r 52), 5 mm voxels.
 | port resistance vs absorbed power | < 1 % |
 | coaxial-loop noise resistance vs quasi-static w^2 int sigma A^2 | -8 / -6 % at 0.1 T, +6 / +9 % at 1.5 T, +48 / +51 % at 3 T (5 / 2.5 mm) |
 
-The receive phase convention was fixed by Faraday's law (`tests/test_loops.py`), after which
+The receive phase convention was fixed by Faraday's law (`tests/phantoms/test_loops.py`), after which
 mariepy's `conj(plus) / 2` and `loops.receive_sensitivities` agree in the quasi-static limit.
 
-## Import (`blochparty.em`, `tests/test_em.py`)
+## Import (`blochparty.em`, `tests/phantoms/test_em.py`)
 
 - A clockwise field of amplitude 1 (as a mariepy phasor) gives |B1+| = 1 with the rotating-frame
   phase of the demodulated lab field, for three phases; a counterclockwise one gives 0.

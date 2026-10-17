@@ -1,7 +1,7 @@
 # Engines
 
 Which simulator does what. The capability matrix below is checked cell by cell by
-`tests/test_engines.py`, which parses this file: edit a cell and the test checks the new claim.
+`tests/engines/test_engines.py`, which parses this file: edit a cell and the test checks the new claim.
 
 | engine | entry point | device, precision | gradients | role |
 |---|---|---|---|---|
@@ -18,7 +18,7 @@ gradients through free pools and the generalized bound pool, now runs on the cor
 
 ## Capability matrix
 
-`✓`: supported, and in `tests/test_engines.py` the engine agrees with the core on a small case
+`✓`: supported, and in `tests/engines/test_engines.py` the engine agrees with the core on a small case
 (forward: signal and final magnetization; gradients: the core's autograd against a central
 finite difference, the other engines' gradients against the core's autograd). `✗`: raises
 `NotImplementedError`. The core's physics is checked against the independent references in the
@@ -67,7 +67,7 @@ builders (sub-voxel spins, T2′, 6-peak fat, susceptibility B0, anatomy), seque
 
 ## Agreement
 
-Tolerances of `tests/test_engines.py`: max |engine − core| / max |core| per output, the core in
+Tolerances of `tests/engines/test_engines.py`: max |engine − core| / max |core| per output, the core in
 float64 (the bound pool and free pools relative to the water's magnetization: a saturated bound
 pool is tiny, so its own maximum is no scale). Observed: the worst case over the matrix on an M4.
 
@@ -93,7 +93,7 @@ float32, so a spin 5 mm from isocentre is resolved to ~3e-10 m, and a compartmen
 r − centre) to that as well; the per-spin phase carries the rounding, the signal averages it. A
 walk in offsets from the start position would remove most of it.
 
-Long sequences (`tests/test_metal.py`): 1e4 CW RF segments agree to 1e-6 and a CEST train to
+Long sequences (`tests/engines/test_gpu.py`): 1e4 CW RF segments agree to 1e-6 and a CEST train to
 3.5e-7 in Z (benchmark 9: 15015 segments). RF segments add their increments by two-sum; before
 that (until M1a) Metal drifted from the core by 1e-3 per 1e4 RF segments. Free segments are not
 compensated: a free run of 1e5 segments drifts by ~1.5e-5 in Mz.
@@ -105,7 +105,7 @@ segments are far smaller; long strong lobes on spins far off centre are where it
 Metal's adjoint (float32) against the core's float64 autograd, worst over the matrix: 1.2e-4
 (`rf_freq`, where the retired fused kernel's float32 adjoint was 1.5e-3 off), 8e-5 with the bound
 pool, ≤ 1.4e-5 elsewhere; on a 1600-segment RF-spoiled GRE with 4 coils 2e-5; over 32000 RF
-segments (slice-selective sincs, `tests/test_integration.py`) 8.9e-4 on the flip angle, where the
+segments (slice-selective sincs, `tests/engines/test_integration.py`) 8.9e-4 on the flip angle, where the
 core itself in float32 is 5.4e-3 off. Gradients are bit-identical for any `checkpoint_every` and
 from run to run (no atomics; per-spin sums flushed every 64 segments). CUDA's adjoint (the same code) against the
 core, worst over the matrix on an RTX 4090: 1.3e-4 (`rf_freq`), 5.3e-5 with the bound pool, ≤ 1.4e-5 elsewhere. Optimizing through it: the
@@ -128,13 +128,13 @@ direction, Richardson-extrapolated, the case rebuilt at every point) to 1e-6 rel
   9), and returned in order; moving spins are not (their walks are keyed by spin index).
 - Metal, `readouts="nufft"` (forward only, opt-in): every readout of at least 16 samples with one
   dt, gradient and B0 offset (the most common length) is a type-1 NUFFT, 3e-6 from the per-sample
-  path on the realism TSE (`test_metal_nufft.py`). For static spins without diffusion, motion,
+  path on the realism TSE (`test_gpu_nufft.py`). For static spins without diffusion, motion,
   free pools, the generalized bound pool or concomitant fields (raises `ValueError`); other readouts
   and threadgroups whose spins span more than `NUFFT_WMAX` grid cells keep the per-sample path.
 - Metal, `pulses="reuse"` (forward only, opt-in): a pulse of two or more RF segments that recurs up to
   a global RF phase is stepped once per spin into its affine map and applied at every occurrence,
   turned about z by its phase (relaxation and exchange commute with z-rotations: the same map, 1e-7
-  from stepping, `test_metal_reuse.py`). Maps take 12 (20 with a bound pool) floats per spin and
+  from stepping, `test_gpu_reuse.py`). Maps take 12 (20 with a bound pool) floats per spin and
   pulse, at most `PULSE_MEMORY` bytes (2 GiB), most-used pulses first. Same eligibility as NUFFT
   readouts.
 - Metal: `mma=False` (one `simd_sum` per coil and sample) takes at most 32 coils; the default for

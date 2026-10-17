@@ -100,7 +100,7 @@ Physics (SI chi, dimensionless; field in Hz at the Larmor frequency):
 - Typical values (cite primary sources in code): water -9.05 ppm, air +0.36 ppm, so air-tissue
   ~ +9.4 ppm; cortical bone ~ -2 ppm relative to water; deep grey matter iron +0.05-0.2 ppm.
 
-Required checks (`tests/test_susceptibility.py`):
+Required checks (`tests/phantoms/test_susceptibility.py`):
 
 1. Sphere in a large box: inside and outside against `b0_sphere`, error falls with padding and
    resolution; report the converged numbers in the test docstring.
@@ -188,7 +188,7 @@ seed=0, mt=False, diffusion=False, chi_to_b0=True, shim_order=2, variability=Non
   / `slab` so 2D slices and thin slabs are cheap, measure a full 3D run on the GPU
   (`blochparty.metal.simulate_metal`) and report spins/s and memory in the docstring.
 
-### 5.4 Required checks (`tests/test_anatomy.py`; use a small synthetic anatomy in unit tests,
+### 5.4 Required checks (`tests/phantoms/test_anatomy.py`; use a small synthetic anatomy in unit tests,
 real data only in an opt-in marked test or a validation script)
 
 1. Conservation: the sum of spin PD per tissue equals sum(fraction x PD) over voxels to 1e-12;
@@ -205,7 +205,7 @@ real data only in an opt-in marked test or a validation script)
 5. Determinism: same seed -> identical phantom; different seeds -> different spatial jitter,
    with fixed material properties. Categorical tissue draws and B0 sampled at changed
    positions also change; quantile broadening uses its own fixed random stream.
-6. GPU = core on a small anatomical phantom (relative error ~1e-5, as `tests/test_metal.py`).
+6. GPU = core on a small anatomical phantom (relative error ~1e-5, as `tests/engines/test_gpu.py`).
 
 Validation script (`validation/anatomy_brainweb.py`, [RESULTS](../../validation/anatomy/RESULTS.md)):
 compare tissue contrast ratios (GM/WM, CSF/GM) against downloaded references. The newer
@@ -282,7 +282,7 @@ realised SD and correlation length within 10 % of the request on a large grid; d
 ## 8. Coordination (two agents on one repo)
 
 - **You own**: `src/blochparty/susceptibility.py`, `src/blochparty/anatomy.py`,
-  `tests/test_susceptibility.py`, `tests/test_anatomy.py`, `examples/anatomy_*.py`,
+  `tests/phantoms/test_susceptibility.py`, `tests/phantoms/test_anatomy.py`, `examples/anatomy_*.py`,
   `validation/anatomy*`, `docs/specs/ANATOMY.md` (update its status line), and exports in
   `src/blochparty/__init__.py`.
 - **Shared, edit with small diffs**: `docs/REALISM.md`, `docs/LESSONS.md`, `docs/JOURNAL.md`,

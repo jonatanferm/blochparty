@@ -141,7 +141,7 @@ derivatives with respect to positions, off-resonance and the gradient amplitude 
 kernel's derivative: the adjoint gets simpler, not harder.
 
 **Independent check.** The current direct kernel on the same spins, to the NUFFT tolerance;
-`reference.signal_equation`; and `tests/test_free_runs.py` extended with the NUFFT path.
+`reference.signal_equation`; and `tests/engines/test_free_runs.py` extended with the NUFFT path.
 
 **Gain (estimated).** Realism TSE: the readout share (45 % + 10 %) shrinks about 7x → 1.6-1.8x
 alone, 3x on top of the merge of 2.4. 3D GRE 128³: readouts are 97 % of the segments → about 6x
@@ -206,7 +206,7 @@ build (a Bloch simulation of virtual spins), gradients of the spin's parameters 
 interpolation.
 
 **Independent check.** The stepped kernel on the same spins at the 1 µs raster; the slice
-profile against SLR; `tests/test_integration.py`'s 32,000-segment flip-angle gradient.
+profile against SLR; `tests/engines/test_integration.py`'s 32,000-segment flip-angle gradient.
 
 **Gain (measured cost, estimated saving).** Realism TSE: RF is 10 % at 100 µs → 1.1x alone, but
 after 2.1 and 2.4 it is the largest remaining term (about 40 %), so 1.6x there. Multi-slice
@@ -250,7 +250,7 @@ reversible-network idea (Gomez et al. 2017; MALI, Zhuang et al. 2021) applied to
 steps are exactly invertible rather than approximately. Results stay deterministic.
 
 **Independent check.** The current adjoint (bit-identical for any `checkpoint_every`) and the
-core's autograd, as in `tests/test_engines.py`.
+core's autograd, as in `tests/engines/test_engines.py`.
 
 **Gain (estimated).** The replay and the in-block recompute are about two of the 5-7 forward
 equivalents, and the R traffic was measured as a quarter of the sweep on 3d-48: **forward +

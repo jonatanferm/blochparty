@@ -6,6 +6,9 @@ entries at the bottom. Hard-won technical lessons are distilled separately in
 [LESSONS.md](LESSONS.md); the plan lives in [../ROADMAP.md](../ROADMAP.md) and
 [REALISM.md](REALISM.md).
 
+Paths in entries before 2026-10-17 are the layout before the refactor ([REFACTOR_PLAN.md](REFACTOR_PLAN.md),
+section 2): `tests/test_metal.py` is now `tests/engines/test_gpu.py`, and so on.
+
 One file per entry in [journal/](journal/), named `<date>-<nn>-<slug>.md` (nn: the entry's place in its day);
 newest last. A new entry is a new file and one line here (`tests/docs/test_docs.py` checks the two agree).
 

@@ -51,7 +51,7 @@ Three conditions, each testable. The core is done when all three hold.
 The rules in `CLAUDE.md` apply. Concretely, for every item below:
 
 - **Independent check first.** Name the reference before writing code: a closed form, the SciPy
-  ODE (`tests/test_bloch_vs_ode.py: random_case`), EPG (`src/blochparty/epg.py`), the signal
+  ODE (`tests/cases.py: random_case`), EPG (`src/blochparty/epg.py`), the signal
   equation (`src/blochparty/reference.py`), BMCTool (`validation/compare_bmctool.py`), MRzero
   (`validation/compare_mrzero.py`), or real data (`validation/real/`). A feature without a
   reference is not done.
@@ -61,7 +61,7 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
   snapshot. If an item needs the snapshot to grow (new engine, new default inputs), add to
   `tools/snapshot.py` in a separate commit and say so in the journal.
 - **Core, then Metal, then parity test.** Physics goes into `bloch.py` with a test against the
-  reference, then into the Metal shader, then a test in `tests/test_metal.py` comparing the two
+  reference, then into the Metal shader, then a test in `tests/engines/test_gpu.py` comparing the two
   on the same inputs. Float32 tolerance for parity is ~1e-5 relative on signals (what the
   existing tests use); say which tolerance and why.
 - **Metal variants.** The shader is compiled in three variants of `advance<V, DIFF>` (plain,
@@ -91,7 +91,7 @@ Goal: a stranger (or a fresh agent) can tell which engine does what, and the doc
 - [x] `docs/ENGINES.md`: capability matrix of the four entry points (core, fused, Metal,
       chunked) × 31 features and combinations, forward and gradients, precision per engine, and
       the measured agreement (fused 4e-14, Metal 2e-5 static / 7e-5 signal with walking spins).
-- [x] `tests/test_engines.py` parses the matrix and checks all 248 cells: ✓ = parity with the
+- [x] `tests/engines/test_engines.py` parses the matrix and checks all 248 cells: ✓ = parity with the
       core (forward; gradients vs the core's autograd, the core's autograd vs finite
       differences), ✗ = `NotImplementedError`. It found two silent cases, now raising: the core
       ignored `maps` with free pools, Metal ran diffusion with exact concomitant fields (no
@@ -144,7 +144,7 @@ and applies `matrix_exp(A dt)` to the state. Reproduce that on the GPU.
   of 58 offsets × 8 tubes × parameter sets takes 15 s in the core and a Levenberg–Marquardt
   calibration about 7 min). Report core vs Metal time in `RESULTS.md`.
 
-Verify: `tests/test_metal.py`: two-pool and three-pool phantoms with and without a bound pool on
+Verify: `tests/engines/test_gpu.py`: two-pool and three-pool phantoms with and without a bound pool on
 a random RF / gradient / off-resonance sequence and on a CEST saturation + readout, vs the core
 ≤ 1e-5 relative; the BMCTool comparison (`validation/compare_bmctool.py`) through Metal within
 the float32 budget (the core is at 5.8e-7); benchmarks 8 and 9 reproduce their tables.
@@ -157,7 +157,7 @@ coefficients (core: `bloch._moving_fields`; Metal: `nl_displacement`, `conc_at` 
 kernels). Static spins untouched (snapshot bit-identical). A moving spin equals the chain of static
 one-segment simulations at each segment's position to 4e-15 (core) and 1e-5 per spin (Metal);
 in a Maxwell-compensated echo a moving spin keeps the exact path integral of Bernstein's field,
-the midpoint error falling 4x per halving (`tests/test_fields_concomitant.py`). Also: static
+the midpoint error falling 4x per halving (`tests/physics/test_fields_concomitant.py`). Also: static
 `FieldMaps` are now sampled at true positions (they were at encoding positions under a
 nonlinearity). Metal's float32 resolves a segment's phase to |φ| 2⁻²⁴ (4e-4 rad for a 5 ms,
 32 mT/m lobe at 15 cm): see `docs/ENGINES.md`.
@@ -216,7 +216,7 @@ acquires Bernstein's velocity-dependent phase for a moving one.
       (300 T2b = 3 ms at T2b 10 µs) played on resonance. 60 hard pulses of 0.2 ms / 60° leave
       the water 1.4e-3 (cut) and 2.3e-2 (no cut) from the generalized model; 0.1 ms / 30°:
       3.9e-2 and 1.1e-1; 0.5 to 2 ms / 90°: 2 to 8e-3 either way. There the pool rotates and
-      neither rate variant is right (`tests/test_pools.py`).
+      neither rate variant is right (`tests/physics/test_pools.py`).
 - [ ] **(B) Generalized bound pool with free pools on Metal by operator splitting**, if needed:
       keep the mode state in the device buffer the `_gen` variant already uses (`U`, 2J × N), and
       per RF sub-step do a half step of the existing mode and bound-pool rotation (`step_gen`'s
@@ -398,7 +398,7 @@ the precondition for sequence development and for a linter that talks about Puls
       phase); for flat sequences without provenance, emit segment runs between RF and ADC
       boundaries as arbitrary-gradient blocks. Ideal spoil flags cannot be written: raise unless
       `spoil="drop"` is passed, and say so in the docstring.
-- [ ] Round-trip tests (`tests/test_pulseq.py`): write → `read_pulseq` → simulate equals the
+- [ ] Round-trip tests (`tests/sequences/test_pulseq.py`): write → `read_pulseq` → simulate equals the
       original to 1e-9 on GRE (ramps, slice select, RF spoiling), TSE, bSSFP, EPI and an imported
       scanner `.seq` from `validation/real/data`; pypulseq's `check_timing` passes; k-space at every
       ADC sample equals pypulseq's `calculate_kspace` for the written file.
@@ -451,8 +451,8 @@ anatomy pillar. The learned parts (P4, P5) come after M6.
       vitreous (T1 4.3-4.5 s at 3 T, Simpson 2024; T2 546 +- 157 ms only at 1.5 T), and the IXI segmentation labels the
       vitreous "skin" (CSF-like intensities outside the brain), which an orbit-restricted eye class would fix; no
       effect on the realism score (fastMRI's stack starts above the orbits); (3) dura and connective tissue: no
-      in-vivo measurements found. The verify list below is covered (tests/test_head_sampler.py: draws over 100
-      subjects, Jacobian; tests/test_io.py: round trip; examples/sampled_heads.py: the ten-head triplet).
+      in-vivo measurements found. The verify list below is covered (tests/phantoms/test_head_sampler.py: draws over 100
+      subjects, Jacobian; tests/signal/test_io.py: round trip; examples/sampled_heads.py: the ten-head triplet).
       *Done 2026-10-13* (3f4cf1b, b8b9106): a dermis class (`add_dermis`, `sample_head(dermis=True)`: the outer
       1.61 mm, T2 12 ms from its 10 ms T2*, flagged) and an eye class (vitreous, T1 4.518 s at 3 T measured, T2 from
       1.5 T flagged; prepare_ixi's `orbit_vitreous` finds the globes, IXI012 9.0 mL). Left: dura and connective
@@ -605,7 +605,7 @@ core) or raises, and the engine matrix says which.
    (S, C_tx) complex drive weights; the effective field is Σ_c w_c b1_c. Default remains a real
    scalar and bit-identical. Verify: Mz = cos(|b1|α) for any phase; a two-channel shim that
    cancels at a point gives zero flip there; the imported mariepy maps' phase (the quadrature
-   birdcage's spatial phase) vs the rotating-field phase test in `tests/test_em.py`.
+   birdcage's spatial phase) vs the rotating-field phase test in `tests/phantoms/test_em.py`.
 4. **Contrast agents and perfusion.** Time-varying T1 (and T2*, χ) per spin from tracer kinetics
    (Tofts: Ktrans, ve, vp, an AIF) at the per-segment time; `Phantom` gets a `kinetics` field,
    `to_phantom` fills it from a lesion / parenchyma model (M5). Verify: the signal of a spoiled

@@ -51,12 +51,12 @@
   base point ran 16. Autograd (exact for the 16-step walk) and the converged finite difference
   (exact for the 17-step one) then disagreed by 10 %. Autograd through a walk is right at fixed
   sub-step counts; pick parameters away from integer dt / tau_max when differencing. Source:
-  `tests/test_engines.py`, 2026-10-08.
+  `tests/engines/test_engines.py`, 2026-10-08.
 
 - **Compare a saturated pool against the water's scale, not its own.** After a 10 µs hard 180°
   the bound pool's Mz was 8.8e-5 of an equilibrium 0.12; Metal's error was 1.3e-8 (1e-7 of
-  equilibrium) but 1.5e-4 relative to the pool's own maximum. `test_metal.py` already divided by
-  max |m| of the water; `test_engines.py` does too. Source: `tests/test_engines.py`, 2026-10-08.
+  equilibrium) but 1.5e-4 relative to the pool's own maximum. `test_gpu.py` already divided by
+  max |m| of the water; `test_engines.py` does too. Source: `tests/engines/test_engines.py`, 2026-10-08.
 
 - **Susceptibility units do not specify its reference.** QSM full-head chi is referenced
   to water (air around +9.2 ppm), while challenge chi is brain-only with zero exterior;
@@ -104,7 +104,7 @@
   two axes are at Nyquist (~2 Hz in a random small-grid test). Average over the two
   possible signs independently for every Nyquist axis: retain squared terms and zero
   their cross terms. Odd/even-grid quarter turns then agree to < 2e-12 Hz.
-  (`susceptibility.py`, `tests/test_susceptibility.py`, anatomy M1)
+  (`susceptibility.py`, `tests/phantoms/test_susceptibility.py`, anatomy M1)
 
 - **Padding controls periodic copies, not tissue-boundary discretisation.** For a 10-mm
   partial-volume sphere at 3 T, far-field RMS falls 4.287 → 0.134 → 0.0216 Hz at
@@ -112,7 +112,7 @@
   A long cylinder needs more transverse padding (4× here): 2× gave a ~6.1 Hz constant
   error even in its central plane. Subtract the surrounding susceptibility before
   padding absolute maps; zero padding an absolute head map otherwise puts vacuum,
-  rather than air, outside the array. (`tests/test_susceptibility.py`; Jordan et al.,
+  rather than air, outside the array. (`tests/phantoms/test_susceptibility.py`; Jordan et al.,
   JMRI 2013, [doi:10.1002/jmri.23762](https://doi.org/10.1002/jmri.23762))
 
 - **A susceptibility field does not simply rotate with the head.** Translation can
@@ -171,7 +171,7 @@
 
 - **Strang splitting of relaxation inside RF segments is second order** (error ↓ 4× per halving
   of the RF step), but the coarsest steps are pre-asymptotic (ratios 4.5–9). Without
-  relaxation, rotations are exact to 1e-12. (`tests/test_bloch_vs_ode.py`)
+  relaxation, rotations are exact to 1e-12. (`tests/engines/test_bloch_vs_ode.py`)
 
 - **Many first test failures were the tests' idealisations, not simulator bugs**: T2 decay
   during the readout blurs images (~5e-4 at a 10 µs dwell); an off-resonance comparable to the
@@ -182,7 +182,7 @@
 - **±flip angles give identical magnitude images**, so optimizers may land on −α. Compare |α|.
 
 - **Isochromat equivalence with EPG is exact** once isochromats outnumber the dephasing orders
-  at the echo; below that, order k aliases to k mod K. (`tests/test_epg.py`)
+  at the echo; below that, order k aliases to k mod K. (`tests/physics/test_epg.py`)
 
 - **Incidental MT is a large effect**: MTR 33 % (1.5 T) → 46 % (3 T) in white matter in a
   9-slice acquisition; every multi-slice simulation without a bound pool is biased.
@@ -287,7 +287,7 @@
   1 kHz cut happens to approximate the short-pulse rotation better than the true long-pulse
   lineshape does, which is why the cut-free lineshape is for saturation pulses only. Off
   resonance by Δ the relevant time is 1 / Δ instead, so 50 ms CEST pulses at 447 Hz are safely
-  in the rate regime (ROADMAP M1c; `tests/test_pools.py`).
+  in the rate regime (ROADMAP M1c; `tests/physics/test_pools.py`).
 
 - **A gradcheck step of 1e-6 on a parameter of 1e-5 is a 10 % perturbation**: check derivatives
   w.r.t. T2b through a unit-scale multiplier (`t2 = 1e-5 * s`), or the mismatch looks like a bug.
@@ -302,7 +302,7 @@
   the flip through the float32 adjoint (0.003°) but held the scan-time constraint only to 8e-5.
 
 - **Float32 gradient accuracy depends on how many RF segments feed it; measure the core in
-  float32 before setting a tolerance** (`tests/test_integration.py`): over 32000 slice-selective
+  float32 before setting a tolerance** (`tests/engines/test_integration.py`): over 32000 slice-selective
   sinc segments the flip-angle gradient through the Metal adjoint was 8.9e-4 off the float64 core,
   which looked like a bug until the core itself in float32 came out 5.4e-3 off.
 

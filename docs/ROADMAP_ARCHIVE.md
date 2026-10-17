@@ -3,6 +3,8 @@
 The phase-by-phase plan and its **verified** record up to 2026-10-08, kept unchanged as the
 citable account of what was checked against what. The live plan is [../ROADMAP.md](../ROADMAP.md).
 
+Paths are the layout before the 2026-10 refactor ([REFACTOR_PLAN.md](REFACTOR_PLAN.md), section 2).
+
 Goals, in order of how much they shape design decisions:
 
 1. **A fun, understandable physics project** – small readable core, every feature verified.

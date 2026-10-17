@@ -8,7 +8,7 @@ midpoint value of a segment is its exact average gradient: gradient moments, and
 k-space, are exact at every segment end. Ramps (and other sloped pieces) are further
 cut at ``ramp_raster`` so that spins see a staircase close to the true ramp.
 
-Conventions (Pulseq -> blochparty), checked in ``tests/test_pulseq.py``:
+Conventions (Pulseq -> blochparty), checked in ``tests/sequences/test_pulseq.py``:
 
 * Units already match: RF in Hz, gradients in Hz/m, time in s.
 * Pulseq fixes the sign of a frequency offset physically: a pulse with frequency

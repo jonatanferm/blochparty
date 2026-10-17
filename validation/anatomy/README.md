@@ -194,7 +194,7 @@ multipliers `t2_scale` and `pd_scale` that make the simulator's own tissue mixtu
 92 ms); a cubic trend fitted over pure white matter is removed (the two-point fit's absolute level and its B1+ pattern
 belong to IXI's scanner; the tissue database keeps absolute values); clipped to x0.61-1.65. `load_ixi(residual=True)` /
 `sample_head(source="ixi", residual=True)` carry the maps through the pose and `to_phantom` multiplies every non-fat
-tissue's T2 and PD by them. Checked on a synthetic head with known multipliers (`tests/test_realism_helpers.py`) and on
+tissue's T2 and PD by them. Checked on a synthetic head with known multipliers (`tests/validation/test_realism_helpers.py`) and on
 IXI012 against its own T2 (the scanner trend removed from both: brain |log(real / predicted)| median 0.064 -> 0.032).
 
 ## AHEAD 7 T templates

@@ -116,7 +116,7 @@ def phantom_from_maps(
         quantiles at (j + 1/2) / K, shuffled over the voxel's positions (seeded);
         ``"random"`` draws them. Needs many spins per voxel: with K quantiles the FID
         follows exp(-t / T2') to ~0.5 / sqrt(K) (of the t = 0 signal) over the first
-        few T2', ~2 / sqrt(K) out to K T2' / 4 (``tests/test_phantom_t2prime.py``). One
+        few T2', ~2 / sqrt(K) out to K T2' / 4 (``tests/phantoms/test_phantom_t2prime.py``). One
         spin gets offset 0.
     b1: relative transmit (B1+) map; every RF pulse is scaled by it (see ``Phantom.b1``).
     fat_fraction: fat signal fraction map in [0, 1]. Water spins keep PD (1 - f); every

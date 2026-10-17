@@ -40,7 +40,7 @@ Anything numeric in a sequence or phantom can be a tensor with `requires_grad=Tr
 
 Three entry points with the same arguments and result, one physics. Which features each one runs,
 with forward and gradients, is the matrix in [docs/ENGINES.md](docs/ENGINES.md), checked cell by
-cell by `tests/test_engines.py`.
+cell by `tests/engines/test_engines.py`.
 
 - `bp.simulate`: the reference. Plain PyTorch on any device, float32 or float64, differentiable
   by autograd. Every new effect lands here first.
@@ -202,7 +202,7 @@ write_pulseq(bp.gre_2d(64, ramps=True, spoiling="rf", slice_thickness=5e-3), "gr
   identically either way).
 - `write_pulseq` is lossless: written and read back, GRE (ramps, slice selection, RF spoiling),
   TSE, bSSFP and EPI simulate identically to 1e-9, pypulseq's `check_timing` passes and k-space
-  equals its `calculate_kspace` (`tests/test_pulseq_write.py`). It writes Pulseq 1.5 itself at
+  equals its `calculate_kspace` (`tests/sequences/test_pulseq_write.py`). It writes Pulseq 1.5 itself at
   full precision (pypulseq's writer keeps six digits), one Pulseq block per `SequenceBuilder.block`
   call (the builder records them in `seq.meta["blocks"]`; an EPI train's block is cut between its
   ADCs). It raises for what a scanner cannot play: ideal spoilers (`spoil="drop"` writes without
@@ -369,6 +369,11 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `girf.py` | `apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents (incl. B0 terms) |
 | `drift.py` | B0 drift and respiratory fields as sequence transforms |
 | `design.py` | hardware / safety constraints and penalties, image metrics, Cramér–Rao bound, `minimize`, `design_report()` |
+
+Tests live in `tests/<area>/`: `engines`, `physics`, `sequences`, `phantoms`, `signal`, `validation`, `design` and
+`docs`; `uv run pytest tests/engines` runs one area. Cases shared between files are in `tests/cases.py`, the
+comparison helpers in `tests/helpers.py`, and the `gpu` fixture (every GPU engine on this machine) in
+`tests/conftest.py`.
 
 ## Conventions
 

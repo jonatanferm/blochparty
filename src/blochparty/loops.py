@@ -7,7 +7,7 @@ EM-simulated maps through ``maps.FieldMaps`` instead).
 
 * Receive sensitivity by reciprocity: B1- = (Bx - i By) / 2 [T/A], the weight blochparty's signal
   (coil x Mxy, Mxy precessing as exp(-i 2 pi f t), demodulated by exp(+i w0 t)) needs: Faraday's
-  law on a lab-frame precessing dipole gives 2 i w0 B1- Mxy (``tests/test_loops.py``). (Until
+  law on a lab-frame precessing dipole gives 2 i w0 B1- Mxy (``tests/phantoms/test_loops.py``). (Until
   2026-10-07 this was conj(B1-), which mirrored every coil's phase pattern; magnitudes unchanged.)
 * Transmit: B1+ = (Bx + i By) / 2 of the driven combination; |B1+| relative to a reference
   point is the transmit scale (``Phantom.b1`` / ``FieldMaps.b1``).

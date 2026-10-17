@@ -12,7 +12,7 @@ each sub-step moves by sqrt(2 D h) n1, reflects off the walls (exactly for plane
 specularly at the crossing point for cylinders and spheres) and contributes its midpoint
 plus the free bridge term sqrt(2 D h / 12) n2 to the segment's effective position (their
 average). Errors are first order in the sub-step near walls; the reference checks are the
-long-diffusion-time and finite-time short-pulse results (tests/test_restriction.py).
+long-diffusion-time and finite-time short-pulse results (tests/physics/test_restriction.py).
 """
 
 from __future__ import annotations

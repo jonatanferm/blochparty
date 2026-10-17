@@ -33,8 +33,8 @@ uv run python validation/em/brainweb_demo.py
 mariepy stores `plus = mu0 (Hx + j Hy)` and `minus = mu0 (Hx - j Hy)` per channel, phasors with
 exp(+j w t), on a grid indexed (x, y, z). With B0 along +z protons precess clockwise seen from +z,
 so the transmit B1+ in blochparty's rotating frame is `conj(minus) / 2` and the receive weight on
-Mxy is `conj(plus) / 2` (`tests/test_em.py` checks the first against a rotating field and both
-against `loops.py` in the quasi-static limit; `tests/test_loops.py` fixes the receive weight by
+Mxy is `conj(plus) / 2` (`tests/phantoms/test_em.py` checks the first against a rotating field and both
+against `loops.py` in the quasi-static limit; `tests/phantoms/test_loops.py` fixes the receive weight by
 Faraday's law). `field_maps` turns them into `FieldMaps` ((z, y, x), |B1+| relative to its median
 over the body, coils scaled to max 1, values outside the body copied from the nearest inside
 voxel). The noise covariance is proportional to `read_noise_resistance(...)`.

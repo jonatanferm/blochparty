@@ -6,7 +6,7 @@ dependency: only its documented ``.npz`` format is read): per channel ``plus = B
 zero outside the body's ``mask``, on a grid whose voxel (i, j, k) sits at origin + h (i, j, k)
 (x, y, z). With B0 along +z, protons precess clockwise seen from +z (blochparty's
 Mxy ~ exp(-i 2 pi f t)), so, from the lab-frame decomposition of the phasors (checked by the
-Faraday test of ``tests/test_loops.py`` in the quasi-static limit):
+Faraday test of ``tests/phantoms/test_loops.py`` in the quasi-static limit):
 
 * transmit: the co-rotating component, B1+ = conj(minus) / 2 for a drive sum_c w_c channel_c
   (conj(sum_c w_c minus_c) / 2), |B1+| relative to a reference gives ``FieldMaps.b1``;

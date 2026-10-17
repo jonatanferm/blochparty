@@ -37,7 +37,7 @@
   under a gradient nonlinearity, a central difference with a 1e-6 relative step agreed with
   autograd to only ~1e-6 (rounding of the loss / step), and a 1e-4 step to 8e-5 (truncation).
   Richardson extrapolation of central differences at 1e-5 and 2e-5 (error O(h⁴)) fixed the check.
-  Source: `tests/test_engines.py`, M1b, 2026-10-08.
+  Source: `tests/engines/test_engines.py`, M1b, 2026-10-08.
 
 - **A validation script's entry point goes last.** `compare_bmctool.py` defined `cest_comparison`
   after `if __name__ == "__main__": main()`, so running it as a script died with a NameError
@@ -49,7 +49,7 @@
   that reason alone. And a leaf computed from another leaf (a carrier from `rf_frequency(rf)`)
   carries a dependence the rebuilt case sees and autograd does not. Build cases as functions of
   independent leaves and rebuild at θ ± εv; give each run its own graph. Source:
-  `tests/test_engines.py`, 2026-10-08.
+  `tests/engines/test_engines.py`, 2026-10-08.
 
 - **`pytest -m EXPR` on the command line replaces the `-m` in `addopts`** (the last one wins), so
   `pytest -m "not slow"` would have run the opt-in crosscheck tests: 4 collected with
@@ -59,7 +59,7 @@
 - **Perturb a symmetric matrix symmetrically.** A finite difference along an asymmetric
   perturbation of a diffusion tensor disagreed with autograd by 8 %: the Cholesky factor reads
   one triangle, its backward returns a symmetrized gradient. Perturb a per-spin scale (or
-  D + Dᵀ) instead. Source: `tests/test_engines.py`, 2026-10-08.
+  D + Dᵀ) instead. Source: `tests/engines/test_engines.py`, 2026-10-08.
 
 - **QSM Challenge releases are not interchangeable.** Radboud's complete head package
   declares restricted access and RU-DI-HD-1.0, despite the initial spec's CC BY guess.
@@ -99,7 +99,7 @@
 - **Parallel workers need file ownership**, and integration still finds what no single worker
   could: two different γ constants, and design checks defaulting to 150 T/m/s against
   builders designing at 170 T/m/s (every built sequence was reported as a slew violation).
-  Write integration tests across workers' features (`tests/test_integration.py`).
+  Write integration tests across workers' features (`tests/engines/test_integration.py`).
 
 - **Expect README/ROADMAP merge conflicts** from parallel workers; resolve as unions.
 

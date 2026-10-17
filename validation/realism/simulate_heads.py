@@ -102,7 +102,7 @@ def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES, 
 def flow_void(head) -> None:
     """BrainWeb's vessel class holds the dural sinuses and large vessels; their blood flows at
     ~10-30 cm/s, and through a 5 mm slice a TSE echo at 113 ms keeps < 3 % of static blood's signal
-    from 10 cm/s up (the engine's moving spins, tests/test_motion.py::test_tse_flow_void). Their
+    from 10 cm/s up (the engine's moving spins, tests/physics/test_motion.py::test_tse_flow_void). Their
     spins are left out (PD 0 after the draw, so no other draw moves); susceptibility stays."""
     p = head.tissues["vessels"]
     head.tissues["vessels"] = replace(p, pd=Distribution(0., None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True))
