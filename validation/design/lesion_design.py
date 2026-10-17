@@ -16,7 +16,9 @@ the image SNR of a reference GRE in the head, see ``snr_unit``):
   G  a fixed spoiled GRE (25 deg, TE 6 ms, TR 15 ms, K lines evenly spread) -> adjoint -> CNN: what the design adds;
   C  the GRE's flips, TE, TR and line positions learned jointly with the CNN (started from G's) by gradient descent
      through the GPU adjoint (``bp.simulate(..., engine="gpu")``: Metal, or CUDA), with a replay buffer of recent
-     acquisitions for extra network updates.
+     acquisitions for extra network updates;
+  F  the control for C: G's net fine-tuned for the same steps on the same batches, noise and replay with the design
+     frozen at G's (C minus F is what learning the sequence adds, not the extra training).
 The adjoint is a fixed, parameter-free linear map of the raw samples, differentiable in the line positions (``--front
 raw`` feeds the samples to the CNN as they are, which fails: a CNN cannot read a small lesion out of k-space). The K
 lines are evenly spaced (``--sampling uniform``, SENSE's case) or drawn from a Gaussian density (``gauss``: incoherent
@@ -259,7 +261,7 @@ def main():
         default=None,
         help="the gauss line mask's seed (default --seed): fixed, it repeats a run on the same lines with new training seeds",
     )
-    ap.add_argument("--arms", default="A,B,G,C")
+    ap.add_argument("--arms", default="A,B,G,C", help="any of A, B, G, C, F (F: C with the design frozen)")
     args = ap.parse_args()
     mask_seed = args.seed if args.mask_seed is None else args.mask_seed
     torch.manual_seed(args.seed)
@@ -397,7 +399,7 @@ def main():
             )
             results["B_tse_" + args.front]["scan_s"] = scan_tse
             print("B", {k: v for k, v in results["B_tse_" + args.front].items() if k != "runs"}, flush=True)
-    if "G" in arms or "C" in arms:
+    if any(a in arms for a in ("G", "C", "F")):
         trials = []
         for start in args.starts.split(","):
             flip, te_ms, tr_ms = (float(v) for v in start.split(":"))
@@ -460,40 +462,53 @@ def main():
             {"scan_s": best["scan_s"], "design": design.describe(), "start": best["start"]}
         )
         print("G", {k: v for k, v in results["G_gre_" + args.front].items() if k not in ("runs", "design")}, flush=True)
-    if "C" in arms:
+
+    def joint(name: str, learn: bool):
+        """Arm C (``learn``): the design and G's first net trained together for ``--steps``; arm F: the same steps,
+        batches, noise and replay (the same generator) with the design frozen at G's, read from G's cache, so C minus
+        F is what moving the sequence adds beyond the extra training of the net."""
         gen = torch.Generator().manual_seed(args.seed + 100)
         net = copy.deepcopy(nets_g[0])
         net.eval()  # the joint phase fine-tunes G's net: batch-norm statistics and dropout fixed, gradients still flow
-        opt_design = torch.optim.Adam(
-            [
-                {"params": [design.flip_raw, design.te_raw, design.tr_raw], "lr": args.design_lr},
-                {"params": [design.ky_raw], "lr": args.ky_lr},
-            ]
-        )
+        if learn:
+            opt_design = torch.optim.Adam(
+                [
+                    {"params": [design.flip_raw, design.te_raw, design.tr_raw], "lr": args.design_lr},
+                    {"params": [design.ky_raw], "lr": args.ky_lr},
+                ]
+            )
         opt_net = torch.optim.Adam(net.parameters(), lr=args.net_lr, weight_decay=1e-4)
         buffer = collections.deque(maxlen=32 * args.batch)
         t0 = time.perf_counter()
         recent = collections.deque(maxlen=20)
+
+        def acquire(rec, seq):
+            if not learn:
+                return k_gre[rec["file"]]
+            ph = load_ph(rec)
+            return simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX)
+
+        seq, ky = None, ky0
         for step in range(args.steps):
-            flips, ky, te, tr = design()
-            seq = learnable_gre(flips, ky, te, tr)
+            if learn:
+                flips, ky, te, tr = design()
+                seq = learnable_gre(flips, ky, te, tr)
             idx = torch.randint(len(train), (args.batch,), generator=gen).tolist()
             xb, yb = [], []
             for j in idx:
                 rec = train[j]
-                ph = load_ph(rec)
-                sig = add_noise(
-                    simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX), sigma[rec["file"]], gen
-                )
+                sig = add_noise(acquire(rec, seq), sigma[rec["file"]], gen)
                 xb.append(front_input(args.front, sig, ky))
                 yb.append(y_train[j])
             loss = nn.functional.binary_cross_entropy_with_logits(
                 net(torch.stack(xb).to(device)), torch.tensor(yb, dtype=torch.float32, device=device)
             )
-            opt_design.zero_grad()
+            if learn:
+                opt_design.zero_grad()
             opt_net.zero_grad()
             loss.backward()
-            opt_design.step()
+            if learn:
+                opt_design.step()
             opt_net.step()
             recent.append(loss.item())
             buffer.extend((x.detach().cpu(), y) for x, y in zip(xb, yb))
@@ -507,36 +522,38 @@ def main():
                 opt_net.step()
             if step % 20 == 0 or step == args.steps - 1:
                 print(
-                    f"C step {step}: loss {np.mean(recent):.3f} over the last {len(recent)} batches (replay {l_r.item():.3f}), {design.summary()}, "
-                    f"{time.perf_counter() - t0:.0f} s",
+                    f"{name} step {step}: loss {np.mean(recent):.3f} over the last {len(recent)} batches (replay {l_r.item():.3f}), "
+                    f"{design.summary() if learn else 'design frozen'}, {time.perf_counter() - t0:.0f} s",
                     flush=True,
                 )
         with torch.no_grad():
-            flips, ky, te, tr = design()
-            seq = learnable_gre(flips, ky, te, tr)
+            if learn:
+                flips, ky, te, tr = design()
+                seq = learnable_gre(flips, ky, te, tr)
 
             def score(records):
                 out = []
                 for rec in records:
-                    ph = load_ph(rec)
-                    sig = add_noise(
-                        simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX),
-                        sigma[rec["file"]],
-                        gen,
-                    )
+                    sig = add_noise(acquire(rec, seq), sigma[rec["file"]], gen)
                     out.append(float(torch.sigmoid(net(front_input(args.front, sig, ky)[None].to(device)))))
                 return out
 
             s_tr = score(train)
             s_te = score(test)
         thr = best_threshold(y_train, s_tr)
-        results["C_learned_" + args.front] = {
+        return {
             "auc": auc(y_test, s_te),
             "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
             "train_auc": auc(y_train, s_tr),
-            "scan_s": float(seq.dt.sum()),
-            "design": design.describe(),
-        }
+            "scan_s": float(seq.dt.sum()) if learn else best["scan_s"],
+            "design": design.describe() if learn else results["G_gre_" + args.front]["design"],
+        }, net
+
+    if "F" in arms:  # before C, which moves the design
+        results["F_frozen_" + args.front], _ = joint("F", learn=False)
+        print("F", {k: v for k, v in results["F_frozen_" + args.front].items() if k != "design"}, flush=True)
+    if "C" in arms:
+        results["C_learned_" + args.front], net = joint("C", learn=True)
         torch.save(
             {"design": design.state_dict(), "net": net.state_dict(), "describe": design.describe()},
             args.out / "arm_C.pt",
