@@ -1,4 +1,6 @@
-"""Fuzzy anatomy on a physical grid, conservative resampling, and sub-voxel spins.
+"""Anatomies on a physical grid (BrainWeb, QSM, AHEAD and IXI heads with cited tissue properties), the head sampler and its edits, and sub-voxel spins from them.
+
+Fuzzy anatomy on a physical grid, conservative resampling, and sub-voxel spins.
 
 Arrays/voxel sizes: (z,y,x); positions/origin: (x,y,z) metres. Assembly runs on
 CPU; transfer the resulting Phantom to an engine afterwards. Fractions describe

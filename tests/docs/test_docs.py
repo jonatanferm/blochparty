@@ -36,3 +36,29 @@ def test_lessons_index_and_topic_files_agree():
         text = (DOCS / "lessons" / name).read_text()
         count = sum(1 for line in text.split("\n") if line.startswith("- "))
         assert f"(lessons/{name}) ({count})" in (DOCS / "LESSONS.md").read_text(), f"{name}: the index's count is {count}"
+
+
+def test_readme_layout_is_generated_from_the_docstrings():
+    """tools/layout.py writes README.md's layout table from the module docstrings; a stale table fails here."""
+    import sys
+
+    sys.path.insert(0, str(DOCS.parent / "tools"))
+    import layout
+
+    assert layout.main(["--check"]) == 0, "run: uv run python tools/layout.py"
+
+
+def test_relative_links_resolve():
+    """Every relative link in the living documents points at a file that exists (the journal and the archived
+    roadmap keep the paths of their day)."""
+    root = DOCS.parent
+    files = [*root.glob("*.md"), *DOCS.glob("*.md"), *DOCS.glob("lessons/*.md"), *DOCS.glob("specs/*.md"),
+             *DOCS.glob("reviews/*.md"), *root.glob("validation/**/*.md"), *root.glob("src/**/*.md")]
+    broken = []
+    for f in files:
+        if f.name in ("ROADMAP_ARCHIVE.md",):
+            continue
+        for target in re.findall(r"\]\(([^)#\s]+)", f.read_text()):
+            if not target.startswith(("http:", "https:", "mailto:")) and not (f.parent / target).exists():
+                broken.append(f"{f.relative_to(root)}: {target}")
+    assert not broken, broken

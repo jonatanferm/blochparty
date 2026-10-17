@@ -1,4 +1,4 @@
-"""How a simulation is run: ``simulate(..., engine=)``, which is ``blochparty.simulate``.
+"""How a simulation is run: ``simulate(..., engine=)`` (``blochparty.simulate``) on the PyTorch core, the chunked core or a GPU engine (Metal, CUDA).
 
 Engines: the core (``core.py``, the PyTorch reference and the default), the core with a spin-chunked backward
 (``chunked.py``), and the GPU engines (``engines.gpu``: one driver, Metal on Apple GPUs and CUDA on NVIDIA GPUs).
