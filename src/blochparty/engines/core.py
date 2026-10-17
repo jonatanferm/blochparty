@@ -33,8 +33,7 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from ..exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
-from ..fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, spin_fields,
-                     transverse_coefficients)
+from ..fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, transverse_coefficients)
 from ..maps import FieldMaps, sample
 from ..motion import positions
 from ..restriction import n_sub, start_offsets, tau_max, walk_segment
@@ -42,6 +41,8 @@ from ..rng import normals
 from ..phantom import Phantom
 from ..result import SimResult
 from ..sequence import Sequence
+from .capabilities import check
+from .prepare import prepare
 
 TWO_PI = 2.0 * math.pi
 
@@ -126,9 +127,7 @@ def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None, bound_
         bz = bz + off
     if spins.mode:
         bz = bz + _concomitant(bz, g, spins)
-    if spins.modes is not None and bound_only:
-        raise NotImplementedError("bound-pool-only RF segments (Sequence.bound_only) with the generalized Bloch pool")
-    if spins.modes is not None:  # generalized Bloch: the RF rotates the bound pool through its modes
+    if spins.modes is not None:  # generalized Bloch (never with bound-only RF: capabilities.REFUSED): the RF rotates the bound pool through its modes
         # the split is accurate for steps << T2b (~1e-3 in Z at 1.7 T2b, 0.06 at 8 T2b): sub-step
         n_sub = max(1, math.ceil(float(dt.detach()) / (0.5 * float(spins.bound.t2.detach().min()))))
         for _ in range(n_sub):
@@ -444,9 +443,7 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
                 bz = bz + off
             if sp.mode:
                 bz = bz + _concomitant(bz, g, sp)
-            bo = seq.bound_only is not None and seq.bound_only[s]
-            if bo and gen:
-                raise NotImplementedError("bound-pool-only RF segments (Sequence.bound_only) with the generalized Bloch pool")
+            bo = seq.bound_only is not None and seq.bound_only[s]  # never with the generalized pool (REFUSED)
             rf_s = rf if seq.is_rf[s] and not bo else rf.new_zeros(2)  # bound-only: the water and free pools ignore it
             w_sat = None
             if bound is not None and seq.is_rf[s] and not gen:
@@ -504,30 +501,22 @@ def simulate(
     pd = phantom.pd
     seq = seq.to(dtype=pd.dtype, device=pd.device)
     n = len(phantom)
+    prep = prepare(phantom, seq, coils, m_init, scanner, maps)  # the checks and what every engine derives alike
+    check("core", prep.features)
     if coils is None:
         sens_re, sens_im = torch.ones_like(pd)[:, None], torch.zeros_like(pd)[:, None]
     else:
         sens_re, sens_im = coils.real.to(pd.dtype), coils.imag.to(pd.dtype)
-    fields = spin_fields(scanner, phantom.pos)
-    bound = phantom.bound.expand(n, pd) if phantom.bound is not None else None
-    gen = bound is not None and bound.model == "generalized"
-    # moving spins under the field model walk and move in true coordinates; every segment maps them to
-    # encoding positions and concomitant coefficients (_moving_fields). Static spins: spin_fields once.
-    field = None
-    if (phantom.diffusion is not None or phantom.motion is not None) and scanner is not None and (
-            fields.mode or scanner.nonlinearity is not None):
-        f0 = None if not fields.mode else torch.as_tensor(scanner.larmor, dtype=pd.dtype, device=pd.device)
-        field = (scanner.nonlinearity, f0, scanner.z_asymmetry)
-    start = phantom.pos if field is not None else fields.pos
+    # moving spins under the field model walk and move in true coordinates (prep.start); every segment maps them
+    # to encoding positions and concomitant coefficients (_moving_fields). Static spins: prep.fields.
+    fields, bound, gen, field, start = prep.fields, prep.bound, prep.generalized, prep.field_model, prep.start
     walk = None
     if phantom.diffusion is not None:  # spins walk from their positions (encoding ones without a moving field model)
         D = phantom.diffusion.to(pd.dtype)
         fac = torch.sqrt(D) if D.dim() == 1 else torch.linalg.cholesky(D)
         idx = np.arange(n, dtype=np.uint64)
         restr = None
-        if phantom.restriction is not None:
-            if D.dim() != 1:
-                raise ValueError("restricted diffusion needs an isotropic diffusivity (N,)")
+        if phantom.restriction is not None:  # isotropic (prepare checks)
             res = phantom.restriction.expand(n, pd)
             restr = (res, start, tau_max(res, D))
         walk = (fac, int(seed), idx, restr)
@@ -538,8 +527,6 @@ def simulate(
                    fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move, field=field)
     moving = walk is not None or move is not None
     if maps is not None:
-        if maps.coils is not None and coils is not None:
-            raise ValueError("coil sensitivities come from either `coils` or `maps`, not both")
         grid = maps.channels(pd.dtype).to(pd.device)
         origin = torch.as_tensor(maps.origin, dtype=pd.dtype, device=pd.device)
         spacing = torch.as_tensor(maps.spacing, dtype=pd.dtype, device=pd.device)
@@ -561,19 +548,9 @@ def simulate(
     off = seq.b0_offset
     use_off = off is not None and (off.requires_grad or bool(off.any()))
 
-    mb = None
-    if m_init is None:
-        mx, my, mz = torch.zeros_like(pd), torch.zeros_like(pd), pd
-    elif m_init.shape[-1] == 4:
-        mx, my, mz, mb = m_init.unbind(-1)
-    else:
-        mx, my, mz = m_init.unbind(-1)
-    if bound is not None and mb is None:
-        mb = bound.f * pd
+    mx, my, mz, mb = prep.m0
     if gen:  # modes of the bound pool's transverse magnetization, at rest
         mb = (mb, torch.zeros(n, len(spins.modes[0]), dtype=spins.modes[0].dtype, device=pd.device))
-    elif bound is None and mb is not None:
-        raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
 
     # group steps into chunks of about checkpoint_every segments
     steps, chunks = _steps(seq, merge_free_runs), []
