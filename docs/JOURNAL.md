@@ -2660,3 +2660,12 @@ controls).
   mean / brain median 1.49 against 1.21 (partial volume at 3.4 mm pulls both down from the closed form). So the
   machinery found the contrast that fits *this* lesion's assumed T2*; whether a real lesion is T2*-long is a question
   for the literature (recorded as assumed in lesion_slabs), not a claim of this experiment.
+- **The joint phase, second fix (4baab75):** with the net held gently (lr 3e-5, batch-norm fixed) the joint loss at
+  100 % still went 0.19 -> 0.69 (20-batch mean) within 20 steps. Adam moves every parameter by ~lr per step whatever
+  the gradient's signal-to-noise, and a central line moves 32 cycles per unit of its tanh-raw parameter, so at
+  design lr 1e-2 the central lines wandered ~0.3 cycles a step under a net trained on the grid (|ky| < 4: 8 -> 10
+  lines in 40 steps). The line positions now have their own rate (`--ky-lr 1e-3`) and the flips / TE / TR 3e-3:
+  the joint loss holds at 0.189 / 0.193 / 0.210 at steps 0 / 20 / 40, with the design moving slowly (flips 15.0 ->
+  15.2 deg, spread 14.7-15.6; TE 60.0 ms; TR 70.0 -> 70.5 ms). The broken run's log is kept as
+  `design5_rss_f1.0_designlr1e-2.log`. Queued after it on the mini: arm C at 50 %, then every arm with
+  variable-density lines (`--sampling gauss`) at 50 % and 30 % (`design6_gauss_f*`).
