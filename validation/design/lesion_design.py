@@ -306,7 +306,10 @@ def main():
     ap.add_argument("--steps", type=int, default=400, help="arm C: joint design + network steps, one simulated batch each")
     ap.add_argument("--batch", type=int, default=8, help="arm C: slabs per simulated step")
     ap.add_argument("--replay", type=int, default=4, help="arm C: extra network-only updates per step from the replay buffer")
-    ap.add_argument("--design-lr", type=float, default=1e-2)
+    ap.add_argument("--design-lr", type=float, default=3e-3, help="arm C: Adam's rate for the flips, TE and TR (raw parameters)")
+    ap.add_argument("--ky-lr", type=float, default=1e-3, help="arm C: Adam's rate for the line positions. Adam moves every parameter "
+                    "~lr per step whatever the gradient's signal-to-noise, and a central line moves nx/2 cycles per unit of its raw "
+                    "parameter: at 1e-2 the central lines wandered 0.3 cycles a step and the joint loss went 0.19 -> 0.69 in 20 steps")
     ap.add_argument("--net-lr", type=float, default=3e-5, help="arm C: the network's rate in the joint phase. It starts from G's converged "
                     "net (cosine-decayed to 1e-5); at 3e-4 with a fresh Adam and batches of 8 the joint phase wrecked it (100 %%: G 0.95 -> C 0.66 "
                     "with the design nearly unchanged), so the joint phase keeps batch-norm statistics and dropout fixed and moves the net gently")
@@ -440,7 +443,8 @@ def main():
         gen = torch.Generator().manual_seed(args.seed + 100)
         net = copy.deepcopy(nets_g[0])
         net.eval()  # the joint phase fine-tunes G's net: batch-norm statistics and dropout fixed, gradients still flow
-        opt_design = torch.optim.Adam(design.parameters(), lr=args.design_lr)
+        opt_design = torch.optim.Adam([{"params": [design.flip_raw, design.te_raw, design.tr_raw], "lr": args.design_lr},
+                                       {"params": [design.ky_raw], "lr": args.ky_lr}])
         opt_net = torch.optim.Adam(net.parameters(), lr=args.net_lr, weight_decay=1e-4)
         buffer = collections.deque(maxlen=32 * args.batch)
         t0 = time.perf_counter()
