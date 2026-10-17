@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import math
 import tempfile
 import time
@@ -119,14 +120,11 @@ def bound_pool(lineshape: str) -> bp.BoundPool:
 
 
 def simulator():
-    """``bp.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    """``bp.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=gpu`` (or metal, cuda; float32)."""
     import os
 
-    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
-        from blochparty.metal import simulate_metal
-
-        return simulate_metal
-    return bp.simulate
+    engine = os.environ.get("BLOCHPARTY_BACKEND", "core")
+    return bp.simulate if engine == "core" else functools.partial(bp.simulate, engine=engine)
 
 
 def spin(db0: float | torch.Tensor, lineshape: str) -> bp.Phantom:

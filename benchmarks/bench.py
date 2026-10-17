@@ -119,9 +119,10 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
-    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "metal", "cuda"])
+    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "gpu", "metal", "cuda"],
+                   help="gpu: CUDA where an NVIDIA GPU is, else Metal")
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
-    p.add_argument("--checkpoint-every", type=int, default=None, help="metal / cuda --grad: checkpoint interval")
+    p.add_argument("--checkpoint-every", type=int, default=None, help="gpu / metal / cuda --grad: checkpoint interval")
     p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
     p.add_argument("--record", action="store_true", help="append results to history.jsonl")
     args = p.parse_args(argv)
@@ -130,29 +131,18 @@ def main(argv=None):
     simulate, threads, backend = bp.simulate, torch.get_num_threads(), args.backend
     if args.backend == "chunked":
         simulate = bp.simulate_chunked
-    elif args.backend == "metal":
-        from blochparty import metal
-
+    elif args.backend in ("gpu", "metal", "cuda"):
+        engine = bp.engines.resolve(args.backend)
         if args.dtype != "float32":
-            p.error("--backend metal is float32")
-        metal._lib()  # compile the shader outside the timed region
-        # and the first dispatch (~80 ms of pipeline setup, otherwise charged to the first case)
+            p.error(f"--backend {args.backend} is float32")
+        # compile the kernels (Metal: the library; CUDA: NVRTC or the disk cache) and run the first dispatch outside
+        # the timed region (~80 ms of pipeline setup on Metal, otherwise charged to the first case)
         warm = bp.shepp_logan(8, dtype=torch.float32)
-        metal.simulate_metal(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
-                             bp.birdcage_sensitivities(warm.pos, n_coils=8))
-        simulate = functools.partial(metal.simulate_metal, checkpoint_every=args.checkpoint_every)
-        threads, backend = "GPU", "metal (Apple GPU)"
-    elif args.backend == "cuda":
-        from blochparty import cuda
-
-        if args.dtype != "float32":
-            p.error("--backend cuda is float32")
-        # compile (or load from the disk cache) and run the first kernels outside the timed region
-        warm = bp.shepp_logan(8, dtype=torch.float32)
-        cuda.simulate_cuda(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
-                           bp.birdcage_sensitivities(warm.pos, n_coils=8))
-        simulate = functools.partial(cuda.simulate_cuda, checkpoint_every=args.checkpoint_every)
-        threads, backend = "GPU", f"cuda ({torch.cuda.get_device_name()})"
+        bp.simulate(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
+                    bp.birdcage_sensitivities(warm.pos, n_coils=8), engine=engine)
+        simulate = functools.partial(bp.simulate, engine=engine, checkpoint_every=args.checkpoint_every)
+        threads = "GPU"
+        backend = "metal (Apple GPU)" if engine == "metal" else f"cuda ({torch.cuda.get_device_name()})"
     if args.grad:
         if args.record:
             p.error("--record tracks forward runs only")
@@ -180,7 +170,7 @@ def main(argv=None):
                  "dtype": args.dtype, "threads": threads, "peak_rss_mb": round(peak_mb),
                  "projected_128_min": round(proj / 60, 1), "results": results}
         if args.backend != "torch":
-            entry.update(backend=args.backend)
+            entry.update(backend=engine if args.backend == "gpu" else args.backend)
         if args.repeat > 1:
             entry.update(repeat=args.repeat)
         with HISTORY.open("a") as f:

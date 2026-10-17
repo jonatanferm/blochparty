@@ -92,11 +92,9 @@ def main():
                            r2star_acquisition=AHEAD_R2STAR_ACQUISITION)
         ph.pos = ph.pos - ph.pos.mean(0)
         seq = bp.gre_2d(192, 0.24, flip_deg=15.0, tr=30e-3, te=te, n_dummy=40)
-        try:
-            from blochparty import metal
-
-            s = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32)).signal.to(torch.complex128)
-        except ImportError:
+        if bp.engines.available("gpu"):
+            s = bp.simulate(ph.to(torch.float32), seq.to(torch.float32), engine="gpu").signal.to(torch.complex128)
+        else:
             s = bp.simulate(ph, seq).signal
         img = bp.reconstruct(s, seq)[0].abs().numpy()
         ax[j + 1].imshow(img[::-1], cmap="gray", vmax=np.percentile(img, 99.5))

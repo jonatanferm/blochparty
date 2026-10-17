@@ -133,9 +133,8 @@ def contrast():
 
 
 def benchmark():
-    from blochparty.metal import available,simulate_metal
-    if not available():
-        raise RuntimeError("Apple GPU unavailable; run with host GPU access")
+    if not bp.engines.available("gpu"):
+        raise RuntimeError("no GPU engine here (Apple GPU or NVIDIA); run with host GPU access")
     started = time.perf_counter()
     a = load_brainweb(4,ROOT,voxel=(.001,)*3)
     load_seconds = time.perf_counter()-started
@@ -146,11 +145,9 @@ def benchmark():
     assembly_seconds = time.perf_counter()-started
     sequence = bp.SequenceBuilder(dtype=torch.float32).rf(.001,flip_deg=30,n_steps=50).readout(32,.0002).build()
     small = replace(ph,**{key:getattr(ph,key)[:100] for key in ("pos","pd","t1","t2","db0")})
-    simulate_metal(small,sequence)  # shader warm-up excluded
-    torch.mps.synchronize()
+    bp.simulate(small,sequence,engine="gpu")  # shader warm-up excluded
     started = time.perf_counter()
-    out = simulate_metal(ph,sequence)
-    torch.mps.synchronize()
+    out = bp.simulate(ph,sequence,engine="gpu")  # results come back on the CPU: the GPU has finished
     elapsed = time.perf_counter()-started
     return dict(spins=len(ph),load_seconds=load_seconds,assembly_seconds=assembly_seconds,
         gpu_seconds=elapsed,spins_per_second=len(ph)/elapsed,segments=len(sequence),adc_samples=32,

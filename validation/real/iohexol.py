@@ -19,6 +19,7 @@ Test: per tube, water T1 / T2 and the iohexol pool(s) calibrated on the 1.5 s Z-
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import sys
@@ -36,14 +37,14 @@ N, NPAR, NOFF = 128, 3, 58
 
 
 def simulator():
-    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=gpu`` (or metal, cuda; float32)."""
     import os
 
-    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
-        from blochparty.metal import simulate_metal
-
-        return simulate_metal
     from blochparty import simulate
+
+    engine = os.environ.get("BLOCHPARTY_BACKEND", "core")
+    if engine != "core":
+        return functools.partial(simulate, engine=engine)
 
     return simulate
 

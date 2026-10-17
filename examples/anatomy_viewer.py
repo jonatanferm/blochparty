@@ -58,11 +58,10 @@ def build(ROOT, z0=60):
     ph=bp.to_phantom(head1,field_T=3.0,fov_region=(slice(z0,z0+2),slice(None),slice(None)),spins_per_voxel=(2,2,2),field_maps=fm,
                      variability={"t1":.05,"t2":.05,"pd":.02,"length":.01})
     c=ph.pos.mean(0).numpy()*1e3; ph.pos=ph.pos-ph.pos.mean(0)
-    from blochparty import metal
     n,fov=192,0.24
     imgs={}
     for key,seq in (("t2w",bp.tse_2d(n,fov,etl=8,esp=12e-3,tr=4.0,n_dummy=1)),("t1w",bp.gre_2d(n,fov,flip_deg=30.0,tr=20e-3,te=4.6e-3,n_dummy=60))):
-        s=metal.simulate_metal(ph.to(torch.float32),seq.to(torch.float32)).signal.to(torch.complex128)
+        s=bp.simulate(ph.to(torch.float32),seq.to(torch.float32),engine="gpu").signal.to(torch.complex128)
         im=bp.cartesian_recon(s,seq)[0].abs().numpy(); imgs[key]=im
     # grid convention: image pixel (i, j) at y = (i - n/2 + 1/2?) -> use grid_positions
     gp=bp.grid_positions((n,n),fov).numpy()  # (n,n,3) (x,y,z) m

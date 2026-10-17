@@ -25,6 +25,8 @@ from pathlib import Path
 
 import numpy as np
 
+import blochparty as bp
+
 DATA = Path(__file__).with_name("data") / "radial"
 SEQ = DATA / "radial_2D_5slices_402spokes_golden_angle.seq"
 H5 = DATA / "radial_2D_5slices_402spokes_golden_angle_data_with_traj.h5"
@@ -197,7 +199,6 @@ def simulate():
 
     import torch
 
-    from blochparty import metal
     from blochparty.girf import GIRF, apply_girf
     from blochparty.pulseq import read_pulseq
 
@@ -209,7 +210,7 @@ def simulate():
         ph = phantom(kind)
         coils = ring_coils(ph.pos).to(torch.complex64) if with_coils else None
         played = apply_girf(seq, GIRF.identity(torch.tensor([dx, dy, 0.0], dtype=torch.float64) * 1e-6))
-        sig = metal.simulate_metal(ph.to(torch.float32), played.to(torch.float32), coils).signal  # (C, n_adc)
+        sig = bp.simulate(ph.to(torch.float32), played.to(torch.float32), coils, engine="gpu").signal  # (C, n_adc)
         c = sig.shape[0]
         k = sig.to(torch.complex64).numpy().reshape(c, NSL, NSP, NS).transpose(1, 2, 0, 3)
         coef, res, _ = delays(k, traj, quiet=True)

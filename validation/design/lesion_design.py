@@ -15,8 +15,8 @@ the image SNR of a reference GRE in the head, see ``snr_unit``):
   B  the same K TSE lines -> the encoding's adjoint (per-coil zero-filled inverse DFT, no reconstruction) -> the CNN;
   G  a fixed spoiled GRE (25 deg, TE 6 ms, TR 15 ms, K lines evenly spread) -> adjoint -> CNN: what the design adds;
   C  the GRE's flips, TE, TR and line positions learned jointly with the CNN (started from G's) by gradient descent
-     through the Metal adjoint (``simulate_metal``), with a replay buffer of recent acquisitions for extra network
-     updates.
+     through the GPU adjoint (``bp.simulate(..., engine="gpu")``: Metal, or CUDA), with a replay buffer of recent
+     acquisitions for extra network updates.
 The adjoint is a fixed, parameter-free linear map of the raw samples, differentiable in the line positions (``--front
 raw`` feeds the samples to the CNN as they are, which fails: a CNN cannot read a small lesion out of k-space). The K
 lines are evenly spaced (``--sampling uniform``, SENSE's case) or drawn from a Gaussian density (``gauss``: incoherent
@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import collections
 import copy
+import functools
 import json
 import math
 import time
@@ -39,8 +40,9 @@ import torch
 from torch import nn
 
 import blochparty as bp
-from blochparty.metal import simulate_metal
 from blochparty.sequence import SequenceBuilder
+
+simulate_metal = functools.partial(bp.simulate, engine="gpu")  # Metal, or CUDA on an NVIDIA machine
 
 FOV, NX, DWELL = 0.22, 64, 10e-6
 RF_DURATION = 0.2e-3

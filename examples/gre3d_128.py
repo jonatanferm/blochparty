@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import torch
 
 import blochparty as bp
-from blochparty.metal import simulate_metal
 
 N = 128
 
@@ -20,7 +19,7 @@ coils = bp.birdcage_sensitivities(phantom.pos, n_coils=8)
 seq = bp.gre_3d(N, flip_deg=15.0, tr=10e-3, n_dummy=200, dtype=torch.float32)
 
 t0 = time.perf_counter()
-signal = simulate_metal(phantom, seq, coils).signal
+signal = bp.simulate(phantom, seq, coils, engine="gpu").signal
 t_sim = time.perf_counter() - t0
 print(f"{len(phantom)} spins x {len(seq)} segments, {seq.n_adc} samples x 8 coils: {t_sim:.0f} s "
       f"({len(phantom) * len(seq) / t_sim:.2e} spin-segments/s)")

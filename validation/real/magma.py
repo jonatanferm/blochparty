@@ -19,6 +19,7 @@ prediction.
 from __future__ import annotations
 
 import glob
+import functools
 import math
 from pathlib import Path
 
@@ -162,14 +163,14 @@ def rf_frame(seq):
 
 
 def simulator():
-    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=metal`` (float32)."""
+    """``blochparty.simulate``, or the Apple GPU kernel with ``BLOCHPARTY_BACKEND=gpu`` (or metal, cuda; float32)."""
     import os
 
-    if os.environ.get("BLOCHPARTY_BACKEND") == "metal":
-        from blochparty.metal import simulate_metal
-
-        return simulate_metal
     from blochparty import simulate
+
+    engine = os.environ.get("BLOCHPARTY_BACKEND", "core")
+    if engine != "core":
+        return functools.partial(simulate, engine=engine)
 
     return simulate
 

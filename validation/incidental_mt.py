@@ -30,7 +30,6 @@ from dataclasses import replace
 import torch
 
 import blochparty as bp
-from blochparty.metal import simulate_metal  # float32; until 2026-10-09 the fused kernel (same table)
 
 F_FAT = -3.4e-6 * 3.0 * bp.GAMMA_BAR  # [Hz]
 TR, SLOT, N_TR = 0.400, 0.040, 25
@@ -82,7 +81,7 @@ def steady_state(tissue: str, mt: bool, n_slices: int, fs) -> float:
     cut = marks[-1]  # Mz just before the last imaged excitation
     part = replace(seq, dt=seq.dt[:cut], rf=seq.rf[:cut], grad=seq.grad[:cut], adc_phase=seq.adc_phase[:cut],
                    is_rf=seq.is_rf[:cut], adc=seq.adc[:cut], spoil=seq.spoil[:cut], meta={})
-    return float(simulate_metal(ph, part).m[0, 2])
+    return float(bp.simulate(ph, part, engine="gpu").m[0, 2])  # float32; until 2026-10-09 the fused kernel (same table)
 
 
 def main():

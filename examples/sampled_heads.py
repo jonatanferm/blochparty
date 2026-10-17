@@ -49,14 +49,9 @@ def protocols(n: int, fov: float, thickness: float) -> dict:
 
 
 def simulate(ph: bp.Phantom, seq: bp.Sequence, coils: torch.Tensor) -> tuple[torch.Tensor, str]:
-    try:
-        from blochparty import metal
-
-        if metal.available():
-            out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64))
-            return out.signal.to(torch.complex128), "metal"
-    except ImportError:
-        pass
+    if bp.engines.available("gpu"):
+        out = bp.simulate(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64), engine="gpu")
+        return out.signal.to(torch.complex128), bp.engines.resolve("gpu")
     return bp.simulate(ph, seq, coils).signal, "core"
 
 

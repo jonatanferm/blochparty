@@ -4,9 +4,10 @@ descent *through the full Bloch simulation and reconstruction*, then compare
 with a brute-force search over the closed-form steady-state signal.
 
     uv run python examples/optimize_contrast.py
-    uv run python examples/optimize_contrast.py --metal   # through the Apple GPU kernel's adjoint (float32)
+    uv run python examples/optimize_contrast.py --gpu   # through the GPU adjoint (Metal or CUDA; float32)
 """
 
+import functools
 import math
 import sys
 import time
@@ -23,8 +24,8 @@ maps = bp.shepp_logan_maps(N)
 phantom = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV)
 wm, gm = maps["label"] == LABELS.index("wm"), maps["label"] == LABELS.index("gm")
 flip = torch.tensor(40.0, dtype=torch.float64, requires_grad=True)
-if "--metal" in sys.argv[1:]:
-    from blochparty.metal import simulate_metal as simulate
+if {"--gpu", "--metal"} & set(sys.argv[1:]):  # the GPU adjoint (Metal or CUDA)
+    simulate = functools.partial(bp.simulate, engine="gpu")
 else:
     simulate = bp.simulate
 

@@ -35,6 +35,7 @@ Prisma GIRF of benchmark 7), all on common seeds so the differences are paired. 
 
 from __future__ import annotations
 
+import functools
 import math
 import sys
 from dataclasses import dataclass, replace
@@ -280,7 +281,7 @@ class Bench:
     def curves(self, theta=None, delays=None, sim=None) -> torch.Tensor:
         """(n_images, 14) model curves; differentiable in ``theta`` (B1+) and ``delays``."""
         if sim is None:
-            from blochparty.metal import simulate_metal as sim
+            sim = functools.partial(bp.simulate, engine="gpu")
         ph = self.cols.phantom
         if theta is not None:
             ph = replace(ph, b1=b1_field(ph.pos, theta).to(ph.pd.dtype))
@@ -475,8 +476,9 @@ class Full:
         import time
 
         from blochparty.fields import Scanner
-        from blochparty.metal import simulate_metal
 
+        simulate_metal = functools.partial(bp.simulate, engine="gpu")  # Metal, or CUDA on an NVIDIA machine
+        gpu = getattr(torch, "cuda" if bp.engines.resolve("gpu") == "cuda" else "mps")
         kw = {"scanner": Scanner(field_strength=3.0, concomitant="leading")} if phys.concomitant else {}
         seqs = self.sequences(phys)
         out = []
@@ -488,7 +490,7 @@ class Full:
                 out.append(np.stack(imgs))
             else:
                 out.append(self.m.sim_complex_images(sum(simulate_metal(ph, seqs[0], **kw).signal for ph in phs)))
-            torch.mps.empty_cache()  # long runs on a 16 GB machine: give cached GPU buffers back between seeds
+            gpu.empty_cache()  # long runs on a 16 GB machine: give cached GPU buffers back between seeds
             log(f"    seed {k}: {' + '.join(str(len(p)) for p in phs)} spins, {time.perf_counter() - t0:.0f} s, "
                 f"GPU driver memory {torch.mps.driver_allocated_memory() / 2**30:.1f} GB")
         return np.array(out)
@@ -580,7 +582,7 @@ VARIANTS = [("centre, no water ", dict(water=None)), ("3x3 grid, no water", dict
 
 def check():
     """Reduced vs full model at nominal parameters, both benchmarks: per-sphere curve shapes."""
-    from blochparty.metal import simulate_metal
+    simulate_metal = functools.partial(bp.simulate, engine="gpu")
 
     sys.path.insert(0, str(HERE))
     import nist_irse as b1

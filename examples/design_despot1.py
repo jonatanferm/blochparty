@@ -3,19 +3,21 @@
 Two spoiled-GRE steady states at flip angles a1, a2 (same TR) determine M0 and T1. The
 bound on the variance of the T1 estimate comes from the Jacobian of the *simulated*
 signals w.r.t. (M0, T1) (``blochparty.design.crb``), and gradient descent through the core
-(float64, about a minute) or the Metal adjoint (``--metal``, float32, seconds) moves the two flip
+(float64, about a minute) or the GPU adjoint (``--gpu``, float32, seconds) moves the two flip
 angles to minimise it. Known result (Deoni, Rutt & Peters, MRM
 49:515, 2003): at the optimum both signals are ≈ 71 % of the Ernst-angle maximum. Checked
 here against a brute-force grid search over the closed-form signal and its exact derivative.
 
-    uv run python examples/design_despot1.py [--metal]
+    uv run python examples/design_despot1.py [--gpu]
 """
 
+import functools
 import math
 import time
 
 import torch
 
+import blochparty as bp
 from blochparty import Phantom, Sequence, SequenceBuilder
 from blochparty.design import crb, minimize
 
@@ -117,12 +119,11 @@ def main():
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--metal", action="store_true", help="through the GPU adjoint (float32) instead of the core")
+    p.add_argument("--gpu", "--metal", action="store_true", help="through the GPU adjoint (float32) instead of the core")
     args = p.parse_args()
-    if args.metal:  # float32: fourth-order differences with a step large against the signals' rounding
-        from blochparty.metal import simulate_metal
-
-        res, engine = optimize(simulate=simulate_metal, rel_step=METAL_STEP, method="fd4"), "Metal adjoint"
+    if args.gpu:  # float32: fourth-order differences with a step large against the signals' rounding
+        gpu = functools.partial(bp.simulate, engine="gpu")
+        res, engine = optimize(simulate=gpu, rel_step=METAL_STEP, method="fd4"), f"{bp.engines.resolve('gpu')} adjoint"
     else:
         res, engine = optimize(), "core"
     print(f"T1 {T1} s, TR {TR * 1e3:g} ms, Ernst angle {math.degrees(math.acos(math.exp(-TR / T1))):.3f} deg")
@@ -135,7 +136,7 @@ def main():
     fr = [ernst_fraction(a) for a in res["flips"]]
     print(f"signals at {100 * fr[0]:.2f} % and {100 * fr[1]:.2f} % of the Ernst maximum (Deoni 2003: ≈ 71 %)")
     # the bound is flat along a2: float32 rounding moves the found pair by up to 0.03 deg, at < 1e-5 of the bound
-    assert max(abs(res["flips"][0] - g1), abs(res["flips"][1] - g2)) < (0.05 if args.metal else 0.01)
+    assert max(abs(res["flips"][0] - g1), abs(res["flips"][1] - g2)) < (0.05 if args.gpu else 0.01)
     assert excess < 1e-5
     assert all(abs(f - 0.71) < 0.01 for f in fr)
 

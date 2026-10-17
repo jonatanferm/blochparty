@@ -26,13 +26,8 @@ ROOT = Path(__file__).resolve().parents[1] / "anatomy" / "data"
 
 
 def simulate(phantom, seq, maps=None):
-    try:
-        from blochparty import metal
-
-        if metal.available():
-            return metal.simulate_metal(phantom.to(torch.float32), seq.to(torch.float32), maps=maps).signal.to(torch.complex128)
-    except ImportError:
-        pass
+    if bp.engines.available("gpu"):
+        return bp.simulate(phantom.to(torch.float32), seq.to(torch.float32), maps=maps, engine="gpu").signal.to(torch.complex128)
     return bp.simulate(phantom, seq, maps=maps).signal
 
 

@@ -22,6 +22,7 @@ receiver phase (follows the RF phase: the data do not alternate).
 
 from __future__ import annotations
 
+import functools
 import math
 from pathlib import Path
 
@@ -138,12 +139,7 @@ def signals(t1, t2, b1, df=None, *, n_z: int = 101, batch: int = 64, **model) ->
     seq = _seq(**model)
     z = slice_spins(n_z) if model.get("slice_select", True) else torch.zeros(1, dtype=torch.float64)
     nz = len(z)
-    try:
-        from blochparty import metal
-
-        run = metal.simulate_metal if metal.available() else bp.simulate
-    except ImportError:
-        run = bp.simulate
+    run = functools.partial(bp.simulate, engine="gpu" if bp.engines.available("gpu") else "core")
     out = []
     for a in range(0, len(t1), batch):
         m = min(batch, len(t1) - a)

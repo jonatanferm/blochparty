@@ -24,14 +24,9 @@ ROOT = Path(__file__).resolve().parents[1] / "validation" / "anatomy" / "data"
 
 
 def run(phantom: bp.Phantom, seq: bp.Sequence) -> np.ndarray:
-    try:
-        from blochparty import metal
-
-        if metal.available():
-            s = metal.simulate_metal(phantom.to(torch.float32), seq.to(torch.float32)).signal.to(torch.complex128)
-            return bp.cartesian_recon(s, seq)[0].abs().numpy()
-    except ImportError:
-        pass
+    if bp.engines.available("gpu"):
+        s = bp.simulate(phantom.to(torch.float32), seq.to(torch.float32), engine="gpu").signal.to(torch.complex128)
+        return bp.cartesian_recon(s, seq)[0].abs().numpy()
     return bp.cartesian_recon(bp.simulate(phantom, seq).signal, seq)[0].abs().numpy()
 
 

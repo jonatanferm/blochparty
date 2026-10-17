@@ -21,6 +21,7 @@ spheres and scored on the odd ones (a first digital-twin step).
 from __future__ import annotations
 
 import argparse
+import functools
 import os
 import time
 from dataclasses import replace
@@ -37,10 +38,9 @@ from nist import (N, PIXEL, T2_MNCL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask,
                   phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_positions,
                   sphere_radius, t1_of_mncl2)
 
-if os.environ.get("BLOCHPARTY_BACKEND") == "core":  # the float64 reference (slow at this size)
-    engine = bp.simulate
-else:  # the Apple GPU (float32); until 2026-10-09 the fused CPU kernel, with the same tables
-    from blochparty.metal import simulate_metal as engine
+# BLOCHPARTY_BACKEND=core: the float64 reference (slow at this size); default the GPU (float32: Metal, or CUDA on an
+# NVIDIA machine); until 2026-10-09 the fused CPU kernel, with the same tables
+engine = functools.partial(bp.simulate, engine=os.environ.get("BLOCHPARTY_BACKEND", "gpu"))
 
 DATA = Path(__file__).with_name("data") / "developer_main_site" / "TSE_T2_mapping"
 SEQ = DATA / "acq" / "tse_multiecho_NIST_t2_sag.seq"

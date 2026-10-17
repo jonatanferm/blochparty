@@ -20,6 +20,7 @@ does not change the shapes. The measurement side is ``spiral_tse_recon.py`` (own
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import subprocess
@@ -71,8 +72,6 @@ def first_trs(seq: bp.Sequence, n: int = 3) -> bp.Sequence:
 
 def echoes(seq, t1, t2, b1) -> np.ndarray:
     """(atoms, 10) complex echoes of the last simulated TR at the k-space centre."""
-    from blochparty import metal
-
     t1, t2, b1 = (np.atleast_1d(np.asarray(v, float)) for v in (t1, t2, b1))
     z = torch.linspace(-EXTENT / 2, EXTENT / 2, NZ, dtype=torch.float64)
     n = len(t2) * NZ
@@ -83,7 +82,7 @@ def echoes(seq, t1, t2, b1) -> np.ndarray:
                     db0=torch.zeros(n, dtype=torch.float64), b1=rep(b1))
     coils = torch.zeros(n, len(t2), dtype=torch.complex64)
     coils[torch.arange(n), torch.arange(n) // NZ] = 1.0 / NZ
-    run = metal.simulate_metal if metal.available() else bp.simulate
+    run = functools.partial(bp.simulate, engine="gpu" if bp.engines.available("gpu") else "core")
     s = run(ph, seq, coils=coils).signal.numpy().reshape(len(t2), -1, 91)[:, :, 0]
     return s[:, -10:]
 

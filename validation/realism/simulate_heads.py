@@ -351,12 +351,10 @@ def kspace_on_fov(signal, seq) -> np.ndarray:
 
 
 def simulate(ph, seq, coils):
-    from blochparty import metal
-
-    if metal.available():
-        out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64),
-                                   readouts="nufft", pulses="reuse")  # PERFORMANCE 2.1 and 2.3 (exact)
-        return out.signal.to(torch.complex128), "metal"
+    if bp.engines.available("gpu"):
+        out = bp.simulate(ph.to(torch.float32), seq.to(torch.float32), coils.to(torch.complex64), engine="gpu",
+                          readouts="nufft", pulses="reuse")  # PERFORMANCE 2.1 and 2.3 (exact)
+        return out.signal.to(torch.complex128), bp.engines.resolve("gpu")
     return bp.simulate(ph, seq, coils).signal, "core"
 
 
