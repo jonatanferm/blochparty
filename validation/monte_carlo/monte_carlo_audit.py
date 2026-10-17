@@ -1,22 +1,20 @@
 """Reproduce small, CPU-only diagnostics in docs/MONTE_CARLO_REVIEW.md.
 
-Run: .venv/bin/python validation/monte_carlo_audit.py
+Run: .venv/bin/python validation/monte_carlo/monte_carlo_audit.py
 These are estimator/analytic-integral experiments, not scanner throughput benchmarks.
 """
 
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 import scipy
 import torch
 from scipy.stats import qmc
 
-sys.path.insert(0, str(Path(__file__).parent / "real"))
-from nist import _sobol_points, jackknife, mc_magnitude  # noqa: E402
+from blochparty.montecarlo import jackknife, mc_magnitude
+from blochparty.montecarlo import sobol_points as _sobol_points
 
 import blochparty as bp
 from blochparty.rng import normals

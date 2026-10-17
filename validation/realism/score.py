@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -31,7 +30,6 @@ from torch import nn
 from blochparty.design import auc, bootstrap  # noqa: F401 (gap.py uses them as score.auc, score.bootstrap)
 from blochparty.generate.sample import unit_floor  # noqa: F401 (moved there; gap.py uses score.unit_floor)
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
 import simulate_heads as SH  # noqa: E402
 

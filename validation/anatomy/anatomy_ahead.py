@@ -12,7 +12,7 @@ Checks (printed; recorded in validation/anatomy/RESULTS.md):
   relative PD maps, with the QSM-derived field (brain only, relative); T2 an explicit assumption; the
   default T2* policy separates microscopic R2' from the field's own dephasing (32 spins per voxel).
 
-    uv run python validation/anatomy/fetch_ahead.py && uv run python validation/anatomy_ahead.py
+    uv run python validation/anatomy/fetch_ahead.py && uv run python validation/anatomy/anatomy_ahead.py
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ import torch
 import blochparty as bp
 from blochparty.anatomy import AHEAD_R2STAR_ACQUISITION, Distribution, TissueProperties
 
-ROOT = Path(__file__).resolve().parent / "anatomy" / "data" / "ahead"
+ROOT = Path(__file__).resolve().parent / "data" / "ahead"
 
 
 def world(a: bp.Anatomy):

@@ -27,13 +27,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
 from scipy import ndimage as ndi, stats
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 BANDS = [(0.05, 0.15), (0.15, 0.3), (0.3, 0.45), (0.45, 0.6), (0.6, 0.8), (0.8, 1.0)]
 SECTORS = {"posterior": range(-6, 7), "right": range(12, 25), "anterior": range(30, 43), "left": range(48, 61)}

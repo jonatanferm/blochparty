@@ -27,9 +27,6 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).parent))
-import twix  # noqa: E402
-
 DATA = Path(__file__).with_name("data") / "iohexol"
 SEQ15 = DATA / "Ref_00_3D_res128_alpha_4_OC_15_100ms_1ms_4ppm_Phantom_Trec_3p5.seq"
 RAW = {1.5: DATA / "meas_MID00127_FID56966_Ref_Tsat_1p5.dat", 4.0: DATA / "meas_MID00131_FID56970_Ref_Tsat_4.dat"}
@@ -73,6 +70,8 @@ def encoding() -> tuple[np.ndarray, np.ndarray]:
 
 def recon(tsat: float) -> np.ndarray:
     """(offsets, coils, NPAR, N, N) complex images."""
+    from blochparty.io import twix  # here, so the module stays numpy-only on import (iohexol_t1 imports it)
+
     adc, _ = twix.read_adcs(RAW[tsat])
     ky, kz = encoding()
     nc = adc.shape[1]
@@ -139,7 +138,6 @@ def sat_pulse(step: float = 100e-6):
     import pypulseq as pp
     import torch
 
-    sys.path.insert(0, str(Path(__file__).parent))
     from magma import rf_frame
 
     from blochparty.pulseq import read_pulseq
@@ -224,7 +222,6 @@ def spectra(par: dict, db0_hz, b1, n_pulses: int, passes: int = 2, step: float =
     default equilibrium). Returns (Z, Mz before readout, start states for the next call)."""
     import torch
 
-    import blochparty as bp
 
     env, period, sign, _, _ = sat_pulse(step)
     prep, ro, g, gap = build_offsets(n_pulses, env, period, step)

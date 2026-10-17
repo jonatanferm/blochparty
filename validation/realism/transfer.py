@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -26,9 +25,7 @@ from torch import nn
 
 import blochparty as bp
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
-import score as SC  # noqa: E402
 
 
 def undersample(k: np.ndarray, accel: int, centre: float, rng) -> np.ndarray:
@@ -177,7 +174,6 @@ def main():
     ap.add_argument("--slices", default="1-7")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
-    import h5py
     device = "mps" if torch.backends.mps.is_available() else "cpu"
     rng = np.random.default_rng(args.seed)
     lo, _, hi = args.slices.partition("-")

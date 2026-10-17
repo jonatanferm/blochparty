@@ -19,8 +19,6 @@ from __future__ import annotations
 
 import json
 import math
-import sys
-from pathlib import Path
 
 import finufft
 import h5py
@@ -28,7 +26,6 @@ import numpy as np
 from scipy import ndimage
 from scipy.optimize import least_squares
 
-sys.path.insert(0, str(Path(__file__).parent))
 import iohexol as I  # noqa: E402  (numpy-only parts)
 
 H5 = I.DATA / "meas_MID00123_FID56962_IR_LL_SOS.h5"

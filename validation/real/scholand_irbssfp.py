@@ -27,7 +27,6 @@ from pathlib import Path
 import numpy as np
 
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
 import nist  # noqa: E402
 import scholand as s  # noqa: E402
 

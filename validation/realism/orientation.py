@@ -17,12 +17,10 @@ as-is, i.e. were shown anterior up.
 import argparse
 import json
 from pathlib import Path
-import sys
 
 import numpy as np
 from scipy import ndimage
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
 import score as S  # noqa: E402
 import simulate_heads as SH  # noqa: E402

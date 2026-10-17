@@ -9,7 +9,7 @@ dependencies = ["torch>=2.4", "numpy"]
 [project.optional-dependencies]
 anatomy = ["nibabel>=5"]  # optional NIfTI reader for locally supplied QSM Challenge maps
 pulseq = ["pypulseq>=1.5"]  # read_pulseq
-mrzero = ["MRzeroCore>=1.1"]  # validation/compare_mrzero.py and the crosscheck tests
+mrzero = ["MRzeroCore>=1.1"]  # validation/mrzero/compare_mrzero.py and the crosscheck tests
 io = ["ismrmrd>=1.14", "h5py>=3"]  # io.write_dataset / read_dataset (ISMRMRD HDF5)
 
 [dependency-groups]
@@ -26,4 +26,4 @@ markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m
            "slow: over ~1 s; pytest -m 'not slow' is the quick subset for iterating (under a minute)"]
 addopts = "-m 'not crosscheck' --import-mode=importlib"
 # helpers.py and cases.py (tests/), and the example and validation scripts the tests import
-pythonpath = ["tests", "examples", "validation", "validation/real", "validation/realism", "validation/anatomy"]
+pythonpath = ["tests", "examples", "validation/mrzero", "validation/real", "validation/realism", "validation/anatomy"]

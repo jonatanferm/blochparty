@@ -1,7 +1,7 @@
 """Opt-in cross-simulator check (``uv run pytest -m crosscheck``, needs the ``mrzero`` extra):
-the harness in validation/compare_mrzero.py on a 16 x 16 phantom.
+the harness in validation/mrzero/compare_mrzero.py on a 16 x 16 phantom.
 
-Tolerances, from the full 32 x 32 runs in validation/RESULTS.md:
+Tolerances, from the full 32 x 32 runs in validation/mrzero/RESULTS.md:
 * MRzero vs blochparty < 1e-4 (max relative k-space difference). MRzero's float32 and its
   merging of PDG states whose k-vectors agree only to float32 precision give up to ~4e-5
   on the RF-spoiled GRE; everything else is at 1e-6..1e-5.

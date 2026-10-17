@@ -251,7 +251,6 @@ class Bench:
     their k = 0 pairs, the columns, and the measured ROI means."""
 
     def __init__(self, name: str, wall=1e-3, **col_kw):
-        sys.path.insert(0, str(HERE))
         from nist import roi_means, slice_position, sphere_radius
 
         self.name = name
@@ -409,7 +408,6 @@ class Full:
     Sobol seeds as ``nist_irse.monte_carlo`` / ``nist_tse.monte_carlo``, with the twin's inputs."""
 
     def __init__(self, name: str, n=256, wall=1e-3, margin=8, dense=3, sparse=0.25):
-        sys.path.insert(0, str(HERE))
         from nist import fill_mask, roi_means, slice_position, sphere_radius
 
         self.name, self.n, self.wall, self.margin, self.dense, self.sparse = name, n, wall, margin, dense, sparse
@@ -584,7 +582,6 @@ def check():
     """Reduced vs full model at nominal parameters, both benchmarks: per-sphere curve shapes."""
     simulate_metal = functools.partial(bp.simulate, engine="gpu")
 
-    sys.path.insert(0, str(HERE))
     import nist_irse as b1
     import nist_tse as b2
     from nist import phantom, roi_means, slice_position, sphere_radius

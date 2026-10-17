@@ -1,7 +1,7 @@
 """BrainWeb contrast plausibility and full-head throughput (not scanner ground truth).
 
     uv run python validation/anatomy/fetch_brainweb.py --legacy
-    uv run python validation/anatomy_brainweb.py [--benchmark]
+    uv run python validation/anatomy/anatomy_brainweb.py [--benchmark]
 
 The 20-model set supplies only SFLASH T1 (22/9.2 ms, 30 deg). The older
 single-subject SBD supplies T1 (18/10 ms, 30 deg) and double-spin-echo T2/PD
@@ -32,7 +32,7 @@ import blochparty as bp
 from blochparty.anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, Distribution,
                                anatomy_field_maps, load_brainweb, to_phantom)
 
-ROOT = Path(__file__).with_name("anatomy")/"data"
+ROOT = Path(__file__).parent/"data"
 
 
 def read(entry,shape):

@@ -32,10 +32,10 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from . import sequence as _sequence
-from .sequences import builder as _events
-from .constants import GAMMA_BAR
-from .sequence import Sequence, kspace_trajectory
+from .. import sequence as _sequence
+from ..sequences import builder as _events
+from ..constants import GAMMA_BAR
+from ..sequence import Sequence, kspace_trajectory
 
 TICK = 2.5e-3  # [s] ISMRMRD time-stamp unit
 _ARRAYS = ("dt", "rf", "grad", "adc_phase", "b0_offset", "rf_freq")
@@ -188,8 +188,8 @@ def write_dataset(path, signal, seq: Sequence, *, phantom=None, coils=None, nois
     "birdcage", "n": 8}`` and ``{"sd": 1e-3, "seed": 4}``; ``seed`` and ``engine`` say how it
     was run. Overwrites ``path``."""
     h5py, ismrmrd = _imports()
-    from .anatomy import DigitalPhantom
-    from .sequences.pulseq import write_pulseq
+    from ..anatomy import DigitalPhantom
+    from ..sequences.pulseq import write_pulseq
 
     path = Path(path)
     sig = getattr(signal, "signal", signal)

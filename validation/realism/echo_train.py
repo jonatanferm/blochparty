@@ -15,12 +15,10 @@ simulate_heads.py's ``--train header`` plays this train; the fitted one was 16 e
 import argparse
 from pathlib import Path
 import re
-import sys
 
 import numpy as np
 from scipy import ndimage, signal
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
 
 

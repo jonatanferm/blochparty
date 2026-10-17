@@ -26,7 +26,6 @@ import hashlib
 import json
 import shutil
 import subprocess
-import sys
 import tarfile
 import time
 from pathlib import Path
@@ -79,7 +78,6 @@ def main():
     ap.add_argument("--min-field", type=float, default=None, help="drop volumes below this field strength [T] after reading their header")
     args = ap.parse_args()
     if args.compact:
-        sys.path.insert(0, str(Path(__file__).resolve().parent))
         import realism as R
     caps = {k: float(v) * GB for k, v in (c.split("=") for c in args.cap)}
     args.out.mkdir(parents=True, exist_ok=True)

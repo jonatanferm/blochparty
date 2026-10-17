@@ -20,10 +20,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from blochparty import generate  # noqa: E402
 import realism as R  # noqa: E402
 import score as SC  # noqa: E402

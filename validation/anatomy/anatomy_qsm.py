@@ -1,7 +1,7 @@
 """QSM forward comparison against pinned, independently published Python code.
 
-uv run python validation/anatomy_qsm.py --fetch-reference
-uv run python validation/anatomy_qsm.py --root validation/anatomy/data/qsm2
+uv run python validation/anatomy/anatomy_qsm.py --fetch-reference
+uv run python validation/anatomy/anatomy_qsm.py --root validation/anatomy/data/qsm2
 
 Without --root, only synthetic checks run; no real-head validation is claimed.
 This public qsm-forward implementation is a separate reference based on the paper,
@@ -20,7 +20,7 @@ import torch
 
 from blochparty import GAMMA_BAR, load_qsm2, susceptibility_to_b0
 
-HERE = Path(__file__).with_name("anatomy")
+HERE = Path(__file__).parent
 REFERENCE = HERE/"data"/"qsm-forward-reference.py"
 
 
