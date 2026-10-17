@@ -24,6 +24,7 @@ aliasing in the zero-filled image), the same set for every arm; arms G and C sta
 the test AUC per arm (A, B, G over ``--seeds`` seeds, accuracy at the threshold that is best on the training set), the
 scan time and arm C's learned sequence; run at 1.0, 0.2, 0.1 and 0.05 to see where each arm fails.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -96,7 +97,9 @@ def adjoint_image(k: torch.Tensor, ky_cycles: torch.Tensor, nx: int = NX) -> tor
 
 
 def add_noise(k: torch.Tensor, sigma: float, gen: torch.Generator | None) -> torch.Tensor:
-    noise = torch.randn(k.shape, generator=gen, dtype=torch.float32) + 1j * torch.randn(k.shape, generator=gen, dtype=torch.float32)
+    noise = torch.randn(k.shape, generator=gen, dtype=torch.float32) + 1j * torch.randn(
+        k.shape, generator=gen, dtype=torch.float32
+    )
     return k + sigma * noise.to(k.dtype)
 
 
@@ -106,8 +109,14 @@ def snr_unit(ph) -> float:
     deviation of a pixel. With ``bp.ifft2c``'s 1/N^2 normalisation a k-space sample noise of sigma gives sigma / N per
     pixel, so sigma = N x (median head pixel) / snr; this returns N x (median head pixel), the unit of sigma."""
     with torch.no_grad():
-        seq = bp.gre_2d(NX, FOV, flip_deg=25., tr=15e-3, te=6e-3, dwell=DWELL, n_dummy=N_DUMMY).to(torch.float32)
-        img = bp.ifft2c(bp.cartesian_kspace(simulate_metal(ph, seq, coils_for(ph)).signal, seq)).abs().pow(2).sum(0).sqrt()
+        seq = bp.gre_2d(NX, FOV, flip_deg=25.0, tr=15e-3, te=6e-3, dwell=DWELL, n_dummy=N_DUMMY).to(torch.float32)
+        img = (
+            bp.ifft2c(bp.cartesian_kspace(simulate_metal(ph, seq, coils_for(ph)).signal, seq))
+            .abs()
+            .pow(2)
+            .sum(0)
+            .sqrt()
+        )
         return float(img[img > 0.2 * img.max()].median()) * NX
 
 
@@ -136,7 +145,7 @@ def augment(x: torch.Tensor, gen: torch.Generator) -> torch.Tensor:
     a lesion may be anywhere). Raw k-space inputs are left alone."""
     if tuple(x.shape[-2:]) != (NX, NX):
         return x
-    if torch.rand((), generator=gen) < .5:
+    if torch.rand((), generator=gen) < 0.5:
         x = x.flip(-1)
     dy, dx = (int(v) for v in torch.randint(-4, 5, (2,), generator=gen))
     return torch.roll(x, (dy, dx), (-2, -1))
@@ -165,7 +174,7 @@ def front_input(front: str, k_lines: torch.Tensor, ky_cycles: torch.Tensor) -> t
 
 def best_threshold(y, s) -> float:
     y, s = np.asarray(y), np.asarray(s)
-    cand = np.concatenate([[0.], np.sort(np.unique(s)), [1.]])
+    cand = np.concatenate([[0.0], np.sort(np.unique(s)), [1.0]])
     mids = (cand[1:] + cand[:-1]) / 2
     accs = [((s > t) == y).mean() for t in mids]
     return float(mids[int(np.argmax(accs))])
@@ -187,28 +196,62 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--slabs", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--fraction", type=float, default=0.2, help="the share of k-space every arm may acquire (K = fraction x 64 lines)")
-    ap.add_argument("--snr", type=float, default=20., help="image SNR of the reference GRE in the head (snr_unit)")
-    ap.add_argument("--front", default="rss", choices=("rss", "coils", "raw"), help="what the CNN of arms B, G and C reads (rss read best)")
+    ap.add_argument(
+        "--fraction",
+        type=float,
+        default=0.2,
+        help="the share of k-space every arm may acquire (K = fraction x 64 lines)",
+    )
+    ap.add_argument("--snr", type=float, default=20.0, help="image SNR of the reference GRE in the head (snr_unit)")
+    ap.add_argument(
+        "--front",
+        default="rss",
+        choices=("rss", "coils", "raw"),
+        help="what the CNN of arms B, G and C reads (rss read best)",
+    )
     ap.add_argument("--epochs", type=int, default=100, help="arms A, B, G: epochs over the cached acquisitions")
     ap.add_argument("--seeds", type=int, default=3, help="arms A, B, G: repeats (initialisation, noise, order)")
-    ap.add_argument("--steps", type=int, default=400, help="arm C: joint design + network steps, one simulated batch each")
+    ap.add_argument(
+        "--steps", type=int, default=400, help="arm C: joint design + network steps, one simulated batch each"
+    )
     ap.add_argument("--batch", type=int, default=8, help="arm C: slabs per simulated step")
-    ap.add_argument("--replay", type=int, default=4, help="arm C: extra network-only updates per step from the replay buffer")
-    ap.add_argument("--design-lr", type=float, default=3e-3, help="arm C: Adam's rate for the flips, TE and TR (raw parameters)")
-    ap.add_argument("--ky-lr", type=float, default=1e-3, help="arm C: Adam's rate for the line positions. Adam moves every parameter "
-                    "~lr per step whatever the gradient's signal-to-noise, and a central line moves nx/2 cycles per unit of its raw "
-                    "parameter: at 1e-2 the central lines wandered 0.3 cycles a step and the joint loss went 0.19 -> 0.69 in 20 steps")
-    ap.add_argument("--net-lr", type=float, default=3e-5, help="arm C: the network's rate in the joint phase. It starts from G's converged "
-                    "net (cosine-decayed to 1e-5); at 3e-4 with a fresh Adam and batches of 8 the joint phase wrecked it (100 %%: G 0.95 -> C 0.66 "
-                    "with the design nearly unchanged), so the joint phase keeps batch-norm statistics and dropout fixed and moves the net gently")
-    ap.add_argument("--starts", default="25:6:15,10:6:15,25:20:30,15:30:40,15:45:55,15:60:70",
-                    help="arm G / C's starting designs as flip_deg:TE_ms:TR_ms (K lines evenly spread): each is fitted with one seed and the "
-                         "best on the training set is arm G (refitted with --seeds) and arm C's start. A coarse search over the generic "
-                         "GRE contrasts first, because a joint gradient from a chance-level network has nothing to follow: from the "
-                         "25 deg / 6 ms / 15 ms start alone (a lesion 16 %% darker than white matter, like grey matter) the design did not move")
-    ap.add_argument("--min-lesion-px", type=float, default=4.)
-    ap.add_argument("--sampling", default="uniform", choices=("uniform", "gauss"), help="which K lines every arm acquires (sampled_lines)")
+    ap.add_argument(
+        "--replay", type=int, default=4, help="arm C: extra network-only updates per step from the replay buffer"
+    )
+    ap.add_argument(
+        "--design-lr", type=float, default=3e-3, help="arm C: Adam's rate for the flips, TE and TR (raw parameters)"
+    )
+    ap.add_argument(
+        "--ky-lr",
+        type=float,
+        default=1e-3,
+        help="arm C: Adam's rate for the line positions. Adam moves every parameter "
+        "~lr per step whatever the gradient's signal-to-noise, and a central line moves nx/2 cycles per unit of its raw "
+        "parameter: at 1e-2 the central lines wandered 0.3 cycles a step and the joint loss went 0.19 -> 0.69 in 20 steps",
+    )
+    ap.add_argument(
+        "--net-lr",
+        type=float,
+        default=3e-5,
+        help="arm C: the network's rate in the joint phase. It starts from G's converged "
+        "net (cosine-decayed to 1e-5); at 3e-4 with a fresh Adam and batches of 8 the joint phase wrecked it (100 %%: G 0.95 -> C 0.66 "
+        "with the design nearly unchanged), so the joint phase keeps batch-norm statistics and dropout fixed and moves the net gently",
+    )
+    ap.add_argument(
+        "--starts",
+        default="25:6:15,10:6:15,25:20:30,15:30:40,15:45:55,15:60:70",
+        help="arm G / C's starting designs as flip_deg:TE_ms:TR_ms (K lines evenly spread): each is fitted with one seed and the "
+        "best on the training set is arm G (refitted with --seeds) and arm C's start. A coarse search over the generic "
+        "GRE contrasts first, because a joint gradient from a chance-level network has nothing to follow: from the "
+        "25 deg / 6 ms / 15 ms start alone (a lesion 16 %% darker than white matter, like grey matter) the design did not move",
+    )
+    ap.add_argument("--min-lesion-px", type=float, default=4.0)
+    ap.add_argument(
+        "--sampling",
+        default="uniform",
+        choices=("uniform", "gauss"),
+        help="which K lines every arm acquires (sampled_lines)",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--arms", default="A,B,G,C")
     args = ap.parse_args()
@@ -217,15 +260,31 @@ def main():
     data, dropped = load_index(args.slabs, args.min_lesion_px)
     train, test = data["train"], data["test"]
     y_train, y_test = [r["label"] for r in train], [r["label"] for r in test]
-    print(f"slabs: {len(train)} train / {len(test)} test ({dropped} ambiguous left out); positives {sum(y_train)} / {sum(y_test)}", flush=True)
+    print(
+        f"slabs: {len(train)} train / {len(test)} test ({dropped} ambiguous left out); positives {sum(y_train)} / {sum(y_test)}",
+        flush=True,
+    )
     args.out.mkdir(parents=True, exist_ok=True)
     lines = max(int(round(args.fraction * NX)), 2)
     mask = sampled_lines(NX, lines, args.sampling, seed=args.seed)
     cols = torch.nonzero(mask).squeeze(1)
-    results = {"n": {"train": len(train), "test": len(test)}, "snr": args.snr, "fraction": args.fraction, "lines": lines, "coils": N_COILS,
-               "front": args.front, "sampling": args.sampling, "epochs": args.epochs, "seeds": args.seeds, "steps": args.steps}
-    print(f"fraction {args.fraction}: {lines} of {NX} lines, {args.sampling}; the TSE keeps ky indices {cols.tolist()}; front {args.front}; "
-          f"device {device}", flush=True)
+    results = {
+        "n": {"train": len(train), "test": len(test)},
+        "snr": args.snr,
+        "fraction": args.fraction,
+        "lines": lines,
+        "coils": N_COILS,
+        "front": args.front,
+        "sampling": args.sampling,
+        "epochs": args.epochs,
+        "seeds": args.seeds,
+        "steps": args.steps,
+    }
+    print(
+        f"fraction {args.fraction}: {lines} of {NX} lines, {args.sampling}; the TSE keeps ky indices {cols.tolist()}; front {args.front}; "
+        f"device {device}",
+        flush=True,
+    )
 
     def load_ph(rec):
         return torch.load(args.slabs / rec["file"], weights_only=False)["phantom"]
@@ -254,7 +313,8 @@ def main():
         final-epoch network is scored (no selection on the test set)."""
         runs, nets = [], []
         for s in range(args.seeds if seeds is None else seeds):
-            torch.manual_seed(args.seed + s); gen = torch.Generator().manual_seed(args.seed + s)
+            torch.manual_seed(args.seed + s)
+            gen = torch.Generator().manual_seed(args.seed + s)
             x0 = make_input(train[0], gen)
             net = Net(x0.shape[0], tuple(x0.shape[1:])).to(device)
             opt = torch.optim.Adam(net.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -262,25 +322,41 @@ def main():
             t0 = time.perf_counter()
             for ep in range(args.epochs):
                 net.train()
-                perm = torch.randperm(len(train), generator=gen); losses = []
+                perm = torch.randperm(len(train), generator=gen)
+                losses = []
                 for i in range(0, len(perm), 16):
-                    j = perm[i:i + 16]
+                    j = perm[i : i + 16]
                     xb = torch.stack([augment(make_input(train[q], gen), gen) for q in j]).to(device)
                     yb = torch.tensor([y_train[q] for q in j], dtype=torch.float32, device=device)
                     loss = nn.functional.binary_cross_entropy_with_logits(net(xb), yb)
-                    opt.zero_grad(); loss.backward(); opt.step(); losses.append(loss.item())
+                    opt.zero_grad()
+                    loss.backward()
+                    opt.step()
+                    losses.append(loss.item())
                 sched.step()
                 if ep % 25 == 24 or ep == args.epochs - 1:
-                    print(f"  {name} seed {s} epoch {ep + 1}: train loss {np.mean(losses):.3f}, {time.perf_counter() - t0:.0f} s", flush=True)
+                    print(
+                        f"  {name} seed {s} epoch {ep + 1}: train loss {np.mean(losses):.3f}, {time.perf_counter() - t0:.0f} s",
+                        flush=True,
+                    )
             net.eval()
             with torch.no_grad():
                 s_tr = [float(torch.sigmoid(net(make_input(r, gen)[None].to(device)))) for r in train]
                 s_te = [float(torch.sigmoid(net(make_input(r, gen)[None].to(device)))) for r in test]
             thr = best_threshold(y_train, s_tr)
-            runs.append({"auc": auc(y_test, s_te), "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
-                         "train_auc": auc(y_train, s_tr), "threshold": thr})
+            runs.append(
+                {
+                    "auc": auc(y_test, s_te),
+                    "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
+                    "train_auc": auc(y_train, s_tr),
+                    "threshold": thr,
+                }
+            )
             nets.append(net)
-            print(f"{name} seed {s}: test AUC {runs[-1]['auc']:.3f}, accuracy {runs[-1]['accuracy']:.2f} (train AUC {runs[-1]['train_auc']:.3f})", flush=True)
+            print(
+                f"{name} seed {s}: test AUC {runs[-1]['auc']:.3f}, accuracy {runs[-1]['accuracy']:.2f} (train AUC {runs[-1]['train_auc']:.3f})",
+                flush=True,
+            )
         out = {k: float(np.mean([r[k] for r in runs])) for k in ("auc", "accuracy", "train_auc")}
         out["auc_range"] = [min(r["auc"] for r in runs), max(r["auc"] for r in runs)]
         out["runs"] = runs
@@ -288,52 +364,103 @@ def main():
 
     arms = args.arms.split(",")
     if "A" in arms or "B" in arms:
-        tse = bp.tse_2d(NX, FOV, etl=16, esp=12.5e-3, tr=6.0, n_dummy=1).to(torch.float32)  # ky = 0 at echo 9: TE_eff ~113 ms
-        k_tse = cached("tse", lambda ph: bp.cartesian_kspace(simulate_metal(ph, tse, coils_for(ph)).signal, tse).cpu())  # (C, ky, kx)
+        tse = bp.tse_2d(NX, FOV, etl=16, esp=12.5e-3, tr=6.0, n_dummy=1).to(
+            torch.float32
+        )  # ky = 0 at echo 9: TE_eff ~113 ms
+        k_tse = cached(
+            "tse", lambda ph: bp.cartesian_kspace(simulate_metal(ph, tse, coils_for(ph)).signal, tse).cpu()
+        )  # (C, ky, kx)
         scan_tse = float(tse.dt.sum()) * lines / NX  # the kept lines' share of the shots
         if "A" in arms:
             maps = coil_maps()
-            results["A_tse_sense_image"], _ = fit("A", lambda r, g: sense_input(add_noise(k_tse[r["file"]], sigma[r["file"]], g), maps, mask))
+            results["A_tse_sense_image"], _ = fit(
+                "A", lambda r, g: sense_input(add_noise(k_tse[r["file"]], sigma[r["file"]], g), maps, mask)
+            )
             results["A_tse_sense_image"]["scan_s"] = scan_tse
             print("A", {k: v for k, v in results["A_tse_sense_image"].items() if k != "runs"}, flush=True)
         if "B" in arms:
             ky_tse = cols.float() - NX / 2
-            results["B_tse_" + args.front], _ = fit("B", lambda r, g: front_input(args.front, add_noise(k_tse[r["file"]][:, cols, :], sigma[r["file"]], g), ky_tse))
+            results["B_tse_" + args.front], _ = fit(
+                "B",
+                lambda r, g: front_input(
+                    args.front, add_noise(k_tse[r["file"]][:, cols, :], sigma[r["file"]], g), ky_tse
+                ),
+            )
             results["B_tse_" + args.front]["scan_s"] = scan_tse
             print("B", {k: v for k, v in results["B_tse_" + args.front].items() if k != "runs"}, flush=True)
     if "G" in arms or "C" in arms:
         trials = []
         for start in args.starts.split(","):
             flip, te_ms, tr_ms = (float(v) for v in start.split(":"))
-            d = Design(lines, init_flip=flip, init_te=te_ms * 1e-3, init_tr=tr_ms * 1e-3,
-                       ky_init=None if args.sampling == "uniform" else cols.float() - NX / 2)
+            d = Design(
+                lines,
+                init_flip=flip,
+                init_te=te_ms * 1e-3,
+                init_tr=tr_ms * 1e-3,
+                ky_init=None if args.sampling == "uniform" else cols.float() - NX / 2,
+            )
             with torch.no_grad():
                 flips0, ky0, te0, tr0 = d()
                 gre0 = learnable_gre(flips0, ky0, te0, tr0)
-            k0 = cached(f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}" + ("" if args.sampling == "uniform" else f"_{args.sampling}{args.seed}"),
-                        lambda ph, seq=gre0: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu())
-            r, nets = fit(f"G[{flip:g} deg, TE {te_ms:g}, TR {tr_ms:g} ms]",
-                          lambda rec, g, k0=k0, ky0=ky0: front_input(args.front, add_noise(k0[rec["file"]], sigma[rec["file"]], g), ky0), seeds=1)
-            trials.append({"start": [flip, te_ms, tr_ms], "auc": r["auc"], "train_auc": r["train_auc"], "scan_s": float(gre0.dt.sum()),
-                           "design": d, "k": k0, "ky": ky0, "net": nets[0]})
+            k0 = cached(
+                f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}"
+                + ("" if args.sampling == "uniform" else f"_{args.sampling}{args.seed}"),
+                lambda ph, seq=gre0: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu(),
+            )
+            r, nets = fit(
+                f"G[{flip:g} deg, TE {te_ms:g}, TR {tr_ms:g} ms]",
+                lambda rec, g, k0=k0, ky0=ky0: front_input(
+                    args.front, add_noise(k0[rec["file"]], sigma[rec["file"]], g), ky0
+                ),
+                seeds=1,
+            )
+            trials.append(
+                {
+                    "start": [flip, te_ms, tr_ms],
+                    "auc": r["auc"],
+                    "train_auc": r["train_auc"],
+                    "scan_s": float(gre0.dt.sum()),
+                    "design": d,
+                    "k": k0,
+                    "ky": ky0,
+                    "net": nets[0],
+                }
+            )
         best = max(trials, key=lambda t: t["train_auc"])  # chosen on the training set, never on the test set
         results["G_starts"] = [{k: t[k] for k in ("start", "auc", "train_auc", "scan_s")} for t in trials]
         design, k_gre, ky0 = best["design"], best["k"], best["ky"]
-        print("G starts (test AUC / train AUC): " + ", ".join(f"{t['start']}: {t['auc']:.3f} / {t['train_auc']:.3f}" for t in trials)
-              + f"; best on the training set {best['start']}", flush=True)
+        print(
+            "G starts (test AUC / train AUC): "
+            + ", ".join(f"{t['start']}: {t['auc']:.3f} / {t['train_auc']:.3f}" for t in trials)
+            + f"; best on the training set {best['start']}",
+            flush=True,
+        )
         if args.seeds > 1:
-            results["G_gre_" + args.front], nets_g = fit("G", lambda r, g: front_input(args.front, add_noise(k_gre[r["file"]], sigma[r["file"]], g), ky0))
+            results["G_gre_" + args.front], nets_g = fit(
+                "G", lambda r, g: front_input(args.front, add_noise(k_gre[r["file"]], sigma[r["file"]], g), ky0)
+            )
         else:
-            results["G_gre_" + args.front] = {"auc": best["auc"], "train_auc": best["train_auc"], "accuracy": float("nan"), "runs": []}
+            results["G_gre_" + args.front] = {
+                "auc": best["auc"],
+                "train_auc": best["train_auc"],
+                "accuracy": float("nan"),
+                "runs": [],
+            }
             nets_g = [best["net"]]
-        results["G_gre_" + args.front].update({"scan_s": best["scan_s"], "design": design.describe(), "start": best["start"]})
+        results["G_gre_" + args.front].update(
+            {"scan_s": best["scan_s"], "design": design.describe(), "start": best["start"]}
+        )
         print("G", {k: v for k, v in results["G_gre_" + args.front].items() if k not in ("runs", "design")}, flush=True)
     if "C" in arms:
         gen = torch.Generator().manual_seed(args.seed + 100)
         net = copy.deepcopy(nets_g[0])
         net.eval()  # the joint phase fine-tunes G's net: batch-norm statistics and dropout fixed, gradients still flow
-        opt_design = torch.optim.Adam([{"params": [design.flip_raw, design.te_raw, design.tr_raw], "lr": args.design_lr},
-                                       {"params": [design.ky_raw], "lr": args.ky_lr}])
+        opt_design = torch.optim.Adam(
+            [
+                {"params": [design.flip_raw, design.te_raw, design.tr_raw], "lr": args.design_lr},
+                {"params": [design.ky_raw], "lr": args.ky_lr},
+            ]
+        )
         opt_net = torch.optim.Adam(net.parameters(), lr=args.net_lr, weight_decay=1e-4)
         buffer = collections.deque(maxlen=32 * args.batch)
         t0 = time.perf_counter()
@@ -346,10 +473,19 @@ def main():
             for j in idx:
                 rec = train[j]
                 ph = load_ph(rec)
-                sig = add_noise(simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX), sigma[rec["file"]], gen)
-                xb.append(front_input(args.front, sig, ky)); yb.append(y_train[j])
-            loss = nn.functional.binary_cross_entropy_with_logits(net(torch.stack(xb).to(device)), torch.tensor(yb, dtype=torch.float32, device=device))
-            opt_design.zero_grad(); opt_net.zero_grad(); loss.backward(); opt_design.step(); opt_net.step()
+                sig = add_noise(
+                    simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX), sigma[rec["file"]], gen
+                )
+                xb.append(front_input(args.front, sig, ky))
+                yb.append(y_train[j])
+            loss = nn.functional.binary_cross_entropy_with_logits(
+                net(torch.stack(xb).to(device)), torch.tensor(yb, dtype=torch.float32, device=device)
+            )
+            opt_design.zero_grad()
+            opt_net.zero_grad()
+            loss.backward()
+            opt_design.step()
+            opt_net.step()
             recent.append(loss.item())
             buffer.extend((x.detach().cpu(), y) for x, y in zip(xb, yb))
             for _ in range(args.replay):  # the network alone, on recent acquisitions (a slowly moving design)
@@ -357,10 +493,15 @@ def main():
                 xr = torch.stack([augment(buffer[p][0], gen) for p in pick]).to(device)
                 yr = torch.tensor([buffer[p][1] for p in pick], dtype=torch.float32, device=device)
                 l_r = nn.functional.binary_cross_entropy_with_logits(net(xr), yr)
-                opt_net.zero_grad(); l_r.backward(); opt_net.step()
+                opt_net.zero_grad()
+                l_r.backward()
+                opt_net.step()
             if step % 20 == 0 or step == args.steps - 1:
-                print(f"C step {step}: loss {np.mean(recent):.3f} over the last {len(recent)} batches (replay {l_r.item():.3f}), {design.summary()}, "
-                      f"{time.perf_counter() - t0:.0f} s", flush=True)
+                print(
+                    f"C step {step}: loss {np.mean(recent):.3f} over the last {len(recent)} batches (replay {l_r.item():.3f}), {design.summary()}, "
+                    f"{time.perf_counter() - t0:.0f} s",
+                    flush=True,
+                )
         with torch.no_grad():
             flips, ky, te, tr = design()
             seq = learnable_gre(flips, ky, te, tr)
@@ -369,15 +510,34 @@ def main():
                 out = []
                 for rec in records:
                     ph = load_ph(rec)
-                    sig = add_noise(simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX), sigma[rec["file"]], gen)
+                    sig = add_noise(
+                        simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX),
+                        sigma[rec["file"]],
+                        gen,
+                    )
                     out.append(float(torch.sigmoid(net(front_input(args.front, sig, ky)[None].to(device)))))
                 return out
-            s_tr = score(train); s_te = score(test)
+
+            s_tr = score(train)
+            s_te = score(test)
         thr = best_threshold(y_train, s_tr)
-        results["C_learned_" + args.front] = {"auc": auc(y_test, s_te), "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
-                                              "train_auc": auc(y_train, s_tr), "scan_s": float(seq.dt.sum()), "design": design.describe()}
-        torch.save({"design": design.state_dict(), "net": net.state_dict(), "describe": design.describe()}, args.out / "arm_C.pt")
-        print("C", {k: v for k, v in results["C_learned_" + args.front].items() if k != "design"}, design.summary(), flush=True)
+        results["C_learned_" + args.front] = {
+            "auc": auc(y_test, s_te),
+            "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
+            "train_auc": auc(y_train, s_tr),
+            "scan_s": float(seq.dt.sum()),
+            "design": design.describe(),
+        }
+        torch.save(
+            {"design": design.state_dict(), "net": net.state_dict(), "describe": design.describe()},
+            args.out / "arm_C.pt",
+        )
+        print(
+            "C",
+            {k: v for k, v in results["C_learned_" + args.front].items() if k != "design"},
+            design.summary(),
+            flush=True,
+        )
     (args.out / "results.json").write_text(json.dumps(results, indent=1))
 
 

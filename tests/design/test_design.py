@@ -67,8 +67,8 @@ def test_units_peak_b1_and_rf_energy():
     b1 = 250.0 / G * 1e6  # 90 deg in 1 ms = 250 Hz
     assert abs(float(d.b1_uT(seq)[0]) - b1) < 1e-12 and abs(b1 - 5.8717) < 1e-4
     assert abs(float(d.grad_mT_m(seq)[1, 0]) - 1.0) < 1e-12
-    assert abs(float(d.rf_energy(seq)) - b1 ** 2 * 1e-3) < 1e-12
-    assert abs(float(d.rf_power(seq)) - b1 ** 2 / 2) < 1e-12  # over the whole 2 ms
+    assert abs(float(d.rf_energy(seq)) - b1**2 * 1e-3) < 1e-12
+    assert abs(float(d.rf_power(seq)) - b1**2 / 2) < 1e-12  # over the whole 2 ms
 
 
 def test_windowed_rf_power():
@@ -101,8 +101,9 @@ def test_instantaneous_steps_are_reported_with_segments_and_excess():
     checks = {c.name: c for c in d.check_hardware(seq, HW150)}
     items = d.violations(checks["slew x"], seq)
     assert [i["segments"] for i in items] == [[1, 2]]  # boundaries 1 and 2: one run
-    assert items[0]["message"] == ("slew x exceeded in boundaries 1–2 (t = 1.000–2.000 ms) by 1.23e+03 % "
-                                   "(2000 T/m/s > 150 T/m/s)")
+    assert items[0]["message"] == (
+        "slew x exceeded in boundaries 1–2 (t = 1.000–2.000 ms) by 1.23e+03 % (2000 T/m/s > 150 T/m/s)"
+    )
     # a ramp 12 % too steep over boundaries 101..119 of a raster-sampled trapezoid
     seq = trapezoid(slew=168.0, flat_mT_m=168.0 * 20 * 10e-6 * 1e3)
     report = d.design_report(seq, psf=False, hardware=HW150)
@@ -202,7 +203,7 @@ def test_psf_with_t2_decay_matches_closed_form_weighting():
     seq = bp.gre_2d(n, flip_deg=30.0, tr=10e-3, dwell=dwell, n_dummy=2)
     psf = d.point_spread_function(seq, t1=1e-3, t2=t2, oversample=os)
     w = torch.zeros(n * os, dtype=torch.complex128)
-    w[n * os // 2 - n // 2: n * os // 2 + n // 2] = torch.exp(-torch.arange(n, dtype=torch.float64) * dwell / t2)
+    w[n * os // 2 - n // 2 : n * os // 2 + n // 2] = torch.exp(-torch.arange(n, dtype=torch.float64) * dwell / t2)
     ref = torch.fft.fftshift(torch.fft.ifft(torch.fft.ifftshift(w))).abs()
     assert float((psf[n * os // 2] - ref / ref.max()).abs().max()) < 1e-9
     m = d.psf_metrics(psf, os)
@@ -244,8 +245,11 @@ def test_crb_gradient_gpu_and_differences_match_autograd(gpu_simulate):
     # d CRB / d flips: central differences in T1 through the core, and fourth-order ones through the
     # Metal adjoint (1.5e-5 measured), against the exact Jacobian's double backward through the core
     grads = []
-    for sim, method, kw in ((simulate, "autograd", {}), (simulate, "fd", {}),
-                            (gpu_simulate, "fd4", {"rel_step": despot1.METAL_STEP})):
+    for sim, method, kw in (
+        (simulate, "autograd", {}),
+        (simulate, "fd", {}),
+        (gpu_simulate, "fd4", {"rel_step": despot1.METAL_STEP}),
+    ):
         flips = f64([5.0, 30.0]).requires_grad_(True)
         (g,) = torch.autograd.grad(despot1.t1_crb(flips, sim, method=method, n_dummy=40, **kw), flips)
         grads.append(g)
@@ -293,7 +297,7 @@ def test_tse_low_sar_train():
     # independent model and optimizer: SLSQP on EPG from the constant train
     ref = tse.slsqp_on_epg([base] * tse.N_ECHO)
     assert float((ref - flips).abs().max()) < 0.01
-    assert abs(float((ref ** 2).sum() / (flips ** 2).sum()) - 1) < 1e-6
+    assert abs(float((ref**2).sum() / (flips**2).sum()) - 1) < 1e-6
 
 
 def test_tse_gradient_gpu_equals_simulate(gpu_simulate):
@@ -316,8 +320,9 @@ def test_design_report_is_json_and_matches_closed_forms(gpu_simulate):
     phantom = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], fov)
     masks = {t: maps["label"] == LABELS.index(t) for t in ("wm", "gm", "csf")}
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, te=te, dwell=2e-6, n_dummy=400)
-    report = d.design_report(seq, phantom, masks=masks, contrast_pairs=[("wm", "gm")], noise_sigma=1e-3,
-                             simulate=gpu_simulate)
+    report = d.design_report(
+        seq, phantom, masks=masks, contrast_pairs=[("wm", "gm")], noise_sigma=1e-3, simulate=gpu_simulate
+    )
     report = json.loads(json.dumps(report))  # plain JSON types only
     assert abs(report["timing"]["duration_s"] - (400 + n) * tr) < 1e-12
     # readout gradient dk / dwell = 1 / (fov * dwell) Hz/m is the largest

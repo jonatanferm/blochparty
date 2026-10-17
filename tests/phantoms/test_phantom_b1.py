@@ -63,13 +63,15 @@ def _b1_image_matches_ernst(signal_of):
     signal = signal_of(ph, seq)
     img = bp.ifft2c(bp.kspace_grid(signal, seq))[0]
     mask = maps["pd"] > 0
-    expected = 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"],
-                                       b1_map * math.radians(flip))
+    expected = 1j * spoiled_gre_signal(
+        maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"], b1_map * math.radians(flip)
+    )
     expected = torch.where(mask, expected, 0)
     assert (img - expected).abs().max() < 1e-4 * expected.abs().max()
     # with the nominal flip everywhere the image would be clearly different
-    nominal = torch.where(mask, 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"],
-                                                         math.radians(flip)), 0)
+    nominal = torch.where(
+        mask, 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"], math.radians(flip)), 0
+    )
     assert (img - nominal).abs().max() > 0.05 * expected.abs().max()
 
 
@@ -136,6 +138,7 @@ def test_b1_gradcheck():
     scale = torch.tensor(1.1, dtype=torch.float64, requires_grad=True)  # of every RF pulse
     g = torch.Generator().manual_seed(1)
     w = torch.randn(2, len(coils[0]), seq.n_adc, dtype=torch.complex128, generator=g)
+
     def f(b1, scale):  # a few random projections of signal and m keep it quick
         r = simulate(replace(phantom, b1=b1), replace(seq, rf=seq.rf * scale), coils)
         return torch.stack([(r.signal * w[0]).real.sum(), (r.signal * w[1]).imag.sum(), r.m.sum()]), r.m[:, 2]
@@ -166,22 +169,26 @@ def test_birdcage_b1_field():
     b1 = birdcage_b1(pos, cb, radius=radius)
     rho = pos[:, :2].norm(dim=1)
     # 1 on the axis, 1 / (1 + cb) at `radius`, radially symmetric, independent of z, decreasing
-    edge = torch.tensor([[radius, 0, 0.3], [0, -radius, -0.1], [radius / 2**0.5, radius / 2**0.5, 0]],
-                        dtype=torch.float64)
-    assert torch.allclose(birdcage_b1(edge, cb, radius=radius), torch.full((3,), 1 / (1 + cb), dtype=torch.float64),
-                          atol=1e-14)
+    edge = torch.tensor(
+        [[radius, 0, 0.3], [0, -radius, -0.1], [radius / 2**0.5, radius / 2**0.5, 0]], dtype=torch.float64
+    )
+    assert torch.allclose(
+        birdcage_b1(edge, cb, radius=radius), torch.full((3,), 1 / (1 + cb), dtype=torch.float64), atol=1e-14
+    )
     assert birdcage_b1(torch.zeros(1, 3, dtype=torch.float64), cb, radius=radius).item() == 1.0
     order = rho.argsort()
     assert torch.all(b1[order].diff() <= 0)
     # a CP field in a uniform dielectric solves the 2D Helmholtz equation: lap(B) + k^2 B = 0
     x0 = torch.tensor([[0.03, 0.02, 0.0]], dtype=torch.float64)
     h = 1e-4
-    lap = sum(birdcage_b1(x0 + s * h * e, cb, radius=radius) for e in torch.eye(3, dtype=torch.float64)[:2]
-              for s in (1, -1)) - 4 * birdcage_b1(x0, cb, radius=radius)
+    lap = sum(
+        birdcage_b1(x0 + s * h * e, cb, radius=radius) for e in torch.eye(3, dtype=torch.float64)[:2] for s in (1, -1)
+    ) - 4 * birdcage_b1(x0, cb, radius=radius)
     lap = lap / h**2
     k2 = -lap / birdcage_b1(x0, cb, radius=radius)
     # k from the definition J0(k radius) = 1 / (1 + cb), via scipy's independent J0
     from scipy.optimize import brentq
     from scipy.special import j0
+
     k = brentq(lambda x: j0(x) - 1 / (1 + cb), 0, 2.4048) / radius
     assert abs(float(k2) / k**2 - 1) < 1e-5

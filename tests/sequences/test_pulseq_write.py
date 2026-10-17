@@ -20,12 +20,15 @@ pp = pytest.importorskip("pypulseq")
 f64 = torch.float64
 
 CASES = {
-    "gre: ramps, slice selection, RF spoiling": lambda: bp.gre_2d(16, ramps=True, spoiling="rf", slice_thickness=5e-3,
-                                                                  n_dummy=2),
-    "tse: slice selection, crushers, gradient spoiling": lambda: bp.tse_2d(16, etl=4, tr=0.4, slice_thickness=5e-3,
-                                                                            spoiling="gradient"),
-    "tse, slice 2 cm off centre (phase-ramped pulses)": lambda: bp.tse_2d(16, etl=4, tr=0.4, slice_thickness=5e-3,
-                                                                          slice_offset=0.02, spoiling="gradient"),
+    "gre: ramps, slice selection, RF spoiling": lambda: bp.gre_2d(
+        16, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2
+    ),
+    "tse: slice selection, crushers, gradient spoiling": lambda: bp.tse_2d(
+        16, etl=4, tr=0.4, slice_thickness=5e-3, spoiling="gradient"
+    ),
+    "tse, slice 2 cm off centre (phase-ramped pulses)": lambda: bp.tse_2d(
+        16, etl=4, tr=0.4, slice_thickness=5e-3, slice_offset=0.02, spoiling="gradient"
+    ),
     "bssfp: slice selection, alpha/2 preparation": lambda: bp.bssfp_2d(16, slice_thickness=5e-3, n_dummy=4),
     "epi: blipped, ramps": lambda: bp.epi_2d(16, dwell=5e-6, slice_thickness=5e-3),
 }
@@ -123,11 +126,25 @@ def assert_same_segments(a, b, exact=True):
 def test_imported_file_is_written_back_losslessly(tmp_path):
     # a sequence made and written by pypulseq itself (its six-digit numbers), imported, re-exported
     # by write_pulseq and imported again: the same segments, bit for bit
-    sysm = pp.Opts(max_grad=32, grad_unit="mT/m", max_slew=130, slew_unit="T/m/s", rf_ringdown_time=20e-6,
-                   rf_dead_time=100e-6, adc_dead_time=10e-6)
+    sysm = pp.Opts(
+        max_grad=32,
+        grad_unit="mT/m",
+        max_slew=130,
+        slew_unit="T/m/s",
+        rf_ringdown_time=20e-6,
+        rf_dead_time=100e-6,
+        adc_dead_time=10e-6,
+    )
     s = pp.Sequence(sysm)
-    rf, gz, gzr = pp.make_sinc_pulse(flip_angle=np.pi / 6, duration=2e-3, slice_thickness=5e-3, apodization=0.5,
-                                     time_bw_product=4, system=sysm, return_gz=True)
+    rf, gz, gzr = pp.make_sinc_pulse(
+        flip_angle=np.pi / 6,
+        duration=2e-3,
+        slice_thickness=5e-3,
+        apodization=0.5,
+        time_bw_product=4,
+        system=sysm,
+        return_gz=True,
+    )
     gx = pp.make_trapezoid("x", flat_area=64 / 0.2, flat_time=3.2e-3, system=sysm)
     adc = pp.make_adc(64, duration=gx.flat_time, delay=gx.rise_time, system=sysm)
     gx_pre = pp.make_trapezoid("x", area=-gx.area / 2, duration=1e-3, system=sysm)

@@ -42,13 +42,16 @@ def scan(path):
 def analyse(path):
     data = np.load(path)
     b1, sims, real = data["b1"], data["sims"], data["real"]  # (B,), (B, 23, 14), (23, 14)
+
     def err(s, r):
         a = (s * r).sum(0) / (s * s).sum(0)
         return np.sqrt(((a * s - r) ** 2).sum(0) / (r * r).sum(0))
 
     E = np.array([err(s, real) for s in sims])  # (B, 14)
     curves = [CubicSpline(b1, E[:, k]) for k in range(14)]
-    pos = np.array([[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL] for r, c in (center_of_mass(m) for m in t.sphere_rois())])
+    pos = np.array(
+        [[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL] for r, c in (center_of_mass(m) for m in t.sphere_rois())]
+    )
     even, odd, S = [1, 3, 5, 7, 9], [0, 2, 4, 6, 8], list(range(10))
     fine = np.linspace(b1[0], b1[-1], 801)
 
@@ -73,14 +76,18 @@ def analyse(path):
     for name, nc in (("map: offset + linear", 3), ("map: offset + linear + quadratic", 4)):
         best_c = None
         for start in np.random.default_rng(0).uniform(-0.3, 0.3, (200, nc)):
-            r = minimize(lambda c: score(map_value(np.r_[c, np.zeros(4 - nc)], pos[even]), even), start, method="Nelder-Mead")
+            r = minimize(
+                lambda c: score(map_value(np.r_[c, np.zeros(4 - nc)], pos[even]), even), start, method="Nelder-Mead"
+            )
             if best_c is None or r.fun < best_c[0]:
                 best_c = (r.fun, np.r_[r.x, np.zeros(4 - nc)])
         c = best_c[1]
         rows[name] = (score(map_value(c, pos[odd]), odd), score(map_value(c, pos[S]), S))
         print(f"{name}: coefficients {np.round(c, 3)}, B1+ at spheres 1-10 {map_value(c, pos[S])}")
-    rows["per-sphere best (upper bound, not a prediction)"] = (np.mean([curves[k](best[k]) for k in odd]),
-                                                                np.mean([curves[k](best[k]) for k in S]))
+    rows["per-sphere best (upper bound, not a prediction)"] = (
+        np.mean([curves[k](best[k]) for k in odd]),
+        np.mean([curves[k](best[k]) for k in S]),
+    )
     print("\n| B1+ model | held-out odd spheres 1–9 | all spheres 1–10 |\n|---|---|---|")
     for k, (o, a) in rows.items():
         print(f"| {k} | {100 * o:.2f} % | {100 * a:.2f} % |")

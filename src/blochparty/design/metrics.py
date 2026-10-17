@@ -43,9 +43,15 @@ def snr_efficiency(image: Tensor, mask: Tensor, sigma, duration) -> Tensor:
     return snr(image, mask, sigma) / torch.sqrt(torch.as_tensor(duration))
 
 
-def image_noise_sigma(signal: Tensor, recon: Callable[[Tensor], Tensor], kspace_sigma: float,
-                      noise_cov: Tensor | None = None, mask: Tensor | None = None, n_replicas: int = 16,
-                      generator: torch.Generator | None = None) -> Tensor:
+def image_noise_sigma(
+    signal: Tensor,
+    recon: Callable[[Tensor], Tensor],
+    kspace_sigma: float,
+    noise_cov: Tensor | None = None,
+    mask: Tensor | None = None,
+    n_replicas: int = 16,
+    generator: torch.Generator | None = None,
+) -> Tensor:
     """Image-domain noise standard deviation by the pseudo-replica method: ``recon`` of
     (C, n_adc) ``signal`` plus k-space noise of per-channel ``kspace_sigma`` (and channel
     covariance ``noise_cov``, as ``coils.add_noise``), minus the noise-free image; the
@@ -53,8 +59,9 @@ def image_noise_sigma(signal: Tensor, recon: Callable[[Tensor], Tensor], kspace_
     reconstruction, including nonlinear ones such as RSS, at the actual signal level."""
     with torch.no_grad():
         clean = recon(signal)
-        diffs = torch.stack([recon(add_noise(signal, kspace_sigma, noise_cov, generator)) - clean
-                             for _ in range(n_replicas)])
+        diffs = torch.stack(
+            [recon(add_noise(signal, kspace_sigma, noise_cov, generator)) - clean for _ in range(n_replicas)]
+        )
         if diffs.is_complex():
             diffs = diffs.real  # one component of complex noise, the same sigma as the magnitude at high SNR
         var = diffs.var(dim=0)
@@ -84,7 +91,9 @@ def bootstrap(y, s, groups, b=2000, seed=0) -> list[float]:
     neg = [p for p in people if y[rows[p][0]] == 0]
     out = []
     for _ in range(b):
-        idx = np.concatenate([rows[p] for p in rng.choice(pos, len(pos))] + [rows[p] for p in rng.choice(neg, len(neg))])
+        idx = np.concatenate(
+            [rows[p] for p in rng.choice(pos, len(pos))] + [rows[p] for p in rng.choice(neg, len(neg))]
+        )
         out.append(auc(y[idx], s[idx]))
     return [float(np.percentile(out, 2.5)), float(np.percentile(out, 97.5))]
 
@@ -98,8 +107,9 @@ def _default_simulate():
     return simulate
 
 
-def point_spread_function(seq: Sequence, *, t1=1.0, t2=0.1, pd=1.0, db0=0.0, pos=(0.0, 0.0, 0.0),
-                          oversample: int = 4, simulate=None) -> Tensor:
+def point_spread_function(
+    seq: Sequence, *, t1=1.0, t2=0.1, pd=1.0, db0=0.0, pos=(0.0, 0.0, 0.0), oversample: int = 4, simulate=None
+) -> Tensor:
     """Magnitude PSF of a Cartesian ``seq``: simulate one spin at ``pos``, zero-pad k-space
     by ``oversample`` on every axis, reconstruct; normalised to its peak. Shape
     ``oversample * kspace_shape``; pixel ``oversample * n/2`` (per axis) is the grid centre."""
@@ -152,7 +162,7 @@ def psf_metrics(psf: Tensor, oversample: int = 4) -> dict[str, Tensor]:
                 i += step
             lobe.append(i)
         lo, hi = min(lobe), max(lobe)
-        outside = torch.cat([p[:lo], p[hi + 1:]])
+        outside = torch.cat([p[:lo], p[hi + 1 :]])
         out[f"fwhm_{names[ax]}"] = (half[0] + half[1]) / oversample
         out[f"sidelobe_{names[ax]}"] = outside.max() if outside.numel() else p.new_zeros(())
     return out

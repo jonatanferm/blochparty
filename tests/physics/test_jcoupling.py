@@ -1,4 +1,5 @@
 """J-coupled spin fragments (blochparty.jcoupling) against analytic limits."""
+
 import math
 
 import numpy as np

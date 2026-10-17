@@ -7,6 +7,7 @@ exactly the k-space points a simulated ``n`` x ``n`` Cartesian acquisition over 
 (k = (i - n/2) / fov); root-sum-of-squares over coils; scaled by ``normalise``. Real and simulated
 images never meet a different pipeline.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,7 +18,9 @@ import numpy as np
 from blochparty.generate.sample import centred_fft, centred_ifft, crop_centre  # noqa: E402,F401 (moved there)
 from blochparty.generate.sample import rss_image as recon  # noqa: E402
 
-FASTMRI = Path.home() / "data" / "fastmri_c"  # the compact real set (fetch_fastmri --compact); fastmri_brain until 2026-10-14
+FASTMRI = (
+    Path.home() / "data" / "fastmri_c"
+)  # the compact real set (fetch_fastmri --compact); fastmri_brain until 2026-10-14
 
 
 def lowres_kspace(coil_images, n):
@@ -62,10 +65,17 @@ def coil_kspace(path, n=128):
     imgs = crop_centre(centred_ifft(k, (-2, -1)), (rx, ry))  # (S, C, rx, ry) on the recon FOV
     low = np.stack([lowres_kspace(s, n) for s in imgs]).astype(np.complex64)
     seq = hdr.sequenceParameters
-    info = {"file": path.name, "fov_mm": [enc.reconSpace.fieldOfView_mm.x, enc.reconSpace.fieldOfView_mm.y,
-            enc.reconSpace.fieldOfView_mm.z], "recon": [rx, ry], "coils": int(k.shape[1]), "slices": int(k.shape[0]),
-            "TR_ms": float(seq.TR[0]), "TE_ms": float(seq.TE[0]), "field_T": hdr.acquisitionSystemInformation.systemFieldStrength_T,
-            "model": hdr.acquisitionSystemInformation.systemModel}
+    info = {
+        "file": path.name,
+        "fov_mm": [enc.reconSpace.fieldOfView_mm.x, enc.reconSpace.fieldOfView_mm.y, enc.reconSpace.fieldOfView_mm.z],
+        "recon": [rx, ry],
+        "coils": int(k.shape[1]),
+        "slices": int(k.shape[0]),
+        "TR_ms": float(seq.TR[0]),
+        "TE_ms": float(seq.TE[0]),
+        "field_T": hdr.acquisitionSystemInformation.systemFieldStrength_T,
+        "model": hdr.acquisitionSystemInformation.systemModel,
+    }
     return low, info
 
 
@@ -79,5 +89,8 @@ def manifest(contrast="AXT2", min_field=2.0, root=FASTMRI):
     """The real scans of ``contrast`` at ``min_field`` or above, as paths: the compact ``.npz`` where the manifest
     records one, else the raw ``.h5``."""
     m = json.loads((root / "manifest.json").read_text())
-    return sorted(root / v.get("compact", k) for k, v in m.items() if v["contrast"] == contrast
-                  and (v.get("field_T") or 0) >= min_field and "error" not in v)
+    return sorted(
+        root / v.get("compact", k)
+        for k, v in m.items()
+        if v["contrast"] == contrast and (v.get("field_T") or 0) >= min_field and "error" not in v
+    )

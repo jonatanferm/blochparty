@@ -49,9 +49,10 @@ class DigitalPhantom:
     ``to_phantom(a, DEFAULT_TISSUES, 3., **kw)``, bit for bit; keyword arguments override
     ``options``.
     """
+
     anatomy: Anatomy
     tissues: dict[str, TissueProperties]
-    field_T: float = 3.
+    field_T: float = 3.0
     options: dict = field(default_factory=dict)
     meta: dict = field(default_factory=dict)
 
@@ -93,13 +94,18 @@ def draw_tissues(tissues: dict, generator: torch.Generator) -> tuple[dict, dict]
                 values[f.name] = d.mean + d.sd * z
         for key in ("bound_fraction", "fat_fraction"):
             if key in values:
-                values[key] = min(values[key], .999)
+                values[key] = min(values[key], 0.999)
         t2 = values.get("t2", p.t2.mean)
         if p.t2star is not None and values.get("t2star", p.t2star.mean) > t2:
             values["t2star"] = t2
         draws[name] = values
-        out[name] = replace(p, **{k: Distribution(v, None, "Drawn by draw_tissues from: " + getattr(p, k).citation,
-                                                  getattr(p, k).assumed) for k, v in values.items()})
+        out[name] = replace(
+            p,
+            **{
+                k: Distribution(v, None, "Drawn by draw_tissues from: " + getattr(p, k).citation, getattr(p, k).assumed)
+                for k, v in values.items()
+            },
+        )
     return out, draws
 
 
@@ -107,13 +113,15 @@ def draw_tissues(tissues: dict, generator: torch.Generator) -> tuple[dict, dict]
 # from the ANSUR II public data (2012 Anthropometric Survey of U.S. Army Personnel, Gordon et al. 2015,
 # NATICK/TR-15/007; ANSUR_II_MALE_Public.csv n = 4082, ANSUR_II_FEMALE_Public.csv n = 1986, via
 # openlab.psu.edu/ansur2, computed 2026-10-10).
-ANSUR_HEAD = {"male": dict(breadth=(0.1543, 0.0055), length=(0.1995, 0.0070), corr=0.18),
-              "female": dict(breadth=(0.1478, 0.0052), length=(0.1898, 0.0074), corr=0.22)}
+ANSUR_HEAD = {
+    "male": dict(breadth=(0.1543, 0.0055), length=(0.1995, 0.0070), corr=0.18),
+    "female": dict(breadth=(0.1478, 0.0052), length=(0.1898, 0.0074), corr=0.22),
+}
 
 
 def _head_mask(anatomy: Anatomy) -> np.ndarray:
     """Voxels more than half tissue (any class but background; outside a resampled grid is empty)."""
-    return (sum(v for k, v in anatomy.fractions.items() if k != "background") > .5).numpy()
+    return (sum(v for k, v in anatomy.fractions.items() if k != "background") > 0.5).numpy()
 
 
 def head_dimensions(anatomy: Anatomy, depth: float = 0.1) -> tuple[float, float]:
@@ -123,7 +131,7 @@ def head_dimensions(anatomy: Anatomy, depth: float = 0.1) -> tuple[float, float]
     head = _head_mask(anatomy)
     zs = np.nonzero(head.any((1, 2)))[0]
     top = int(zs.max())
-    sl = head[max(top - round(depth / anatomy.voxel[0]), 0): top + 1]
+    sl = head[max(top - round(depth / anatomy.voxel[0]), 0) : top + 1]
     ys, xs = np.nonzero(sl.any((0, 2)))[0], np.nonzero(sl.any((0, 1)))[0]
     return (xs.max() - xs.min() + 1) * anatomy.voxel[2], (ys.max() - ys.min() + 1) * anatomy.voxel[1]
 
@@ -136,12 +144,12 @@ def intracranial_mask(anatomy: Anatomy) -> np.ndarray:
     and filled."""
     from scipy import ndimage
 
-    inside = sum(v for k, v in anatomy.fractions.items() if k in _INTRACRANIAL).numpy() > .5
+    inside = sum(v for k, v in anatomy.fractions.items() if k in _INTRACRANIAL).numpy() > 0.5
     return ndimage.binary_fill_holes(ndimage.binary_closing(inside, iterations=2))
 
 
 def _extents(mask: np.ndarray, voxel, top: int, depth: float) -> tuple[float, float]:
-    sl = mask[max(top - round(depth / voxel[0]), 0): top + 1]
+    sl = mask[max(top - round(depth / voxel[0]), 0) : top + 1]
     ys, xs = np.nonzero(sl.any((0, 2)))[0], np.nonzero(sl.any((0, 1)))[0]
     return (xs.max() - xs.min() + 1) * voxel[2], (ys.max() - ys.min() + 1) * voxel[1]
 
@@ -155,7 +163,7 @@ def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator, she
     factors scale the skull's contents only (``intracranial_mask``), the skull and scalp keeping the
     model's thickness around them (``_shell_translation``): head = factor x contents + shell at the
     caliper level; the same draw."""
-    sex = "male" if generator.random() < .5 else "female"
+    sex = "male" if generator.random() < 0.5 else "female"
     a = ANSUR_HEAD[sex]
     (mb, sb), (ml, sl), r = a["breadth"], a["length"], a["corr"]
     z0, z1 = generator.standard_normal(2)
@@ -167,10 +175,17 @@ def anthropometric_scaling(anatomy: Anatomy, generator: np.random.Generator, she
         top = int(np.nonzero(head.any((1, 2)))[0].max())
         bi, li = _extents(intracranial_mask(anatomy), anatomy.voxel, top, 0.1)
         sx, sy = float((breadth - (b0 - bi)) / bi), float((length - (l0 - li)) / li)
-    centre = tuple(float((np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean()) * h)
-                   for k, h in enumerate(anatomy.voxel))
-    draw = {"sex": sex, "breadth": float(breadth), "length": float(length), "source_breadth": float(b0),
-            "source_length": float(l0)}
+    centre = tuple(
+        float((np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean()) * h)
+        for k, h in enumerate(anatomy.voxel)
+    )
+    draw = {
+        "sex": sex,
+        "breadth": float(breadth),
+        "length": float(length),
+        "source_breadth": float(b0),
+        "source_length": float(l0),
+    }
     if shell:
         draw |= {"source_contents_breadth": float(bi), "source_contents_length": float(li)}
     return (math.sqrt(sx * sy), sy, sx), centre, draw
@@ -195,7 +210,7 @@ def _shell_translation(anatomy: Anatomy, factors, centre, smooth: float = 2e-3, 
     for k, (f, c, h, n) in enumerate(zip(factors, centre, anatomy.voxel, anatomy.shape)):
         x = (np.arange(n) * h - c).reshape([-1 if j == k else 1 for j in range(3)])
         t = w * (f - 1) * (idx[k] * h - c) + (1 - w) * (f - 1) * x
-        smoothed = ndimage.gaussian_filter(np.where(inside, 0., t), sigma, mode="nearest") / np.maximum(norm, 1e-6)
+        smoothed = ndimage.gaussian_filter(np.where(inside, 0.0, t), sigma, mode="nearest") / np.maximum(norm, 1e-6)
         out.append(np.where(inside, (f - 1) * np.broadcast_to(x, inside.shape), smoothed))
     return torch.from_numpy(np.stack(out))
 
@@ -204,24 +219,47 @@ def _sample_field(field: Tensor, pos: Tensor, voxel) -> Tensor:
     """Trilinear values of a (3, z, y, x) field at positions (3, z, y, x) [m from the grid origin],
     clamped to the grid."""
     shape = field.shape[1:]
-    grid = torch.stack([2 * pos[k] / h / max(n - 1, 1) - 1 for k, (h, n) in reversed(list(enumerate(zip(voxel, shape))))], -1)
-    out = torch.nn.functional.grid_sample(field[None].to(grid.dtype), grid[None], mode="bilinear", padding_mode="border",
-                                          align_corners=True)
+    grid = torch.stack(
+        [2 * pos[k] / h / max(n - 1, 1) - 1 for k, (h, n) in reversed(list(enumerate(zip(voxel, shape))))], -1
+    )
+    out = torch.nn.functional.grid_sample(
+        field[None].to(grid.dtype), grid[None], mode="bilinear", padding_mode="border", align_corners=True
+    )
     return out[0]
 
 
 BRAINWEB_SUBJECTS = (4, 5, 6, 18, 20, 38, *range(41, 55))
-DEFAULT_TEXTURE = {"t1": .05, "t2": .05, "pd": .02, "length": .01}  # validation/anatomy/README.md, M4
+DEFAULT_TEXTURE = {"t1": 0.05, "t2": 0.05, "pd": 0.02, "length": 0.01}  # validation/anatomy/README.md, M4
 
 
-def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=None, table=DEFAULT_TISSUES,
-                magnitude=3e-3, spacing=40e-3, texture=DEFAULT_TEXTURE, dtype=torch.float32,
-                scalp: str = "brainweb", size: str = "brainweb", yaw_sd: float = 0.,
-                age: float | tuple[float, float] | None = None, deep_grey: bool = False, falx: bool = False,
-                ventricle_age: float | tuple[float, float] | None = None,
-                pitch: tuple[float, float] | None = None, sulci: str = "conserved",
-                source: str = "brainweb", interpolation: int = 1, residual: bool = False,
-                dermis: bool = False, ixi_prepared=None, lesions: dict | None = None) -> DigitalPhantom:
+def sample_head(
+    seed: int,
+    *,
+    subject=None,
+    field_T=3.0,
+    voxel=(1e-3,) * 3,
+    root=None,
+    table=DEFAULT_TISSUES,
+    magnitude=3e-3,
+    spacing=40e-3,
+    texture=DEFAULT_TEXTURE,
+    dtype=torch.float32,
+    scalp: str = "brainweb",
+    size: str = "brainweb",
+    yaw_sd: float = 0.0,
+    age: float | tuple[float, float] | None = None,
+    deep_grey: bool = False,
+    falx: bool = False,
+    ventricle_age: float | tuple[float, float] | None = None,
+    pitch: tuple[float, float] | None = None,
+    sulci: str = "conserved",
+    source: str = "brainweb",
+    interpolation: int = 1,
+    residual: bool = False,
+    dermis: bool = False,
+    ixi_prepared=None,
+    lesions: dict | None = None,
+) -> DigitalPhantom:
     """A new head for every seed (ROADMAP M5, P1): a BrainWeb subject (``subject``, or one of the
     20 drawn by the seed), deformed by ``random_deformation`` (``magnitude``, ``spacing``; halved
     until the Jacobian exceeds 0.2 everywhere), one subject's tissue table (``draw_tissues``),
@@ -292,22 +330,31 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         subject = BRAINWEB_SUBJECTS[int(np.random.default_rng(streams[0]).integers(len(BRAINWEB_SUBJECTS)))]
     age_draw = None
     if source == "ixi":
-        anatomy, ixi_meta = load_ixi(subject, ixi_root, voxel=voxel, dtype=dtype, residual=residual, prepared=ixi_prepared)
+        anatomy, ixi_meta = load_ixi(
+            subject, ixi_root, voxel=voxel, dtype=dtype, residual=residual, prepared=ixi_prepared
+        )
     elif age is not None:  # sulci opened on the native 0.5 mm grid, then resampled
-        years = float(age) if np.isscalar(age) else float(np.random.default_rng(
-            np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
+        years = (
+            float(age)
+            if np.isscalar(age)
+            else float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(7)[6]).uniform(*age))
+        )
         native = load_brainweb(subject, root, dtype=dtype)
         native = Anatomy({k: native.fractions[k] for k in ("gm", "wm", "csf")}, native.voxel, native.origin)
         cell = float(np.prod(native.voxel))
         if sulci == "measured":
             mean, sd = sulcal_width(years)
-            width = max(mean + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()), 0.)
+            width = max(
+                mean
+                + sd * float(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(11)[10]).standard_normal()),
+                0.0,
+            )
             opened = open_sulci(native, width)
             age_draw = {"years": years, "sulci": sulci, "sulcal_width": width}
         else:  # conserved: the cortex's diffuse CSF gathered into the sheets, plus the widening with age
             gathered = gather_cortical_csf(native)
             volume = float(native.fractions["csf"].sum() - gathered.fractions["csf"].sum()) * cell
-            opened = open_sulci(gathered, volume=max(volume, 0.), widen=sulcal_widening(years))
+            opened = open_sulci(gathered, volume=max(volume, 0.0), widen=sulcal_widening(years))
             age_draw = {"years": years, "sulci": sulci, "gathered_csf": volume, "widen": sulcal_widening(years)}
         move = native.fractions["gm"] - opened.fractions["gm"]  # grey matter -> CSF (signed)
         del opened
@@ -316,8 +363,11 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         move = _resample(move.double(), native.voxel, anatomy.voxel).to(dtype)
         move = torch.maximum(torch.minimum(move, anatomy.fractions["gm"]), -anatomy.fractions["csf"])
         del native
-        anatomy = replace(anatomy, fractions=anatomy.fractions | {"gm": anatomy.fractions["gm"] - move,
-                                                                  "csf": anatomy.fractions["csf"] + move})
+        anatomy = replace(
+            anatomy,
+            fractions=anatomy.fractions
+            | {"gm": anatomy.fractions["gm"] - move, "csf": anatomy.fractions["csf"] + move},
+        )
     else:
         anatomy = load_brainweb(subject, root, voxel=voxel, dtype=dtype)
     if deep_grey:
@@ -336,8 +386,9 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         else:
             years = float(ventricle_age) if np.isscalar(ventricle_age) else float(vrng.uniform(*ventricle_age))
         vent_draw = {"years": years, "factor": ventricle_factor(years)}
-    displacement, control = random_deformation(anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]),
-                                               magnitude=magnitude, spacing=spacing)
+    displacement, control = random_deformation(
+        anatomy.shape, anatomy.voxel, torch.Generator().manual_seed(streams[1]), magnitude=magnitude, spacing=spacing
+    )
     size_draw, pose = None, None
     total = lambda d: d
     if size != "brainweb" or yaw_sd or pitch is not None:
@@ -347,28 +398,35 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
             lin = np.array(ixi_meta["affine_mm"])[:3, :3]
             factors = tuple(float(np.linalg.norm(lin[:, a])) for a in (2, 1, 0))  # (z, y, x)
             head = _head_mask(anatomy)
-            centre = tuple(float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
-                           for k, h in enumerate(anatomy.voxel))
+            centre = tuple(
+                float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
+                for k, h in enumerate(anatomy.voxel)
+            )
             size_draw = {"native": True, "factors": list(factors)}
         elif size != "brainweb":
             factors, centre, size_draw = anthropometric_scaling(anatomy, rng, shell=size == "anthropometric_shell")
             size_draw["factors"] = list(factors)
         else:
-            factors = (1., 1., 1.)
+            factors = (1.0, 1.0, 1.0)
             head = _head_mask(anatomy)
-            centre = tuple(float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
-                           for k, h in enumerate(anatomy.voxel))
-        yaw = math.radians(yaw_sd) * float(rng.standard_normal()) if yaw_sd else 0.
+            centre = tuple(
+                float(np.nonzero(head.any(tuple(j for j in range(3) if j != k)))[0][[0, -1]].mean() * h)
+                for k, h in enumerate(anatomy.voxel)
+            )
+        yaw = math.radians(yaw_sd) * float(rng.standard_normal()) if yaw_sd else 0.0
         pose = {"yaw_deg": math.degrees(yaw), "centre": list(centre), "factors": list(factors)}
-        tilt = 0.
+        tilt = 0.0
         if pitch is not None:
             prng = np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(10)[9])
             tilt = math.radians(pitch[0] + pitch[1] * float(prng.standard_normal()))
             pose["pitch_deg"] = math.degrees(tilt)
         dt = displacement.dtype
         s = torch.tensor(factors, dtype=dt).view(3, 1, 1, 1)
-        grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=dt) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
-                                          indexing="ij"))
+        grid = torch.stack(
+            torch.meshgrid(
+                *(torch.arange(n, dtype=dt) * h for n, h in zip(anatomy.shape, anatomy.voxel)), indexing="ij"
+            )
+        )
         c = torch.tensor(centre, dtype=dt).view(3, 1, 1, 1)
         cos, sin = math.cos(yaw), math.sin(yaw)
         cp, sp = math.cos(tilt), math.sin(tilt)
@@ -385,15 +443,18 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
                 for _ in range(6):
                     u = v - _sample_field(shell, c + u, anatomy.voxel).to(dt)
             return c + u - grid
+
     if vent_draw is not None and vent_draw["factor"] > 1:  # MNI space, before the deformation and resizing
         mask = ventricle_mask(anatomy)
         vent_draw["offset"], vent_draw["source_volume"] = ventricle_offset(anatomy, vent_draw["factor"], mask)
         anatomy = deform(anatomy, ventricle_displacement(anatomy, mask, vent_draw["offset"]).to(displacement.dtype))
-    scale = 1.
-    while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= .2:
+    scale = 1.0
+    while (jac := deformation_jacobian(total(displacement * scale), anatomy.voxel)).min() <= 0.2:
         scale /= 2
-    tissues, draws = draw_tissues({k: v for k, v in table[field_T].items() if k not in DEEP_GREY and k not in GENERATED},
-                                  torch.Generator().manual_seed(streams[2]))
+    tissues, draws = draw_tissues(
+        {k: v for k, v in table[field_T].items() if k not in DEEP_GREY and k not in GENERATED},
+        torch.Generator().manual_seed(streams[2]),
+    )
     generated = {k: table[field_T][k] for k in GENERATED if k in table[field_T]}
     if generated:
         stream = int(np.random.SeedSequence(int(seed)).spawn(14)[13].generate_state(1)[0])
@@ -401,16 +462,31 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
         tissues, draws = tissues | more, draws | more_draws
     if deep_grey:
         stream = int(np.random.SeedSequence(int(seed)).spawn(8)[7].generate_state(1)[0])
-        more, more_draws = draw_tissues({k: table[field_T][k] for k in DEEP_GREY}, torch.Generator().manual_seed(stream))
+        more, more_draws = draw_tissues(
+            {k: table[field_T][k] for k in DEEP_GREY}, torch.Generator().manual_seed(stream)
+        )
         tissues, draws = tissues | more, draws | more_draws
     options = {"seed": streams[4]}
     if texture:
         options["variability"] = dict(texture) | {"seed": streams[3]}
-    meta = {"sampler": "anatomy.sample_head", "seed": int(seed), "subject": subject, "field_T": field_T, "scalp": scalp,
-            "voxel": list(anatomy.voxel), "streams": streams,
-            "deformation": {"magnitude": magnitude, "spacing": spacing, "scale": scale,
-                            "jacobian": [float(jac.min()), float(jac.max())], "control": control.tolist()},
-            "draws": draws, "options": options}
+    meta = {
+        "sampler": "anatomy.sample_head",
+        "seed": int(seed),
+        "subject": subject,
+        "field_T": field_T,
+        "scalp": scalp,
+        "voxel": list(anatomy.voxel),
+        "streams": streams,
+        "deformation": {
+            "magnitude": magnitude,
+            "spacing": spacing,
+            "scale": scale,
+            "jacobian": [float(jac.min()), float(jac.max())],
+            "control": control.tolist(),
+        },
+        "draws": draws,
+        "options": options,
+    }
     if size_draw is not None:
         meta["size"] = size_draw
     if pose is not None:
@@ -424,11 +500,21 @@ def sample_head(seed: int, *, subject=None, field_T=3., voxel=(1e-3,) * 3, root=
     field = total(displacement * scale)
     # where MNI's lateral-ventricle bodies (x 0, y -15, z +20 mm) landed: the output voxel whose source point is
     # nearest (a prior for the slice-stack landmark; the models are MNI-registered, the pose moves them)
-    src = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=field.dtype) * h for n, h in zip(anatomy.shape, anatomy.voxel)),
-                                     indexing="ij")) + field
-    mni = torch.tensor([20e-3 - anatomy.origin[2], -15e-3 - anatomy.origin[1], 0. - anatomy.origin[0]], dtype=field.dtype)
+    src = (
+        torch.stack(
+            torch.meshgrid(
+                *(torch.arange(n, dtype=field.dtype) * h for n, h in zip(anatomy.shape, anatomy.voxel)), indexing="ij"
+            )
+        )
+        + field
+    )
+    mni = torch.tensor(
+        [20e-3 - anatomy.origin[2], -15e-3 - anatomy.origin[1], 0.0 - anatomy.origin[0]], dtype=field.dtype
+    )
     k = int(((src - mni.view(3, 1, 1, 1)) ** 2).sum(0).argmin())
-    meta["ventricle_landmark"] = [float(anatomy.origin[2] + (k // (anatomy.shape[1] * anatomy.shape[2])) * anatomy.voxel[0])]
+    meta["ventricle_landmark"] = [
+        float(anatomy.origin[2] + (k // (anatomy.shape[1] * anatomy.shape[2])) * anatomy.voxel[0])
+    ]
     del src
     anatomy = deform(anatomy, field, order=interpolation)
     if scalp == "layered":  # on the final head: the measured layer thicknesses, not resized ones

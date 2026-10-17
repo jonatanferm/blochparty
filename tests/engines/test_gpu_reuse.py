@@ -3,6 +3,7 @@ phase is stepped once per spin into its affine map and applied at every occurren
 its phase. Same signal, magnetization and bound pool as stepping every pulse (TSE, TSE with a bound
 pool and 16 slices' pulses, RF-spoiled GRE with a bound pool), also with NUFFT readouts, dispatches
 that would split a pulse, and a memory cap that leaves some pulses stepped."""
+
 import pytest
 import torch
 
@@ -22,18 +23,38 @@ def phantom(mt=False):
     ph.b1 = 0.8 + 0.4 * torch.rand(len(ph), generator=g, dtype=f64)
     if mt:
         n = len(ph)
-        ph.bound = BoundPool(torch.full((n,), 0.15, dtype=f64), torch.full((n,), 19.0, dtype=f64), ph.t1,
-                             torch.full((n,), 9.7e-6, dtype=f64), model="rate")
+        ph.bound = BoundPool(
+            torch.full((n,), 0.15, dtype=f64),
+            torch.full((n,), 19.0, dtype=f64),
+            ph.t1,
+            torch.full((n,), 9.7e-6, dtype=f64),
+            model="rate",
+        )
     return ph
 
 
 ORDER = [0.005 * (j - 6) for j in list(range(0, 16, 2)) + list(range(1, 16, 2))]
 CASES = {  # (sequence, bound pool, distinct reused pulses)
     "TSE": (lambda: bp.tse_2d(48, etl=8, tr=0.8, slice_thickness=5e-3, spoiling="gradient", n_dummy=1), False, 2),
-    "TSE, bound pool, 16 slices": (lambda: bp.tse_2d(48, etl=8, tr=0.8, slice_thickness=5e-3, spoiling="gradient",
-                                                     n_dummy=1, slice_order=ORDER, bound_only_beyond=0.0075), True, 6),
-    "GRE, RF spoiling, bound pool": (lambda: bp.gre_2d(48, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2),
-                                     True, 1),
+    "TSE, bound pool, 16 slices": (
+        lambda: bp.tse_2d(
+            48,
+            etl=8,
+            tr=0.8,
+            slice_thickness=5e-3,
+            spoiling="gradient",
+            n_dummy=1,
+            slice_order=ORDER,
+            bound_only_beyond=0.0075,
+        ),
+        True,
+        6,
+    ),
+    "GRE, RF spoiling, bound pool": (
+        lambda: bp.gre_2d(48, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2),
+        True,
+        1,
+    ),
 }
 
 
@@ -63,10 +84,12 @@ def test_phases_and_lengths_found():
     """RF spoiling: one pulse, every TR at its own phase (quadratic increments of 117 deg)."""
     seq = bp.gre_2d(16, spoiling="rf", slice_thickness=5e-3, n_dummy=2)
     ((a, k, occ),) = driver._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
-    assert len(occ) == 18 and k == sum(seq.is_rf[a:a + k])
+    assert len(occ) == 18 and k == sum(seq.is_rf[a : a + k])
     rf = torch.complex(seq.rf[:, 0].double(), seq.rf[:, 1].double())
     for s, ph in occ:
-        assert torch.allclose(rf[s:s + k], rf[a:a + k] * torch.exp(torch.tensor(1j * ph)), rtol=0, atol=1e-6 * rf.abs().max())  # the grouping tolerance
+        assert torch.allclose(
+            rf[s : s + k], rf[a : a + k] * torch.exp(torch.tensor(1j * ph)), rtol=0, atol=1e-6 * rf.abs().max()
+        )  # the grouping tolerance
 
 
 def test_dispatch_boundaries_and_memory_cap(gpu, monkeypatch):

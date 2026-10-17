@@ -15,8 +15,9 @@ def _as_real(x: Tensor) -> Tensor:
     return torch.view_as_real(x).flatten() if x.is_complex() else x.flatten()
 
 
-def jacobian(signal_fn: Callable[[Tensor], Tensor], theta: Tensor, *, method: str = "autograd",
-             rel_step: float = 1e-4) -> Tensor:
+def jacobian(
+    signal_fn: Callable[[Tensor], Tensor], theta: Tensor, *, method: str = "autograd", rel_step: float = 1e-4
+) -> Tensor:
     """(M, P) Jacobian of ``signal_fn(theta)`` (complex outputs as stacked real / imaginary
     parts) w.r.t. the (P,) parameters ``theta``.
 
@@ -51,7 +52,7 @@ def fisher_information(signal_fn, theta: Tensor, sigma=1.0, **kwargs) -> Tensor:
     """(P, P) Fisher information J^T J / sigma^2 for measurements with independent Gaussian
     noise of standard deviation ``sigma`` (per real and imaginary part for complex data)."""
     j = jacobian(signal_fn, theta, **kwargs)
-    return j.T @ j / sigma ** 2
+    return j.T @ j / sigma**2
 
 
 def crb(signal_fn, theta: Tensor, sigma=1.0, **kwargs) -> Tensor:

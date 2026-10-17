@@ -3,6 +3,7 @@ ismrmrd-python gives the signal (complex64, exactly), the k-space of every sampl
 encode indices, from which k-space is assembled as ``cartesian_kspace`` assembles it; the
 provenance rebuilds an equal Sequence whose Pulseq file is the stored one, and keeps the phantom's
 draws, seeds, engine and versions."""
+
 from dataclasses import replace
 
 import numpy as np
@@ -68,9 +69,12 @@ def test_signal_trajectory_and_kspace_survive(written):
     for i in range(dset.number_of_acquisitions()):
         acq = dset.read_acquisition(i)
         line = acq.data if not acq.is_flag_set(ismrmrd.ACQ_IS_REVERSE) else acq.data[:, ::-1]
-        start = nx // 2 - (acq.center_sample if not acq.is_flag_set(ismrmrd.ACQ_IS_REVERSE)
-                           else acq.number_of_samples - 1 - acq.center_sample)
-        k[:, acq.idx.kspace_encode_step_1, start:start + acq.number_of_samples] = line
+        start = nx // 2 - (
+            acq.center_sample
+            if not acq.is_flag_set(ismrmrd.ACQ_IS_REVERSE)
+            else acq.number_of_samples - 1 - acq.center_sample
+        )
+        k[:, acq.idx.kspace_encode_step_1, start : start + acq.number_of_samples] = line
         last = acq.is_flag_set(ismrmrd.ACQ_LAST_IN_MEASUREMENT)
     dset.close()
     assert last
@@ -94,9 +98,14 @@ def test_sequence_and_pulseq_file_survive(written, tmp_path):
 
 
 def test_digital_phantom_provenance(tmp_path):
-    a = Anatomy({"wm": torch.full((4, 4, 4), .7, dtype=torch.float64)}, (.002,) * 3, (0, 0, 0))
-    head = DigitalPhantom(a, DEFAULT_TISSUES[1.5], 1.5, {"seed": 3},
-                          {"sampler": "test", "draws": {"wm": {"t1": .9}}, "control": [[1.5, -2e-3]]})
+    a = Anatomy({"wm": torch.full((4, 4, 4), 0.7, dtype=torch.float64)}, (0.002,) * 3, (0, 0, 0))
+    head = DigitalPhantom(
+        a,
+        DEFAULT_TISSUES[1.5],
+        1.5,
+        {"seed": 3},
+        {"sampler": "test", "draws": {"wm": {"t1": 0.9}}, "control": [[1.5, -2e-3]]},
+    )
     seq = bp.gre_2d(4, ramps=True, spoiling="rf", n_dummy=0)
     ph = head.to_phantom(chi_to_b0=False)
     write_dataset(tmp_path / "h.h5", bp.simulate(ph, seq), seq, phantom=head, seed=11, engine="core")

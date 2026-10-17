@@ -62,6 +62,7 @@ def rois(kind: str) -> list[np.ndarray]:
 
 # ---- gold standards -------------------------------------------------------------------------
 
+
 def _cartesian(name: str) -> np.ndarray:
     k = readcfl(DATA / name)  # (512, 256, 1, 20, 1, n)
     k = k.reshape(k.shape[0], k.shape[1], k.shape[3], k.shape[5])
@@ -91,6 +92,7 @@ def gold() -> dict:
 
 # ---- B1 ---------------------------------------------------------------------------------------
 
+
 def b1() -> dict:
     raw = readcfl(DATA / "data_05b_b1map").reshape(304, 192, 20, 2)  # asymmetric echo: 304 of 384
     full = np.zeros((384, 192, 20, 2), complex)
@@ -114,12 +116,17 @@ def b1() -> dict:
 
     cf, *_ = np.linalg.lstsq(poly(yy[bg], xx[bg]), kappa[bg], rcond=None)
     fit = poly(yy, xx) @ cf
-    return {"kappa": kappa, "fit": fit, "fit_rms": np.std(kappa[bg] - poly(yy[bg], xx[bg]) @ cf),
-            "sphere_fit": np.array([fit[r].mean() for r in masks]),
-            "sphere_raw": np.array([kappa[r].mean() for r in masks])}
+    return {
+        "kappa": kappa,
+        "fit": fit,
+        "fit_rms": np.std(kappa[bg] - poly(yy[bg], xx[bg]) @ cf),
+        "sphere_fit": np.array([fit[r].mean() for r in masks]),
+        "sphere_raw": np.array([kappa[r].mean() for r in masks]),
+    }
 
 
 # ---- radial data --------------------------------------------------------------------------------
+
 
 def kspace() -> np.ndarray:
     return readcfl(DATA / "data_05b_kspace").reshape(NS, 20, NT).astype(np.complex128)  # samples, coils, spokes
@@ -132,8 +139,11 @@ def delays(k: np.ndarray, spokes=range(500, NT), tol_deg: float = 0.3) -> np.nda
     th, dl = [], []
     spokes = list(spokes)
     for a in spokes:
-        d = [(min((ang[b] - ang[a] - np.pi) % (2 * np.pi), (ang[a] + np.pi - ang[b]) % (2 * np.pi)), b)
-             for b in spokes if b != a]
+        d = [
+            (min((ang[b] - ang[a] - np.pi) % (2 * np.pi), (ang[a] + np.pi - ang[b]) % (2 * np.pi)), b)
+            for b in spokes
+            if b != a
+        ]
         dmin, b = min(d)
         if dmin > np.radians(tol_deg):
             continue
@@ -162,7 +172,7 @@ def trajectory(coef: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 def compress(k: np.ndarray, n_coils: int = 8):
     dat = np.transpose(k, (1, 2, 0)).reshape(k.shape[1], -1)
-    u, _, _ = np.linalg.svd(dat[:, -500 * NS:], full_matrices=False)
+    u, _, _ = np.linalg.svd(dat[:, -500 * NS :], full_matrices=False)
     cc = u[:, :n_coils].conj().T
     dat = cc @ dat
     scale = np.abs(dat).max()
@@ -184,8 +194,9 @@ def sensitivities(dat, x, y):
     sens = img / (rss + 1e-12)
     nm = ndimage.gaussian_filter(mask * 1.0, 3) + 1e-6
     for c in range(len(sens)):
-        sens[c] = (ndimage.gaussian_filter(sens[c].real * mask, 3)
-                   + 1j * ndimage.gaussian_filter(sens[c].imag * mask, 3)) / nm
+        sens[c] = (
+            ndimage.gaussian_filter(sens[c].real * mask, 3) + 1j * ndimage.gaussian_filter(sens[c].imag * mask, 3)
+        ) / nm
     sens *= ndimage.binary_dilation(mask, iterations=4)
     return sens / (np.sqrt((np.abs(sens) ** 2).sum(0)) + 1e-12), mask
 
@@ -235,7 +246,7 @@ def curves(X, basis, mask) -> np.ndarray:
 def noise_covariance(k: np.ndarray) -> np.ndarray:
     """Coil noise covariance from the outermost 32 samples of every spoke (noise only: their
     spread equals that of the spoke-to-spoke differences / sqrt 2)."""
-    edge = np.r_[0:16, NS - 16:NS]
+    edge = np.r_[0:16, NS - 16 : NS]
     d = (k[edge][:, :, 1:] - k[edge][:, :, :-1]).transpose(1, 0, 2).reshape(k.shape[1], -1) / np.sqrt(2)
     return d @ d.conj().T / d.shape[1]
 

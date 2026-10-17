@@ -23,7 +23,9 @@ PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
 MONRO_BELOW_BODIES = 10e-3  # the foramen of Monro / basal-ganglia level below the ventricle bodies
 
 
-def stack(anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES, prior_z: float | None = None) -> np.ndarray:
+def stack(
+    anatomy, mode: str = "landmarks", offset: float = MONRO_BELOW_BODIES, prior_z: float | None = None
+) -> np.ndarray:
     """z [m] of slices 0..15. "landmarks": slice 0 at the largest lateral-ventricle cross-section, the
     brain top at slice 13.5. "protocol": slice 0 ``MONRO_BELOW_BODIES`` below that (the real slice 0
     shows frontal horns, caudate heads, thalami and the third ventricle), then ``PROTOCOL_SPACING``
@@ -50,7 +52,9 @@ def flow_void(head) -> None:
     from 10 cm/s up (the engine's moving spins, tests/physics/test_motion.py::test_tse_flow_void). Their
     spins are left out (PD 0 after the draw, so no other draw moves); susceptibility stays."""
     p = head.tissues["vessels"]
-    head.tissues["vessels"] = replace(p, pd=Distribution(0., None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True))
+    head.tissues["vessels"] = replace(
+        p, pd=Distribution(0.0, None, "TSE flow void (simulate_heads.flow_void): " + p.pd.citation, True)
+    )
 
 
 def drop_detached(head) -> None:
@@ -63,7 +67,7 @@ def drop_detached(head) -> None:
     an = head.anatomy
     fr = an.fractions
     total = sum(v for k, v in fr.items() if k != "background").numpy()
-    lab, n = ndimage.label(total > .5)
+    lab, n = ndimage.label(total > 0.5)
     if n == 0:
         return
     sizes = np.bincount(lab.ravel())
@@ -96,7 +100,7 @@ def trace_sulci(head, smooth=0.75e-3, ratio=0.8, curvature=0.0006, min_voxels=30
     csf, gm = fr["csf"].numpy().astype(np.float32), fr["gm"].numpy().astype(np.float32)
     cs = ndimage.gaussian_filter(csf, smooth / h)
     g = np.gradient(cs)
-    region = (gm > .5) & ~ndimage.binary_dilation(csf > .4, iterations=1)
+    region = (gm > 0.5) & ~ndimage.binary_dilation(csf > 0.4, iterations=1)
     idx = np.nonzero(region)
     H = np.empty((len(idx[0]), 3, 3), np.float32)
     for i in range(3):
@@ -134,9 +138,9 @@ def thin_convexity_csf(head, thickness: float) -> None:
     0.64), and 0.57 mm reconstructions a thin line at most; 1-2 mm brackets them."""
     an = head.anatomy
     fr = an.fractions
-    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *bp.anatomy.DEEP_GREY)).numpy() > .5
+    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *bp.anatomy.DEEP_GREY)).numpy() > 0.5
     hull = ndimage.binary_fill_holes(ndimage.binary_closing(brain, iterations=round(3e-3 / an.voxel[1])))
-    bone = (fr["skull"] + fr["marrow"]).numpy() > .5  # the calvarium, not the falx and tentorium
+    bone = (fr["skull"] + fr["marrow"]).numpy() > 0.5  # the calvarium, not the falx and tentorium
     d = ndimage.distance_transform_edt(~bone, sampling=an.voxel)
     w = torch.from_numpy(np.clip((thickness + an.voxel[1] / 2 - d) / an.voxel[1], 0, 1) * ~hull).to(fr["csf"].dtype)
     move = fr["csf"] * w
@@ -151,8 +155,10 @@ def centre(anatomy, zs) -> tuple[float, float]:
     z = anatomy.origin[2] + np.arange(anatomy.shape[0]) * anatomy.voxel[0]
     rows = head[(z >= zs[0] - 2.5e-3) & (z <= zs[-1] + 2.5e-3)]
     ys, xs = np.nonzero(rows.any((0, 2)))[0], np.nonzero(rows.any((0, 1)))[0]
-    return (anatomy.origin[0] + (xs[0] + xs[-1]) / 2 * anatomy.voxel[2],
-            anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1])
+    return (
+        anatomy.origin[0] + (xs[0] + xs[-1]) / 2 * anatomy.voxel[2],
+        anatomy.origin[1] + (ys[0] + ys[-1]) / 2 * anatomy.voxel[1],
+    )
 
 
 _B1 = {}
@@ -172,8 +178,14 @@ def b1_plus(head, pos: torch.Tensor, root) -> torch.Tensor:
         fm = em.field_maps(transmit=em.read_mariepy_maps(Path(root) / "em" / "body.npz"))
         ref = bp.load_brainweb(4, root, voxel=(5e-3,) * 3, dtype=torch.float64)
         brain = (ref.fractions["gm"] + ref.fractions["wm"]) > 0.5
-        p = torch.tensor(ref.origin, dtype=torch.float64) + brain.nonzero().double().flip(-1) * torch.tensor(ref.voxel[::-1], dtype=torch.float64)
-        grid = fm.b1[None].double(), torch.tensor(fm.origin, dtype=torch.float64), torch.tensor(fm.spacing, dtype=torch.float64)
+        p = torch.tensor(ref.origin, dtype=torch.float64) + brain.nonzero().double().flip(-1) * torch.tensor(
+            ref.voxel[::-1], dtype=torch.float64
+        )
+        grid = (
+            fm.b1[None].double(),
+            torch.tensor(fm.origin, dtype=torch.float64),
+            torch.tensor(fm.spacing, dtype=torch.float64),
+        )
         _B1[key] = grid, float(sample(*grid, p)[:, 0].mean())
     pose = head.meta.get("pose")
     q = pos.double()
@@ -184,12 +196,24 @@ def b1_plus(head, pos: torch.Tensor, root) -> torch.Tensor:
         s = torch.tensor(pose["factors"][::-1], dtype=torch.float64)
         yaw = math.radians(pose["yaw_deg"])
         v = q - c
-        v = torch.stack([math.cos(yaw) * v[:, 0] - math.sin(yaw) * v[:, 1], math.sin(yaw) * v[:, 0] + math.cos(yaw) * v[:, 1],
-                         v[:, 2]], -1)
-        tilt = math.radians(pose.get("pitch_deg", 0.))
+        v = torch.stack(
+            [
+                math.cos(yaw) * v[:, 0] - math.sin(yaw) * v[:, 1],
+                math.sin(yaw) * v[:, 0] + math.cos(yaw) * v[:, 1],
+                v[:, 2],
+            ],
+            -1,
+        )
+        tilt = math.radians(pose.get("pitch_deg", 0.0))
         if tilt:  # pitch^-1 in the (y, z) plane, as sample_head's pull-back
-            v = torch.stack([v[:, 0], -math.sin(tilt) * v[:, 2] + math.cos(tilt) * v[:, 1],
-                             math.cos(tilt) * v[:, 2] + math.sin(tilt) * v[:, 1]], -1)
+            v = torch.stack(
+                [
+                    v[:, 0],
+                    -math.sin(tilt) * v[:, 2] + math.cos(tilt) * v[:, 1],
+                    math.cos(tilt) * v[:, 2] + math.sin(tilt) * v[:, 1],
+                ],
+                -1,
+            )
         q = c + v / s
     grid, norm = _B1[key]
     return sample(*grid, q)[:, 0] / norm
@@ -208,13 +232,36 @@ def head_for(spec: dict, seed: int, table, root) -> bp.DigitalPhantom:
     a = spec["anatomy"]
     prepared = None if a.get("prepared") is None else Path(a["prepared"]).expanduser()
     subject = a.get("subject")
-    if subject is None and a.get("subjects"):  # a pool of subjects (e.g. a held-out set for evaluation), drawn by the seed
+    if subject is None and a.get(
+        "subjects"
+    ):  # a pool of subjects (e.g. a held-out set for evaluation), drawn by the seed
         pool = list(a["subjects"])
-        subject = int(pool[int(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(17)[16]).integers(len(pool)))])
-    head = bp.sample_head(seed, subject=subject, root=root, voxel=(1e-3,) * 3, table=table, scalp="brainweb",
-                          ixi_prepared=prepared, size="native", yaw_sd=3.8, age=None, deep_grey=True,
-                          magnitude=a.get("deform_mm", 3.0) * 1e-3, ventricle_age=None, pitch=(-10., 5.), source=a["source"],
-                          falx=True, interpolation=3, residual=True, dermis=False, lesions=a.get("lesions"), texture={})
+        subject = int(
+            pool[int(np.random.default_rng(np.random.SeedSequence(int(seed)).spawn(17)[16]).integers(len(pool)))]
+        )
+    head = bp.sample_head(
+        seed,
+        subject=subject,
+        root=root,
+        voxel=(1e-3,) * 3,
+        table=table,
+        scalp="brainweb",
+        ixi_prepared=prepared,
+        size="native",
+        yaw_sd=3.8,
+        age=None,
+        deep_grey=True,
+        magnitude=a.get("deform_mm", 3.0) * 1e-3,
+        ventricle_age=None,
+        pitch=(-10.0, 5.0),
+        source=a["source"],
+        falx=True,
+        interpolation=3,
+        residual=True,
+        dermis=False,
+        lesions=a.get("lesions"),
+        texture={},
+    )
     drop_detached(head)
     flow_void(head)
     return head

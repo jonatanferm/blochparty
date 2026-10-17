@@ -75,12 +75,27 @@ def steady_state(tissue: str, mt: bool, n_slices: int, fs) -> float:
     p = TISSUE[tissue]
     one = lambda v: torch.full((1,), v, dtype=torch.float64)
     pool = bp.BoundPool(f=p["f"], k=30.0, t1=1.0, t2=12e-6) if mt else None
-    ph = bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=one(1.0), t1=one(p["t1"]), t2=one(p["t2"]),
-                    db0=one(0.0), bound=pool)
+    ph = bp.Phantom(
+        pos=torch.zeros(1, 3, dtype=torch.float64),
+        pd=one(1.0),
+        t1=one(p["t1"]),
+        t2=one(p["t2"]),
+        db0=one(0.0),
+        bound=pool,
+    )
     seq, marks = sequence(n_slices, fs)
     cut = marks[-1]  # Mz just before the last imaged excitation
-    part = replace(seq, dt=seq.dt[:cut], rf=seq.rf[:cut], grad=seq.grad[:cut], adc_phase=seq.adc_phase[:cut],
-                   is_rf=seq.is_rf[:cut], adc=seq.adc[:cut], spoil=seq.spoil[:cut], meta={})
+    part = replace(
+        seq,
+        dt=seq.dt[:cut],
+        rf=seq.rf[:cut],
+        grad=seq.grad[:cut],
+        adc_phase=seq.adc_phase[:cut],
+        is_rf=seq.is_rf[:cut],
+        adc=seq.adc[:cut],
+        spoil=seq.spoil[:cut],
+        meta={},
+    )
     return float(bp.simulate(ph, part, engine="gpu").m[0, 2])  # float32; until 2026-10-09 the fused kernel (same table)
 
 
@@ -94,9 +109,12 @@ def main():
             ref = steady_state(tissue, mt, 1, None)
             for fs in ((10e-3, 90.0), (10e-3, 110.0), (10e-3, 180.0), (20e-3, 110.0), (5e-3, 110.0)):
                 rel = [steady_state(tissue, mt, n, fs) / ref for n in slices]
-                print(f"| {tissue} | {fs[0] * 1e3:.0f} ms, {fs[1]:.0f}° | {'yes' if mt else 'no'} | "
-                      + " | ".join(f"{100 * r:.1f} %" for r in rel) + f" | {100 * (1 - rel[-1] / rel[0]):.1f} % |",
-                      flush=True)
+                print(
+                    f"| {tissue} | {fs[0] * 1e3:.0f} ms, {fs[1]:.0f}° | {'yes' if mt else 'no'} | "
+                    + " | ".join(f"{100 * r:.1f} %" for r in rel)
+                    + f" | {100 * (1 - rel[-1] / rel[0]):.1f} % |",
+                    flush=True,
+                )
             if not mt:
                 break
     print("\nShin et al. 2009 (3 T, WM and GM): ~94-98 % (1 slice) -> ~70-72 % (9 slices), ~30 % loss")

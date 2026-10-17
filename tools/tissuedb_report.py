@@ -4,6 +4,7 @@ BrainWeb class (what would change if the candidate became the default).
 
     uv run python tools/tissuedb_report.py [--field 3.0] [--counts]
 """
+
 import argparse
 from collections import defaultdict
 from dataclasses import fields
@@ -11,10 +12,20 @@ from dataclasses import fields
 from blochparty.anatomy import DEFAULT_TISSUES, TissueProperties
 from blochparty.tissuedb import load, tissue_table
 
-UNITS = {"pd": (1, ""), "t1": (1e3, "ms"), "t2": (1e3, "ms"), "t2star": (1e3, "ms"), "chi": (1e6, "ppm"),
-         "bound_fraction": (1, ""), "exchange_rate": (1, "/s"), "bound_t2": (1e6, "us"),
-         "diffusivity": (1e9, "um^2/ms"), "fat_fraction": (1, ""),
-         "myelin_water_fraction": (1, ""), "myelin_water_t2": (1e3, "ms")}
+UNITS = {
+    "pd": (1, ""),
+    "t1": (1e3, "ms"),
+    "t2": (1e3, "ms"),
+    "t2star": (1e3, "ms"),
+    "chi": (1e6, "ppm"),
+    "bound_fraction": (1, ""),
+    "exchange_rate": (1, "/s"),
+    "bound_t2": (1e6, "us"),
+    "diffusivity": (1e9, "um^2/ms"),
+    "fat_fraction": (1, ""),
+    "myelin_water_fraction": (1, ""),
+    "myelin_water_t2": (1e3, "ms"),
+}
 
 
 def fmt(d, name):
@@ -32,7 +43,9 @@ def counts(db):
         key = (m.tissue, m.property, "" if m.field_T is None else f"{m.field_T:g}")
         rows[key] += 1
         srcs[key].add(m.source)
-    print(f"{len(db.measurements)} rows, {len(db.sources)} sources, {len({m.tissue for m in db.measurements})} tissues\n")
+    print(
+        f"{len(db.measurements)} rows, {len(db.sources)} sources, {len({m.tissue for m in db.measurements})} tissues\n"
+    )
     print("| tissue | property | field [T] | rows | sources |\n|---|---|---|---|---|")
     for key in sorted(rows):
         print(f"| {key[0]} | {key[1]} | {key[2]} | {rows[key]} | {len(srcs[key])} |")
@@ -42,8 +55,11 @@ def compare(db, field_T):
     cand, base = tissue_table(field_T, db=db), DEFAULT_TISSUES[field_T]
     names = [f.name for f in fields(TissueProperties)]
     print(f"\n### tissue_table({field_T:g}) vs DEFAULT_TISSUES[{field_T:g}]\n")
-    print("Each cell: candidate / current; (a) = assumed; units: " +
-          ", ".join(f"{n} {UNITS[n][1]}" for n in names if UNITS[n][1]) + ". Unchanged cells show one value.\n")
+    print(
+        "Each cell: candidate / current; (a) = assumed; units: "
+        + ", ".join(f"{n} {UNITS[n][1]}" for n in names if UNITS[n][1])
+        + ". Unchanged cells show one value.\n"
+    )
     print("| class | " + " | ".join(names) + " |\n|---|" + "---|" * len(names))
     for cls in sorted(base):
         c, b = cand.get(cls), base[cls]

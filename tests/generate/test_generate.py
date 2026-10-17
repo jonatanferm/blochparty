@@ -48,9 +48,10 @@ def test_cropping_an_oversampled_readout_keeps_the_field_of_view():
 
     class Seq:  # a stand-in whose cartesian_kspace is k2: kspace_on_fov only reshapes the signal by the sequence
         meta = {"kspace_shape": (n, 2 * n)}
+
     signal = torch.from_numpy(k2.reshape(2, -1))
     out = kspace_on_fov(signal, Seq())
-    crop = img2[..., n // 2: n // 2 + n]
+    crop = img2[..., n // 2 : n // 2 + n]
     ref = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(crop, axes=-1), axis=-1, norm="ortho"), axes=-1)
     ref = np.fft.fftshift(np.fft.fft(np.fft.ifftshift(ref, axes=-2), axis=-2, norm="ortho"), axes=-2)
     assert np.allclose(out, ref, atol=1e-10)

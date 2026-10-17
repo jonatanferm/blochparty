@@ -10,7 +10,11 @@ from torch import Tensor
 
 
 def birdcage_sensitivities(
-    pos: Tensor, n_coils: int = 8, radius: float = 0.18, normalize: bool = False, radius_y: float | None = None,
+    pos: Tensor,
+    n_coils: int = 8,
+    radius: float = 0.18,
+    normalize: bool = False,
+    radius_y: float | None = None,
     element_radius: float | None = None,
 ) -> Tensor:
     """(N, C) complex sensitivities of ``n_coils`` elements evenly spaced on a circle (an ellipse with semi-axes
@@ -30,7 +34,9 @@ def birdcage_sensitivities(
         mag = radius / dist
     else:
         a = element_radius
-        mag = radius * a**2 / (a**2 + dist**2) ** 1.5 * (a**2 + radius**2) ** 1.5 / a**2  # = 1 at the centre of a circle
+        mag = (
+            radius * a**2 / (a**2 + dist**2) ** 1.5 * (a**2 + radius**2) ** 1.5 / a**2
+        )  # = 1 at the centre of a circle
     sens = torch.polar(mag, torch.atan2(dy, dx) - theta)
     if normalize:
         sens = sens / torch.sqrt((sens.abs() ** 2).sum(dim=1, keepdim=True))
@@ -112,7 +118,9 @@ def coil_offset(anatomy, zs, cy: float, radius: float, gap: float) -> float:
     return back - cy - gap + radius
 
 
-def normalised_sensitivities(sens: torch.Tensor, pos: torch.Tensor, smooth_mm: float, bin_mm: float = 4.0) -> torch.Tensor:
+def normalised_sensitivities(
+    sens: torch.Tensor, pos: torch.Tensor, smooth_mm: float, bin_mm: float = 4.0
+) -> torch.Tensor:
     """The receive array as the scanner shows it after its intensity normalisation (Siemens "Prescan Normalize" and
     its kin divide the image by a smooth estimate of the array's sensitivity): ``sens`` (N, C) divided by the
     root-sum-of-squares sensitivity smoothed over ``smooth_mm`` (Gaussian sigma) in the slice plane. The estimate is
@@ -122,13 +130,16 @@ def normalised_sensitivities(sens: torch.Tensor, pos: torch.Tensor, smooth_mm: f
     than a flat receive gives while the interior matches one). ``pos`` in the turned frame (x anterior-posterior, y
     left-right)."""
     from scipy import ndimage
+
     rss = sens.abs().pow(2).sum(1).sqrt().cpu().numpy()
     xy = pos[:, :2].cpu().numpy() / (bin_mm * 1e-3)
     lo = np.floor(xy.min(0)) - 2
     ij = np.floor(xy - lo).astype(int)
     shape = tuple(ij.max(0) + 3)
-    num = np.zeros(shape); den = np.zeros(shape)
-    np.add.at(num, (ij[:, 0], ij[:, 1]), rss); np.add.at(den, (ij[:, 0], ij[:, 1]), 1.0)
+    num = np.zeros(shape)
+    den = np.zeros(shape)
+    np.add.at(num, (ij[:, 0], ij[:, 1]), rss)
+    np.add.at(den, (ij[:, 0], ij[:, 1]), 1.0)
     sigma = smooth_mm / bin_mm
     smooth = ndimage.gaussian_filter(num, sigma) / np.maximum(ndimage.gaussian_filter(den, sigma), 1e-9)
     est = ndimage.map_coordinates(smooth, (xy - lo).T, order=1, mode="nearest")

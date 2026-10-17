@@ -3,6 +3,7 @@
 Source: 10.21942/uva.19646364.v3 (CC BY 4.0). These are brain templates at
 7 T, not the QSM challenge full-head phantom. Relative PD is not absolute M0.
 """
+
 import argparse
 import hashlib
 import json
@@ -36,10 +37,20 @@ def fetch(root, *, offline=False):
             if offline:
                 raise FileNotFoundError(path)
             part = path.with_suffix(".part.gz")
-            subprocess.run([
-                "curl", "-fsSL", "--retry", "2", "--max-time", "300",
-                entry["url"], "-o", str(part),
-            ], check=True)
+            subprocess.run(
+                [
+                    "curl",
+                    "-fsSL",
+                    "--retry",
+                    "2",
+                    "--max-time",
+                    "300",
+                    entry["url"],
+                    "-o",
+                    str(part),
+                ],
+                check=True,
+            )
             if compressed_sha256(part) != entry["sha256"]:
                 raise ValueError(f"download checksum mismatch: {part}")
             part.replace(path)
@@ -49,8 +60,7 @@ def fetch(root, *, offline=False):
             raise ValueError(f"decompressed checksum mismatch: {path}")
         image = nib.load(path)
         if reference is not None and (
-            image.shape != reference.shape
-            or not np.array_equal(image.affine, reference.affine)
+            image.shape != reference.shape or not np.array_equal(image.affine, reference.affine)
         ):
             raise ValueError(f"map grid mismatch: {path}")
         reference = image

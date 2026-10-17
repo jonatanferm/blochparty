@@ -65,8 +65,7 @@ def test_off_resonance_shifts_along_readout(setup):
     maps, phantom, _ = setup
     seq = bp.gre_2d(N, FOV, flip_deg=FLIP, tr=TR, rf_duration=0.1e-6, n_dummy=300)
     bw = bp.readout_bandwidth_per_pixel(seq)
-    shifted = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV,
-                                      db0=torch.full_like(maps["pd"], 2 * bw))
+    shifted = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], FOV, db0=torch.full_like(maps["pd"], 2 * bw))
     recon = lambda p: bp.ifft2c(bp.kspace_grid(bp.simulate(p, seq).signal, seq))[0].abs()
     img, ref = recon(shifted), recon(phantom).roll(2, dims=-1)
     assert (img - ref).abs().max() < 1e-3 * ref.max()

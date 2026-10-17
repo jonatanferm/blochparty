@@ -35,8 +35,9 @@ def snapshot() -> dict:
             coils = bp.birdcage_sensitivities(ph.pos, 8)
             t1 = ph.t1.clone().requires_grad_()
             flip = torch.tensor(20.0, dtype=dt, requires_grad=True)
-            r = sim(bp.Phantom(ph.pos, ph.pd, t1, ph.t2, ph.db0), bp.gre_2d(32, flip_deg=flip, n_dummy=50, dtype=dt),
-                    coils)
+            r = sim(
+                bp.Phantom(ph.pos, ph.pd, t1, ph.t2, ph.db0), bp.gre_2d(32, flip_deg=flip, n_dummy=50, dtype=dt), coils
+            )
             grads = torch.autograd.grad((r.signal.abs() ** 2).sum() + r.m.sum(), [flip, t1])
             out[f"{name}-2d-{dt}"] = (r.signal.detach(), r.m.detach(), *grads)
             r = sim(bp.shepp_logan(12, ndim=3).to(dtype=dt), bp.gre_3d(12, n_dummy=5, dtype=dt))

@@ -79,8 +79,10 @@ def trajectory():
                 if best is None or err < best[0]:
                     best = (err, sx, sy, swap)
     err, sx, sy, swap = best
-    print(f"trajectory: max |k_import - k_file| = {err:.2e} / FOV (of max {np.abs(traj).max():.0f}); "
-          f"file x = {'+' if sx > 0 else '-'}{'y' if swap else 'x'}, y = {'+' if sy > 0 else '-'}{'x' if swap else 'y'}")
+    print(
+        f"trajectory: max |k_import - k_file| = {err:.2e} / FOV (of max {np.abs(traj).max():.0f}); "
+        f"file x = {'+' if sx > 0 else '-'}{'y' if swap else 'x'}, y = {'+' if sy > 0 else '-'}{'x' if swap else 'y'}"
+    )
     return best
 
 
@@ -137,16 +139,20 @@ def delays(k=None, traj=None, quiet=False):
     coef, res = fit(pairs)
     if not quiet:
         us = coef * DWELL * 1e6
-        print(f"delays (all {sum(len(p[0]) for p in pairs)} pairs): dx {us[0]:+.3f}, dy {us[1]:+.3f}, "
-              f"dxy {us[2]:+.3f} us; scatter about the model {res * DWELL * 1e6:.3f} us")
+        print(
+            f"delays (all {sum(len(p[0]) for p in pairs)} pairs): dx {us[0]:+.3f}, dy {us[1]:+.3f}, "
+            f"dxy {us[2]:+.3f} us; scatter about the model {res * DWELL * 1e6:.3f} us"
+        )
         for train in ((0, 2, 4), (1, 3)):
             test = [s for s in range(NSL) if s not in train]
             c, _ = fit([pairs[s] for s in train])
             for s in test:
                 th, dl = pairs[s]
                 pred = design(th) @ c
-                print(f"  fit slices {train} -> slice {s}: rms(measured - predicted) {np.sqrt(np.mean((dl - pred) ** 2)) * 10:.3f} us, "
-                      f"rms(measured - 0) {np.sqrt(np.mean(dl ** 2)) * 10:.3f} us")
+                print(
+                    f"  fit slices {train} -> slice {s}: rms(measured - predicted) {np.sqrt(np.mean((dl - pred) ** 2)) * 10:.3f} us, "
+                    f"rms(measured - 0) {np.sqrt(np.mean(dl**2)) * 10:.3f} us"
+                )
     return coef, res, pairs
 
 
@@ -165,7 +171,10 @@ def phantom(kind: str, seed=0):
     h = 1.5e-3
     ax = torch.arange(-0.1, 0.1, h, dtype=torch.float64)
     yy, xx = torch.meshgrid(ax, ax, indexing="ij")
-    xy = torch.stack([xx.ravel(), yy.ravel()], 1) + (torch.rand(xx.numel(), 2, generator=g, dtype=torch.float64) - 0.5) * h
+    xy = (
+        torch.stack([xx.ravel(), yy.ravel()], 1)
+        + (torch.rand(xx.numel(), 2, generator=g, dtype=torch.float64) - 0.5) * h
+    )
     if kind == "ellipse":
         xy = xy[((xy[:, 0] - 0.02) / 0.08) ** 2 + ((xy[:, 1] + 0.01) / 0.06) ** 2 < 1]
         pd = 1 + 1.5 * (((xy[:, 0] + 0.03) ** 2 + (xy[:, 1] - 0.02) ** 2) < 0.015**2).double()
@@ -182,15 +191,22 @@ def ring_coils(pos):
     """(N, C) receive weights of eight 5 cm loops on a 13 cm ring (quasi-static, ``loops.py``)."""
     from blochparty.loops import Loop, fields, receive_sensitivities
 
-    loops = [Loop((0.13 * math.cos(a), 0.13 * math.sin(a), 0.0), (-math.cos(a), -math.sin(a), 0.0), 0.05)
-             for a in (2 * math.pi * i / 8 for i in range(8))]
+    loops = [
+        Loop((0.13 * math.cos(a), 0.13 * math.sin(a), 0.0), (-math.cos(a), -math.sin(a), 0.0), 0.05)
+        for a in (2 * math.pi * i / 8 for i in range(8))
+    ]
     w = receive_sensitivities(fields(loops, pos)[0])
     return w / w.abs().max()
 
 
 CASES = (  # (phantom, coils, imposed dx, dy [us])
-    ("ellipse", False, 0.0, 0.0), ("ellipse", False, 3.0, 3.0), ("ellipse", False, 3.0, -2.0),
-    ("ellipse", False, 0.2, 0.65), ("disc", True, 0.2, 0.65), ("disc", True, 3.0, -2.0))
+    ("ellipse", False, 0.0, 0.0),
+    ("ellipse", False, 3.0, 3.0),
+    ("ellipse", False, 3.0, -2.0),
+    ("ellipse", False, 0.2, 0.65),
+    ("disc", True, 0.2, 0.65),
+    ("disc", True, 3.0, -2.0),
+)
 
 
 def simulate():
@@ -215,9 +231,11 @@ def simulate():
         k = sig.to(torch.complex64).numpy().reshape(c, NSL, NSP, NS).transpose(1, 2, 0, 3)
         coef, res, _ = delays(k, traj, quiet=True)
         us = coef * DWELL * 1e6
-        print(f"  {kind:7s} {'8 loops' if with_coils else '1 coil ':7s} imposed ({dx:+.2f}, {dy:+.2f}) us -> "
-              f"({us[0]:+.3f}, {us[1]:+.3f}), dxy {us[2]:+.3f} us; scatter {res * DWELL * 1e6:.3f} us "
-              f"({time.perf_counter() - t0:.0f} s)")
+        print(
+            f"  {kind:7s} {'8 loops' if with_coils else '1 coil ':7s} imposed ({dx:+.2f}, {dy:+.2f}) us -> "
+            f"({us[0]:+.3f}, {us[1]:+.3f}), dxy {us[2]:+.3f} us; scatter {res * DWELL * 1e6:.3f} us "
+            f"({time.perf_counter() - t0:.0f} s)"
+        )
 
 
 def centroids():
@@ -232,7 +250,9 @@ def centroids():
         c = (m * x).sum(1) / m.sum(1)
         a = np.stack([np.cos(ang[s]), np.sin(ang[s])], 1)
         (x0, y0), *_ = np.linalg.lstsq(a, c, rcond=None)
-        print(f"  slice {s}: object centre ({x0:+.1f}, {y0:+.1f}) mm, width {(m > 0).sum(1).min()}-{(m > 0).sum(1).max()} mm")
+        print(
+            f"  slice {s}: object centre ({x0:+.1f}, {y0:+.1f}) mm, width {(m > 0).sum(1).min()}-{(m > 0).sum(1).max()} mm"
+        )
 
 
 def main(argv):

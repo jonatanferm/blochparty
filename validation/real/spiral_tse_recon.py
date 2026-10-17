@@ -134,8 +134,14 @@ def background_std(X):
 def recon():
     traj, data, echo = raw()
     sens = coil_maps(coil_images(traj, data, echo))
-    X = np.array([sense(np.ascontiguousarray(data[echo == e].transpose(1, 0, 2).reshape(C, -1)), *coords(traj, echo == e),
-                        sens) for e in range(NE)])
+    X = np.array(
+        [
+            sense(
+                np.ascontiguousarray(data[echo == e].transpose(1, 0, 2).reshape(C, -1)), *coords(traj, echo == e), sens
+            )
+            for e in range(NE)
+        ]
+    )
     cents = tube_centres(np.abs(X[0]) + np.abs(X[1]))
     np.savez(CACHE / "recon.npz", X=X, sens=sens, centres=cents, curves=curves(X, cents), noise=background_std(X))
 

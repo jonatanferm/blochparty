@@ -51,8 +51,24 @@ def _requires_grad(*objs) -> bool:
     return False
 
 
-def _simulate(backend, phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-              checkpoint_every, readouts, nufft_width, nufft_terms, pulses) -> SimResult:
+def _simulate(
+    backend,
+    phantom: Phantom,
+    seq: Sequence,
+    coils,
+    m_init,
+    chunk,
+    group,
+    scanner,
+    mma,
+    seed,
+    maps,
+    checkpoint_every,
+    readouts,
+    nufft_width,
+    nufft_terms,
+    pulses,
+) -> SimResult:
     """simulate_metal on ``backend`` (``metal.METAL`` or ``cuda.CUDA``)."""
     if readouts not in ("direct", "nufft"):
         raise ValueError(f"readouts must be 'direct' or 'nufft', not {readouts!r}")
@@ -63,6 +79,18 @@ def _simulate(backend, phantom: Phantom, seq: Sequence, coils, m_init, chunk, gr
     if grad:
         return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every, backend)
     with torch.no_grad():
-        return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps,
-                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None, reuse=pulses == "reuse",
-                        backend=backend)
+        return _forward(
+            phantom,
+            seq,
+            coils,
+            m_init,
+            chunk,
+            group,
+            scanner,
+            mma,
+            seed,
+            maps,
+            nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None,
+            reuse=pulses == "reuse",
+            backend=backend,
+        )

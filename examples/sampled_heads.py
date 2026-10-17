@@ -39,12 +39,15 @@ def protocols(n: int, fov: float, thickness: float) -> dict:
     # GRE echo times 5 us past round numbers: the echo is the centre of sample n/2, half a dwell
     # off the 10 us gradient raster, and only on-raster blocks can be written to Pulseq
     return {
-        "T1w GRE (TR 250, TE 2.5 ms, 70 deg)": bp.gre_2d(n, fov, flip_deg=70.0, tr=0.25, te=2.505e-3, n_dummy=8,
-                                                       spoiling="rf", **common),
-        "T2w TSE (TR 4 s, ETL 16, TE 90 ms)": bp.tse_2d(n, fov, etl=16, esp=10e-3, tr=4.0, n_dummy=1,
-                                                       spoiling="gradient", **common),
-        "T2*w GRE (TR 600, TE 20 ms, 20 deg)": bp.gre_2d(n, fov, flip_deg=20.0, tr=0.6, te=20.005e-3, n_dummy=4,
-                                                        spoiling="rf", **common),
+        "T1w GRE (TR 250, TE 2.5 ms, 70 deg)": bp.gre_2d(
+            n, fov, flip_deg=70.0, tr=0.25, te=2.505e-3, n_dummy=8, spoiling="rf", **common
+        ),
+        "T2w TSE (TR 4 s, ETL 16, TE 90 ms)": bp.tse_2d(
+            n, fov, etl=16, esp=10e-3, tr=4.0, n_dummy=1, spoiling="gradient", **common
+        ),
+        "T2*w GRE (TR 600, TE 20 ms, 20 deg)": bp.gre_2d(
+            n, fov, flip_deg=20.0, tr=0.6, te=20.005e-3, n_dummy=4, spoiling="rf", **common
+        ),
     }
 
 
@@ -78,11 +81,17 @@ def main():
         t0 = time.perf_counter()
         head = bp.sample_head(seed, subject=args.subject, root=args.root, voxel=(1e-3,) * 3)
         k = round(-head.anatomy.origin[2] / head.anatomy.voxel[0])  # the slice is at z = 0
-        ph = head.to_phantom(fov_region=(slice(k - args.slab, k + args.slab + 1), slice(None), slice(None)),
-                             spins_per_voxel=(2, 2, 2))
+        ph = head.to_phantom(
+            fov_region=(slice(k - args.slab, k + args.slab + 1), slice(None), slice(None)), spins_per_voxel=(2, 2, 2)
+        )
         coils = bp.birdcage_sensitivities(ph.pos, 8)
-        entry = {"seed": seed, "subject": head.meta["subject"], "spins": len(ph),
-                 "jacobian": head.meta["deformation"]["jacobian"], "setup_s": time.perf_counter() - t0}
+        entry = {
+            "seed": seed,
+            "subject": head.meta["subject"],
+            "spins": len(ph),
+            "jacobian": head.meta["deformation"]["jacobian"],
+            "setup_s": time.perf_counter() - t0,
+        }
         print(f"head {seed}: subject {head.meta['subject']}, {len(ph):,} spins ({entry['setup_s']:.0f} s)", flush=True)
         for name, seq in seqs.items():
             t = time.perf_counter()
@@ -91,9 +100,16 @@ def main():
             sigma = level * args.n / args.snr  # image noise sigma / n for the centred iFFT
             noise_seed = 1000 * seed + len(images)
             signal = bp.add_noise(clean, sigma, generator=torch.Generator().manual_seed(noise_seed))
-            write_dataset(args.out / f"head{seed:02d}_{tag(name)}.h5", signal, seq, phantom=head, seed=seed,
-                          engine=engine, coils={"model": "birdcage", "n": 8},
-                          noise={"sigma": sigma, "seed": noise_seed})
+            write_dataset(
+                args.out / f"head{seed:02d}_{tag(name)}.h5",
+                signal,
+                seq,
+                phantom=head,
+                seed=seed,
+                engine=engine,
+                coils={"model": "birdcage", "n": 8},
+                noise={"sigma": sigma, "seed": noise_seed},
+            )
             images[seed, name] = bp.rss(bp.cartesian_recon(signal, seq)).numpy()
             entry[tag(name) + "_s"] = time.perf_counter() - t
             print(f"  {name}: {entry[tag(name) + '_s']:.0f} s ({engine})", flush=True)
@@ -137,11 +153,14 @@ def plot(images: dict, names: list, subjects: dict, path: Path):
             if j == 0:
                 ax[j, i].set_title(f"seed {seed} (subject {subjects[seed]})", fontsize=7)
         ax[j, 0].set_ylabel(name.replace(" (", "\n("), fontsize=7)
-    fig.suptitle("sample_head: ten heads at 3 T (deformation, tissue draws, texture, chi -> B0 + shim, "
-                 "8 coils, noise)", fontsize=8)
+    fig.suptitle(
+        "sample_head: ten heads at 3 T (deformation, tissue draws, texture, chi -> B0 + shim, 8 coils, noise)",
+        fontsize=8,
+    )
     plt.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(path, dpi=90)
+
 
 if __name__ == "__main__":
     main()

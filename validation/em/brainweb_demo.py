@@ -27,7 +27,9 @@ ROOT = Path(__file__).resolve().parents[1] / "anatomy" / "data"
 
 def simulate(phantom, seq, maps=None):
     if bp.engines.available("gpu"):
-        return bp.simulate(phantom.to(torch.float32), seq.to(torch.float32), maps=maps, engine="gpu").signal.to(torch.complex128)
+        return bp.simulate(phantom.to(torch.float32), seq.to(torch.float32), maps=maps, engine="gpu").signal.to(
+            torch.complex128
+        )
     return bp.simulate(phantom, seq, maps=maps).signal
 
 
@@ -45,8 +47,13 @@ def main():
     fm = em.field_maps(body, head8)  # quadrature birdcage, |B1+| relative to its median over the head
     head = bp.load_brainweb(4, ROOT, voxel=(1e-3,) * 3)
     k = int(round((args.height - head.origin[2]) / 1e-3))
-    ph = bp.to_phantom(head, field_T=3.0, fov_region=(slice(k - 1, k + 1), slice(None), slice(None)),
-                       spins_per_voxel=(2, 2, 2), variability={"t1": 0.05, "t2": 0.05, "pd": 0.02, "length": 0.01})
+    ph = bp.to_phantom(
+        head,
+        field_T=3.0,
+        fov_region=(slice(k - 1, k + 1), slice(None), slice(None)),
+        spins_per_voxel=(2, 2, 2),
+        variability={"t1": 0.05, "t2": 0.05, "pd": 0.02, "length": 0.01},
+    )
     # centre the slab in the field of view, moving the scanner-frame maps with it
     shift = ph.pos.mean(0)
     ph.pos = ph.pos - shift
@@ -94,17 +101,23 @@ def main():
     b1_map = sample(fm.b1[None].double(), o, sp, pts)[..., 0]
     support = img_ideal > 0.05 * img_ideal.max()
     b1_vals = b1_map[support]
-    print(f"|B1+| / median over the slab: {float(b1_vals.min()):.2f} to {float(b1_vals.max()):.2f}, "
-          f"cv {float(b1_vals.std() / b1_vals.mean()):.3f}")
+    print(
+        f"|B1+| / median over the slab: {float(b1_vals.min()):.2f} to {float(b1_vals.max()):.2f}, "
+        f"cv {float(b1_vals.std() / b1_vals.mean()):.3f}"
+    )
     # registration: where B1+ is high the 30 deg T1w GRE (above the Ernst angle) loses signal in
     # proportion; the ratio image must follow the sampled map, not its mirror or transpose
     ratio = (b1_only.abs() / img_ideal.clamp(min=1e-12))[support]
     for name, m in (("map", b1_map), ("transposed", b1_map.T), ("flipped y", b1_map.flip(0))):
         r = torch.corrcoef(torch.stack([ratio, m[support]]))[0, 1]
         print(f"corr(birdcage / ideal image, {name}) = {float(r):+.3f}")
-    panels = {"ideal B1 and coil": img_ideal, "full-wave birdcage B1+, ideal coil": b1_only.abs(),
-              "relative |B1+| (birdcage, quadrature)": torch.where(support, b1_map, torch.nan),
-              "8 loops, correlated noise, RSS": rss_noisy, "8 loops, Roemer (noise-whitened)": roemer}
+    panels = {
+        "ideal B1 and coil": img_ideal,
+        "full-wave birdcage B1+, ideal coil": b1_only.abs(),
+        "relative |B1+| (birdcage, quadrature)": torch.where(support, b1_map, torch.nan),
+        "8 loops, correlated noise, RSS": rss_noisy,
+        "8 loops, Roemer (noise-whitened)": roemer,
+    }
     fig, ax = plt.subplots(1, len(panels), figsize=(4.2 * len(panels), 4.6))
     for a, (name, img) in zip(ax, panels.items()):
         im = img.numpy()
@@ -115,8 +128,11 @@ def main():
             a.imshow(im[::-1], cmap="gray", vmax=np.nanpercentile(im, 99.5))
         a.set_title(name, fontsize=9)
         a.axis("off")
-    fig.suptitle(f"BrainWeb 04 at 3 T (127.7 MHz), T1w spoiled GRE, slab z = {float(shift[2]) * 1e3:.0f} mm: "
-                 "mariepy full-wave fields (5 mm)", fontsize=10)
+    fig.suptitle(
+        f"BrainWeb 04 at 3 T (127.7 MHz), T1w spoiled GRE, slab z = {float(shift[2]) * 1e3:.0f} mm: "
+        "mariepy full-wave fields (5 mm)",
+        fontsize=10,
+    )
     plt.tight_layout()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(args.out, dpi=80)

@@ -22,9 +22,15 @@ D = 2e-9
 
 
 def walkers(n, kind, size, axis):
-    return bp.Phantom(pos=torch.zeros(n, 3, dtype=f64), pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
-                      t2=torch.full((n,), 1e6, dtype=f64), db0=torch.zeros(n, dtype=f64),
-                      diffusion=torch.full((n,), D, dtype=f64), restriction=bp.Restriction(kind, size, axis))
+    return bp.Phantom(
+        pos=torch.zeros(n, 3, dtype=f64),
+        pd=torch.ones(n, dtype=f64),
+        t1=torch.full((n,), 1e6, dtype=f64),
+        t2=torch.full((n,), 1e6, dtype=f64),
+        db0=torch.zeros(n, dtype=f64),
+        diffusion=torch.full((n,), D, dtype=f64),
+        restriction=bp.Restriction(kind, size, axis),
+    )
 
 
 def signals(sim, ph, qs, delta, big_delta, **kw):
@@ -52,8 +58,11 @@ def test_equilibrium_is_uniform(kind, axis, power):
 
 def test_gpu_walks_the_core_paths(gpu):
     qs = np.array([0.6, 1.2]) / 5e-6
-    for kind, axis, size in (("planes", (0.6, 0.8, 0.0), 10e-6), ("cylinder", (0.0, 0.6, 0.8), 5e-6),
-                             ("sphere", None, 5e-6)):
+    for kind, axis, size in (
+        ("planes", (0.6, 0.8, 0.0), 10e-6),
+        ("cylinder", (0.0, 0.6, 0.8), 5e-6),
+        ("sphere", None, 5e-6),
+    ):
         ph = walkers(1500, kind, size, axis)
         a = signals(bp.simulate, ph, qs, 1e-3, 20e-3)
         b = signals(gpu.simulate, ph, qs, 1e-3, 20e-3)
@@ -67,8 +76,11 @@ def test_planes_tanner_stejskal(gpu, big_delta):
     sim = signals(gpu.simulate, walkers(n, "planes", L, (1.0, 0.0, 0.0)), qs, 0.02e-3, big_delta)
     x = qs * L
     ref = 2 * (1 - np.cos(x)) / x**2 + 4 * x**2 * sum(
-        np.exp(-(k * math.pi) ** 2 * D * big_delta / L**2) * (1 - (-1) ** k * np.cos(x)) / (x**2 - (k * math.pi) ** 2) ** 2
-        for k in range(1, 400))
+        np.exp(-((k * math.pi) ** 2) * D * big_delta / L**2)
+        * (1 - (-1) ** k * np.cos(x))
+        / (x**2 - (k * math.pi) ** 2) ** 2
+        for k in range(1, 400)
+    )
     assert np.abs(sim - ref).max() < 3e-3, (sim, ref)
 
 
@@ -84,4 +96,4 @@ def test_sphere_and_cylinder_long_time_limits(gpu):
     # along the cylinder: free diffusion
     q = np.array([2e5, 5e5])
     free = signals(gpu.simulate, walkers(200_000, "cylinder", r_c, (1.0, 0.0, 0.0)), q, 1e-3, 30e-3)
-    assert np.abs(free - np.exp(-q**2 * (30e-3 - 1e-3 / 3) * D)).max() < 3e-3
+    assert np.abs(free - np.exp(-(q**2) * (30e-3 - 1e-3 / 3) * D)).max() < 3e-3

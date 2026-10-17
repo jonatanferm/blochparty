@@ -71,6 +71,8 @@ def test_gradients_flow_in_3d():
     loss = bp.reconstruct(bp.simulate(phantom, seq).signal, seq).abs().sum()
     (g,) = torch.autograd.grad(loss, flip)
     eps = 1e-4
-    fd = [bp.reconstruct(bp.simulate(phantom, bp.gre_3d(6, flip_deg=20.0 + s * eps, n_dummy=3)).signal,
-                         seq).abs().sum() for s in (1, -1)]
+    fd = [
+        bp.reconstruct(bp.simulate(phantom, bp.gre_3d(6, flip_deg=20.0 + s * eps, n_dummy=3)).signal, seq).abs().sum()
+        for s in (1, -1)
+    ]
     assert torch.isclose(g, (fd[0] - fd[1]) / (2 * eps), rtol=1e-6)

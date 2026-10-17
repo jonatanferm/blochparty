@@ -35,6 +35,7 @@ def spgr_sequence(flip_deg, n_dummy=N_DUMMY):
     tr = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg, n_steps=1).delay(TR - RF_DUR).spoil().build()
     echo = SequenceBuilder().rf(RF_DUR, flip_deg=flip_deg, n_steps=1)
     echo = echo.delay(TE - RF_DUR / 2 - DWELL / 2).readout(1, DWELL).build()
+
     def cat(name):
         a, b = getattr(tr, name), getattr(echo, name)
         return a * n_dummy + b if isinstance(a, list) else torch.cat([a.repeat(n_dummy, *[1] * (a.ndim - 1)), b])
@@ -44,10 +45,13 @@ def spgr_sequence(flip_deg, n_dummy=N_DUMMY):
 
 def signal_fn(seqs, simulate):
     """theta = (M0, T1) -> the complex signals of the acquisitions ``seqs``."""
+
     def f(theta):
-        spin = Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=theta[:1], t1=theta[1:2],
-                       t2=f64([T2]), db0=f64([0.0]))
+        spin = Phantom(
+            pos=torch.zeros(1, 3, dtype=torch.float64), pd=theta[:1], t1=theta[1:2], t2=f64([T2]), db0=f64([0.0])
+        )
         return torch.cat([simulate(spin, s).signal.flatten() for s in seqs])
+
     return f
 
 
@@ -69,8 +73,7 @@ def optimize(start=(10.0, 40.0), simulate=None, rel_step=1e-4, method="fd"):
     info = minimize([flips], lambda: t1_crb(flips, simulate, method=method, rel_step=rel_step))
     found = sorted(abs(a) for a in flips.tolist())
     cov = float(t1_crb(f64(found), simulate, method=method, rel_step=rel_step))
-    return {"flips": found, "cov": cov, "n_evals": info["n_evals"],
-            "seconds": time.perf_counter() - t0}
+    return {"flips": found, "cov": cov, "n_evals": info["n_evals"], "seconds": time.perf_counter() - t0}
 
 
 # --- independent reference: closed-form signal, exact derivative, brute-force grid -----------
@@ -84,12 +87,12 @@ def closed_form_cov(a1, a2):
 
     def s_and_ds(a):
         s = torch.sin(a) * (1 - e1) / (1 - torch.cos(a) * e1) * decay  # dS/dM0 at M0 = 1
-        ds = torch.sin(a) * (torch.cos(a) - 1) / (1 - torch.cos(a) * e1) ** 2 * e1 * TR / T1 ** 2 * decay
+        ds = torch.sin(a) * (torch.cos(a) - 1) / (1 - torch.cos(a) * e1) ** 2 * e1 * TR / T1**2 * decay
         return s, ds
 
     (s1, d1), (s2, d2) = s_and_ds(a1), s_and_ds(a2)
     det = s1 * d2 - s2 * d1  # J = [[s1, d1], [s2, d2]]; (J^T J)^-1_{T1,T1} = (s1^2 + s2^2) / det^2
-    return torch.sqrt((s1 ** 2 + s2 ** 2) / det ** 2) / T1
+    return torch.sqrt((s1**2 + s2**2) / det**2) / T1
 
 
 def _grid_best(ax1, ax2):

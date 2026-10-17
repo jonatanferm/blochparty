@@ -23,8 +23,15 @@ masks = {t: maps["label"] == LABELS.index(t) for t in ("wm", "gm", "csf", "fat")
 seq = bp.gre_2d(N, FOV, flip_deg=16.0, tr=10e-3, te=3e-3, dwell=10e-6, n_dummy=200)
 
 t0 = time.perf_counter()
-report = design_report(seq, phantom, hardware=Hardware(max_duration=2.0), coils=coils, masks=masks,
-                       contrast_pairs=[("wm", "gm"), ("gm", "csf")], kspace_sigma=0.05)
+report = design_report(
+    seq,
+    phantom,
+    hardware=Hardware(max_duration=2.0),
+    coils=coils,
+    masks=masks,
+    contrast_pairs=[("wm", "gm"), ("gm", "csf")],
+    kspace_sigma=0.05,
+)
 print(f"report in {time.perf_counter() - t0:.2f} s; ok = {report['ok']}")
 for line in report["violations"]:
     print("  -", line)

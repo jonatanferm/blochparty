@@ -18,13 +18,21 @@ def phantom():
     b1 = (1.0 + 0.2 * (1 - xx**2 - yy**2)).to(torch.float64)
     fat = torch.where(maps["label"] == bp.phantom.LABELS.index("fat"), 0.8, 0.0).to(torch.float64)
     t2p = torch.where(maps["pd"] > 0, 0.05, 1.0).to(torch.float64)
-    return bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], 0.22, spins_per_voxel=4,
-                                jitter="stratified", t2prime=t2p, b1=b1, fat_fraction=fat)
+    return bp.phantom_from_maps(
+        maps["pd"],
+        maps["t1"],
+        maps["t2"],
+        0.22,
+        spins_per_voxel=4,
+        jitter="stratified",
+        t2prime=t2p,
+        b1=b1,
+        fat_fraction=fat,
+    )
 
 
 def realistic_gre(flip=20.0):
-    return bp.gre_2d(N, flip_deg=flip, tr=12e-3, n_dummy=4, spoiling="rf", slice_thickness=5e-3,
-                     ramps=True)
+    return bp.gre_2d(N, flip_deg=flip, tr=12e-3, n_dummy=4, spoiling="rf", slice_thickness=5e-3, ramps=True)
 
 
 @pytest.mark.slow

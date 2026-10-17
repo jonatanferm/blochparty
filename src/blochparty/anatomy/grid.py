@@ -20,14 +20,18 @@ class Distribution:
     SDs are metadata, not independent per-spin draws. M4 adds spatial variability.
     ``assumed`` also identifies animal/other-tissue proxies and field extrapolation.
     """
+
     mean: float
     sd: float | None
     citation: str
     assumed: bool = False
 
     def __post_init__(self):
-        if not math.isfinite(self.mean) or (self.sd is not None and
-                (not math.isfinite(self.sd) or self.sd < 0)) or not self.citation:
+        if (
+            not math.isfinite(self.mean)
+            or (self.sd is not None and (not math.isfinite(self.sd) or self.sd < 0))
+            or not self.citation
+        ):
             raise ValueError("a distribution needs a finite mean, nonnegative SD (or None), and citation")
 
 
@@ -87,24 +91,24 @@ def _renormalize(fractions: dict) -> dict:
     return {k: v / scale for k, v in fractions.items()}
 
 
-def _resample(grid, old, new, fill=0.):
+def _resample(grid, old, new, fill=0.0):
     """Exact separable cell-overlap integrals, no dense interpolation matrix."""
     out = grid
     for axis, (a, b) in enumerate(zip(old, new)):
         if a == b:
             continue
         n = out.shape[axis]
-        m = math.ceil(n*a/b - 1e-10)
+        m = math.ceil(n * a / b - 1e-10)
         # Accumulate in float64 even for float32 membership volumes.
         v = out.movedim(axis, 0).double()
-        edges = torch.arange(m+1, dtype=torch.float64) * (b/a)
+        edges = torch.arange(m + 1, dtype=torch.float64) * (b / a)
         clipped = edges.clamp(max=n)
-        idx = clipped.floor().long().clamp(max=n-1)
+        idx = clipped.floor().long().clamp(max=n - 1)
         integral = torch.cat([torch.zeros_like(v[:1]), v.cumsum(0)], 0)
-        shape = (-1,) + (1,)*(v.ndim-1)
-        values = integral[idx] + (clipped-idx).reshape(shape)*v[idx]
-        values += (edges-clipped).reshape(shape)*fill
-        out = ((values[1:]-values[:-1])*(a/b)).to(grid.dtype).movedim(0, axis)
+        shape = (-1,) + (1,) * (v.ndim - 1)
+        values = integral[idx] + (clipped - idx).reshape(shape) * v[idx]
+        values += (edges - clipped).reshape(shape) * fill
+        out = ((values[1:] - values[:-1]) * (a / b)).to(grid.dtype).movedim(0, axis)
     return out
 
 
@@ -118,6 +122,7 @@ class Anatomy:
     consumed by assembly are retained by spatial utilities. Origin is a voxel
     centre, not a corner; axis directions must already be positive x/y/z.
     """
+
     fractions: dict[str, Tensor]
     voxel: tuple[float, float, float]
     origin: tuple[float, float, float]
@@ -136,7 +141,12 @@ class Anatomy:
         if not self.fractions:
             raise ValueError("anatomy requires at least one tissue")
         ref = next(iter(self.fractions.values()))
-        if ref.ndim != 3 or min(ref.shape) == 0 or ref.dtype not in (torch.float32,torch.float64) or ref.device.type != "cpu":
+        if (
+            ref.ndim != 3
+            or min(ref.shape) == 0
+            or ref.dtype not in (torch.float32, torch.float64)
+            or ref.device.type != "cpu"
+        ):
             raise ValueError("anatomy requires nonempty CPU float32/float64 (z,y,x) tensors")
         total = torch.zeros_like(ref)
         for name, value in self.fractions.items():
@@ -144,14 +154,19 @@ class Anatomy:
             if (value < 0).any() or (value > 1).any():
                 raise ValueError(f"invalid fractions for {name}")
             total += value
-        if (total > 1 + 16*torch.finfo(ref.dtype).eps).any():
+        if (total > 1 + 16 * torch.finfo(ref.dtype).eps).any():
             raise ValueError("tissue fractions sum to more than one")
         for value in ([self.chi] if self.chi is not None else []) + list(self.maps.values()):
             self._check_map(value)
 
     def _check_map(self, value):
         ref = next(iter(self.fractions.values()))
-        if value.shape != ref.shape or value.dtype != ref.dtype or value.device != ref.device or not torch.isfinite(value).all():
+        if (
+            value.shape != ref.shape
+            or value.dtype != ref.dtype
+            or value.device != ref.device
+            or not torch.isfinite(value).all()
+        ):
             raise ValueError("all anatomy maps must have matching shape/dtype/device and finite values")
 
     @property
@@ -166,26 +181,32 @@ class Anatomy:
         """
         if len(region) != 3 or any(not isinstance(s, slice) for s in region):
             raise ValueError("region needs three slices in z/y/x order")
-        bounds = [s.indices(n) for s,n in zip(region,self.shape)]
-        if any(step != 1 or hi <= lo for lo,hi,step in bounds):
+        bounds = [s.indices(n) for s, n in zip(region, self.shape)]
+        if any(step != 1 or hi <= lo for lo, hi, step in bounds):
             raise ValueError("crop must be nonempty with unit steps")
-        region = tuple(slice(lo,hi) for lo,hi,_ in bounds)
-        origin = tuple(o + lo*h for o,(lo,_,_),h in zip(self.origin,reversed(bounds),reversed(self.voxel)))
+        region = tuple(slice(lo, hi) for lo, hi, _ in bounds)
+        origin = tuple(o + lo * h for o, (lo, _, _), h in zip(self.origin, reversed(bounds), reversed(self.voxel)))
         take = lambda v: v[region]
-        return Anatomy({k:take(v) for k,v in self.fractions.items()}, self.voxel, origin,
-                       None if self.chi is None else take(self.chi), {k:take(v) for k,v in self.maps.items()},
-                       self.chi_background, self.map_field_T)
+        return Anatomy(
+            {k: take(v) for k, v in self.fractions.items()},
+            self.voxel,
+            origin,
+            None if self.chi is None else take(self.chi),
+            {k: take(v) for k, v in self.maps.items()},
+            self.chi_background,
+            self.map_field_T,
+        )
 
     def slab(self, z0, thickness):
         """Physical z interval [z0,z0+thickness], snapped outward to cell boundaries."""
         if not math.isfinite(z0) or not math.isfinite(thickness) or thickness <= 0:
             raise ValueError("slab needs finite z0 and positive thickness in m")
-        edge = self.origin[2] - self.voxel[0]/2
-        lo = max(0, math.floor((z0-edge)/self.voxel[0] + 1e-10))
-        hi = min(self.shape[0], math.ceil((z0+thickness-edge)/self.voxel[0] - 1e-10))
+        edge = self.origin[2] - self.voxel[0] / 2
+        lo = max(0, math.floor((z0 - edge) / self.voxel[0] + 1e-10))
+        hi = min(self.shape[0], math.ceil((z0 + thickness - edge) / self.voxel[0] - 1e-10))
         if hi <= lo:
             raise ValueError("slab does not intersect anatomy")
-        return self.crop((slice(lo,hi),slice(None),slice(None)))
+        return self.crop((slice(lo, hi), slice(None), slice(None)))
 
     def resample(self, voxel):
         """Volume-weighted cell averages; preserves sum(fraction)*voxel_volume.
@@ -197,16 +218,23 @@ class Anatomy:
         does not dilute rates. Coarsening rates remains a compartment approximation:
         an average rate cannot preserve a general multi-exponential time course.
         """
-        voxel = _triple(voxel,"voxel",True)
-        origin = tuple(o+(b-a)/2 for o,a,b in zip(self.origin,reversed(self.voxel),reversed(voxel)))
-        maps = {k:_resample(v,self.voxel,voxel) for k,v in self.maps.items()}
+        voxel = _triple(voxel, "voxel", True)
+        origin = tuple(o + (b - a) / 2 for o, a, b in zip(self.origin, reversed(self.voxel), reversed(voxel)))
+        maps = {k: _resample(v, self.voxel, voxel) for k, v in self.maps.items()}
         if "M0" in maps:
             density = maps["M0"]
             for name in ("R1", "R2", "R2star", "intrinsic_r2prime"):
                 if name in maps:
-                    weighted = _resample(self.maps[name]*self.maps["M0"],self.voxel,voxel)
-                    maps[name] = torch.where(density > 0,weighted/density.clamp_min(torch.finfo(density.dtype).tiny),0.)
-        return Anatomy(_renormalize({k:_resample(v,self.voxel,voxel).clamp(0,1) for k,v in self.fractions.items()}),
-            voxel,origin,None if self.chi is None else _resample(self.chi,self.voxel,voxel,self.chi_background),
+                    weighted = _resample(self.maps[name] * self.maps["M0"], self.voxel, voxel)
+                    maps[name] = torch.where(
+                        density > 0, weighted / density.clamp_min(torch.finfo(density.dtype).tiny), 0.0
+                    )
+        return Anatomy(
+            _renormalize({k: _resample(v, self.voxel, voxel).clamp(0, 1) for k, v in self.fractions.items()}),
+            voxel,
+            origin,
+            None if self.chi is None else _resample(self.chi, self.voxel, voxel, self.chi_background),
             maps,
-            self.chi_background,self.map_field_T)
+            self.chi_background,
+            self.map_field_T,
+        )

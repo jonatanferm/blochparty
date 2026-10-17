@@ -41,9 +41,9 @@ def _shared_source() -> str:
     src = source("shaders/common.metal")
     a, b = src.index("inline void flush(threadgroup"), src.index("// Many coils:")
     src = src[:a] + src[b:]
-    src = src[:src.index("inline void flush_mma(")]
+    src = src[: src.index("inline void flush_mma(")]
     adj = source("shaders/adjoint_common.metal")
-    adj = adj[:adj.index("kernel void seg_reduce(")]
+    adj = adj[: adj.index("kernel void seg_reduce(")]
     text = (src + adj).replace("#include <metal_stdlib>", "").replace("using namespace metal;", "")
     text = re.sub(r"\b(thread|threadgroup|device)\s+(?=[A-Za-z_])", "", text)
     text = re.sub(r"\bconstant\s+(?=(?:float|int|uint)\b)", "const ", text)
@@ -58,6 +58,7 @@ def _shared_source() -> str:
     for define in ("MAX_TERMS", "NU_HEAD", "RBLOCK", "TG_FLOATS", "MAX_SG", "BM_NC"):
         assert f"#define {define}" in text, define
     return text
+
 
 _VARIANTS = {"": (0, 0), "_full": (1, 0), "_gen": (2, 0), **{f"_bm{k}": (3, k) for k in range(1, MAX_POOLS + 1)}}
 
@@ -98,5 +99,10 @@ def kernel_source(name: str) -> str:
     except KeyError:
         raise AttributeError(f"no CUDA kernel {name!r}") from None
     mma = family == "bloch_chunk_mma"
-    return body + (_KERNEL.replace("@NAME@", name).replace("@MMA@", "1" if mma else "0").replace("@V@", str(v))
-                   .replace("@DIFF@", "true" if diff else "false").replace("@NP@", str(np_)))
+    return body + (
+        _KERNEL.replace("@NAME@", name)
+        .replace("@MMA@", "1" if mma else "0")
+        .replace("@V@", str(v))
+        .replace("@DIFF@", "true" if diff else "false")
+        .replace("@NP@", str(np_))
+    )

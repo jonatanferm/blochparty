@@ -127,15 +127,19 @@ class GradientNonlinearity:
 
         ``r0`` [m] overrides (or supplies) the reference radius."""
         entries, radius = [], None
-        siemens = re.compile(r"^\s*\d+\s+([AB])\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s+([xyz])\s*$",
-                             re.IGNORECASE)
+        siemens = re.compile(
+            r"^\s*\d+\s+([AB])\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s+([xyz])\s*$",
+            re.IGNORECASE,
+        )
         named = re.compile(r"^\s*(alpha|beta)_([xyz])\s+(\d+)\s+(\d+)\s+([-+]?[\d.]+(?:[eE][-+]?\d+)?)\s*;?\s*$")
         for line in Path(path).read_text().splitlines():
             if line.lstrip().startswith("#"):
                 continue
             if m := siemens.match(line):
                 kind, n, mm, value, axis = m.groups()
-                entries.append(("alpha" if kind.upper() == "A" else "beta", axis.lower(), int(n), int(mm), float(value)))
+                entries.append(
+                    ("alpha" if kind.upper() == "A" else "beta", axis.lower(), int(n), int(mm), float(value))
+                )
             elif m := named.match(line):
                 kind, axis, n, mm, value = m.groups()
                 entries.append((kind, axis, int(n), int(mm), float(value)))
@@ -247,5 +251,15 @@ def spin_fields(scanner: Scanner | None, pos: Tensor) -> SpinFields:
     return SpinFields(enc, torch.cat([t, f0.expand(pos.shape[0], 1)], dim=-1), 2)
 
 
-__all__ = ["CONCOMITANT_MODES", "GradientNonlinearity", "Scanner", "SpinFields", "concomitant_coefficients",
-           "exact_excess", "gradient_monomials", "solid_harmonics", "spin_fields", "transverse_coefficients"]
+__all__ = [
+    "CONCOMITANT_MODES",
+    "GradientNonlinearity",
+    "Scanner",
+    "SpinFields",
+    "concomitant_coefficients",
+    "exact_excess",
+    "gradient_monomials",
+    "solid_harmonics",
+    "spin_fields",
+    "transverse_coefficients",
+]

@@ -26,20 +26,43 @@ import copy
 
 DEFAULT_SPEC = {
     "anatomy": {"source": "ixi", "prepared": None, "subject": None, "lesions": None, "deform_mm": 3.0},
-    "protocol": {"family": "fastmri_t2w", "manifest": None,
-                 "n": 128, "slices": {"count": 3}},
-    "scanner": {"receive": "draw", "b1": "birdcage", "noise": "paired", "receive_scale": [1.1, 1.45],
-                "coil_radius": 0.11, "coil_radius_lr": 0.095, "coil_gap_mm": 10., "receive_normalise_mm": 30.},
-    "quality": {"spins": [2, 3, 3], "sampling": "proportional", "jitter": "inplane", "slab_voxels": 3, "rf_raster": 1e-4},
+    "protocol": {"family": "fastmri_t2w", "manifest": None, "n": 128, "slices": {"count": 3}},
+    "scanner": {
+        "receive": "draw",
+        "b1": "birdcage",
+        "noise": "paired",
+        "receive_scale": [1.1, 1.45],
+        "coil_radius": 0.11,
+        "coil_radius_lr": 0.095,
+        "coil_gap_mm": 10.0,
+        "receive_normalise_mm": 30.0,
+    },
+    "quality": {
+        "spins": [2, 3, 3],
+        "sampling": "proportional",
+        "jitter": "inplane",
+        "slab_voxels": 3,
+        "rf_raster": 1e-4,
+    },
 }
 
 
 # every key the generator reads (DEFAULT_SPEC's, and the optional ones: anatomy.subjects, a pool of subjects)
-KEYS = {"anatomy": {"source", "prepared", "subject", "subjects", "lesions", "deform_mm"},
-        "protocol": {"family", "manifest", "n", "slices"},
-        "scanner": {"receive", "b1", "noise", "receive_scale", "coil_radius", "coil_radius_lr", "coil_gap_mm",
-                    "receive_normalise_mm"},
-        "quality": {"spins", "sampling", "jitter", "slab_voxels", "rf_raster"}}
+KEYS = {
+    "anatomy": {"source", "prepared", "subject", "subjects", "lesions", "deform_mm"},
+    "protocol": {"family", "manifest", "n", "slices"},
+    "scanner": {
+        "receive",
+        "b1",
+        "noise",
+        "receive_scale",
+        "coil_radius",
+        "coil_radius_lr",
+        "coil_gap_mm",
+        "receive_normalise_mm",
+    },
+    "quality": {"spins", "sampling", "jitter", "slab_voxels", "rf_raster"},
+}
 
 
 def merged(spec: dict) -> dict:
@@ -61,11 +84,13 @@ def default_spec() -> dict:
     return copy.deepcopy(DEFAULT_SPEC)
 
 
-FALLBACK_PROTOCOLS = [{"file": "fastmri-like (no manifest)", "TR": 6.19, "TE": 0.113, "coils": 16, "refocus_deg": 180., "esp": 10.26e-3}]
+FALLBACK_PROTOCOLS = [
+    {"file": "fastmri-like (no manifest)", "TR": 6.19, "TE": 0.113, "coils": 16, "refocus_deg": 180.0, "esp": 10.26e-3}
+]
 
 
 def span(s) -> list[int]:
-    """"a-b:step" (or "a", "a-b") -> the integers a..b every step."""
+    """ "a-b:step" (or "a", "a-b") -> the integers a..b every step."""
     a, _, step = str(s).partition(":")
     lo, _, hi = a.partition("-")
     return list(range(int(lo), int(hi or lo) + 1, int(step or 1)))

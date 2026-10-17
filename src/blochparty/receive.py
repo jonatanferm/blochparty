@@ -74,8 +74,8 @@ def oversample(seq: Sequence, os: int) -> tuple[Sequence, OversampleInfo]:
         j = np.arange(n * os)
         new_t.append(t0 + (j + 0.5) * dw / os)
         # receiver phase: linear in time along the readout (frequency offsets), from its samples
-        ti = t_adc[a:a + n]
-        ps = np.unwrap(psi_all[a:a + n])
+        ti = t_adc[a : a + n]
+        ps = np.unwrap(psi_all[a : a + n])
         new_psi.append(np.interp(new_t[-1], ti, ps) if n > 1 else np.full(n * os, ps[0]))
     new_t, new_psi = np.concatenate(new_t), np.concatenate(new_psi)
     # split segments at the new sample times; an ADC flag at each
@@ -90,12 +90,18 @@ def oversample(seq: Sequence, os: int) -> tuple[Sequence, OversampleInfo]:
     psi = torch.zeros(len(cut), dtype=seq.dt.dtype, device=seq.dt.device)
     psi[torch.as_tensor(np.nonzero(is_sample)[0])] = torch.as_tensor(new_psi, dtype=psi.dtype, device=psi.device)
     seg_end = np.isclose(cut, ends[seg_of], rtol=0, atol=1e-15)
-    out = replace(seq, dt=torch.as_tensor(piece_dt, dtype=seq.dt.dtype, device=seq.dt.device),
-                  rf=seq.rf[idx], grad=seq.grad[idx], adc_phase=psi,
-                  b0_offset=None if seq.b0_offset is None else seq.b0_offset[idx],
-                  rf_freq=None if seq.rf_freq is None else seq.rf_freq[idx],
-                  is_rf=[seq.is_rf[k] for k in seg_of], adc=is_sample.tolist(),
-                  spoil=[bool(seq.spoil[k] and e) for k, e in zip(seg_of, seg_end)])
+    out = replace(
+        seq,
+        dt=torch.as_tensor(piece_dt, dtype=seq.dt.dtype, device=seq.dt.device),
+        rf=seq.rf[idx],
+        grad=seq.grad[idx],
+        adc_phase=psi,
+        b0_offset=None if seq.b0_offset is None else seq.b0_offset[idx],
+        rf_freq=None if seq.rf_freq is None else seq.rf_freq[idx],
+        is_rf=[seq.is_rf[k] for k in seg_of],
+        adc=is_sample.tolist(),
+        spoil=[bool(seq.spoil[k] and e) for k, e in zip(seg_of, seg_end)],
+    )
     if any(out.is_rf[k] for k in np.nonzero(is_sample)[0]):
         raise ValueError("oversampled ADC samples fall inside RF segments")
     return out, OversampleInfo(os, groups, dwells, torch.as_tensor(new_t))
@@ -131,7 +137,7 @@ def decimate(signal: Tensor, info: OversampleInfo, taps_per_sample: int = 16, be
     half = len(h) // 2
     out, pos = [], 0
     for _, n in info.readouts:
-        x = signal[:, pos:pos + n * os]
+        x = signal[:, pos : pos + n * os]
         pos += n * os
         # original sample i sits between oversampled i os + os/2 - 1 and i os + os/2 (os even), or at i os + (os-1)/2
         pad = torch.nn.functional.pad
@@ -155,8 +161,9 @@ def thermal_noise(signal: Tensor, sigma: float, cov: Tensor | None = None, gener
     return signal + noise.to(signal.device)
 
 
-def interference(signal: Tensor, times: Tensor, freq_hz: float, amplitude: float, channels=None,
-                 phase: float = 0.0) -> Tensor:
+def interference(
+    signal: Tensor, times: Tensor, freq_hz: float, amplitude: float, channels=None, phase: float = 0.0
+) -> Tensor:
     """A narrowband source at a fixed frequency (relative to the receiver) on the given channels."""
     tone = amplitude * torch.exp(1j * (2 * math.pi * freq_hz * times.to(signal.real.dtype) + phase))
     out = signal.clone()

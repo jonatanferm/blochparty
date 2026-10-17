@@ -62,8 +62,12 @@ def test_resistance_matrix():
     pts = pts[pts.norm(dim=-1) < 0.1]
     vol = torch.full((len(pts),), 4 / 3 * math.pi * 0.1**3 / len(pts), dtype=f64)
     sigma = torch.full((len(pts),), 0.6, dtype=f64)
-    loops = [Loop((0, 0, 0.12), (0, 0, 1), 0.04), Loop((0.06, 0, 0.11), (0, 0, 1), 0.04),
-             Loop((0, 0, -0.12), (0, 0, 1), 0.04), Loop((0, 0, 0.12), (0, 0, 1), 0.04)]
+    loops = [
+        Loop((0, 0, 0.12), (0, 0, 1), 0.04),
+        Loop((0.06, 0, 0.11), (0, 0, 1), 0.04),
+        Loop((0, 0, -0.12), (0, 0, 1), 0.04),
+        Loop((0, 0, 0.12), (0, 0, 1), 0.04),
+    ]
     _, A = fields(loops, pts)
     R = resistance(A, sigma, vol, 64e6)
     assert torch.allclose(R, R.T) and bool((torch.linalg.eigvalsh(R[:3, :3]) > 0).all())
@@ -78,8 +82,10 @@ def test_field_maps_in_a_simulation():
     # at the spins, through a whole simulation (to trilinear interpolation on a 1 mm grid)
     from blochparty.loops import field_maps
 
-    loops = [Loop((0.2 * math.cos(t), 0.2 * math.sin(t), 0.0), (math.cos(t), math.sin(t), 0.0), 0.06)
-             for t in np.arange(4) * math.pi / 2]
+    loops = [
+        Loop((0.2 * math.cos(t), 0.2 * math.sin(t), 0.0), (math.cos(t), math.sin(t), 0.0), 0.06)
+        for t in np.arange(4) * math.pi / 2
+    ]
     ph = bp.shepp_logan(32)
     seq = bp.gre_2d(32, n_dummy=2)
     lo = float(ph.pos[:, :2].min()) - 0.002

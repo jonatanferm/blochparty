@@ -22,8 +22,14 @@ def test_random_rf_gradients_off_resonance(gpu, seed):
 def test_gre_2d_coils_b1_b0_offset_rf_spoiling(gpu, mma):
     ph = bp.shepp_logan(24)
     n = len(ph)
-    ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, torch.linspace(-50, 50, n, dtype=torch.float64),
-                    b1=torch.linspace(0.8, 1.2, n, dtype=torch.float64))
+    ph = bp.Phantom(
+        ph.pos,
+        ph.pd,
+        ph.t1,
+        ph.t2,
+        torch.linspace(-50, 50, n, dtype=torch.float64),
+        b1=torch.linspace(0.8, 1.2, n, dtype=torch.float64),
+    )
     seq = bp.gre_2d(24, n_dummy=10, spoiling="rf", ramps=True)
     seq.b0_offset = 3.0 * torch.sin(torch.arange(len(seq), dtype=torch.float64) * 1e-3)  # a slowly varying field
     coils = bp.birdcage_sensitivities(ph.pos, 8)
@@ -47,9 +53,13 @@ def test_many_coils_and_buffer_flushes(gpu, n_coils, mma):
 def test_spins_not_multiple_of_group_and_m_init(gpu):
     g = torch.Generator().manual_seed(3)
     n = 1000  # not a multiple of 256
-    ph = bp.Phantom(pos=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.1,
-                    pd=torch.rand(n, generator=g, dtype=torch.float64), t1=torch.full((n,), 0.8, dtype=torch.float64),
-                    t2=torch.full((n,), 0.07, dtype=torch.float64), db0=torch.zeros(n, dtype=torch.float64))
+    ph = bp.Phantom(
+        pos=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.1,
+        pd=torch.rand(n, generator=g, dtype=torch.float64),
+        t1=torch.full((n,), 0.8, dtype=torch.float64),
+        t2=torch.full((n,), 0.07, dtype=torch.float64),
+        db0=torch.zeros(n, dtype=torch.float64),
+    )
     m0 = torch.randn(n, 3, generator=g, dtype=torch.float64)
     seq = bp.gre_2d(16, n_dummy=2)
     ref = bp.simulate(ph, seq, m_init=m0)
@@ -59,9 +69,13 @@ def test_spins_not_multiple_of_group_and_m_init(gpu):
 
 
 def test_hard_pulse_flip_angle_and_fid(gpu):
-    ph = bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=torch.ones(1, dtype=torch.float64),
-                    t1=torch.full((1,), 1e9, dtype=torch.float64), t2=torch.full((1,), 0.05, dtype=torch.float64),
-                    db0=torch.full((1,), 37.0, dtype=torch.float64))
+    ph = bp.Phantom(
+        pos=torch.zeros(1, 3, dtype=torch.float64),
+        pd=torch.ones(1, dtype=torch.float64),
+        t1=torch.full((1,), 1e9, dtype=torch.float64),
+        t2=torch.full((1,), 0.05, dtype=torch.float64),
+        db0=torch.full((1,), 37.0, dtype=torch.float64),
+    )
     seq = bp.SequenceBuilder().rf(10e-9, flip_deg=90.0).readout(43, 1e-3).build()
     s = gpu.simulate(ph, seq, mma=True).signal[0]  # 43 samples: 5 blocks of 8 and a partial one
     t = (torch.arange(43, dtype=torch.float64) + 0.5) * 1e-3 + 5e-9
@@ -118,8 +132,9 @@ def test_generalized_bloch_bound_pool(gpu, shape, mma):
     from helpers import with_readout
 
     ph, seq = bm_case(1, shape)
-    ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64),
-                 bound=replace(ph.bound, model="generalized"))
+    ph = replace(
+        ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=torch.float64), bound=replace(ph.bound, model="generalized")
+    )
     seq = with_readout(seq)
     coils = bp.birdcage_sensitivities(ph.pos, 4)
     ref = bp.simulate(ph, seq, coils)
@@ -138,12 +153,18 @@ def test_diffusion_same_walk_as_core(gpu, mma):
     g = torch.Generator().manual_seed(2)
     n = 3000
     th = 0.4
-    rot = torch.tensor([[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]], dtype=torch.float64)
+    rot = torch.tensor(
+        [[math.cos(th), -math.sin(th), 0], [math.sin(th), math.cos(th), 0], [0, 0, 1]], dtype=torch.float64
+    )
     dt = rot @ torch.diag(torch.tensor([0.5e-9, 1.5e-9, 2.5e-9], dtype=torch.float64)) @ rot.T
-    ph = bp.Phantom(pos=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.02,
-                    pd=torch.ones(n, dtype=torch.float64), t1=torch.full((n,), 1.0, dtype=torch.float64),
-                    t2=torch.full((n,), 0.08, dtype=torch.float64), db0=(torch.rand(n, generator=g, dtype=torch.float64) - 0.5) * 50,
-                    diffusion=dt.expand(n, 3, 3).contiguous())
+    ph = bp.Phantom(
+        pos=(torch.rand(n, 3, generator=g, dtype=torch.float64) - 0.5) * 0.02,
+        pd=torch.ones(n, dtype=torch.float64),
+        t1=torch.full((n,), 1.0, dtype=torch.float64),
+        t2=torch.full((n,), 0.08, dtype=torch.float64),
+        db0=(torch.rand(n, generator=g, dtype=torch.float64) - 0.5) * 50,
+        diffusion=dt.expand(n, 3, 3).contiguous(),
+    )
     seq = pgse((1.2e6, 3e5, -2e5), readout=32)
     coils = bp.birdcage_sensitivities(ph.pos, 4)
     ref = bp.simulate(ph, seq, coils, seed=9)
@@ -157,12 +178,22 @@ def test_diffusion_same_walk_as_core(gpu, mma):
 def test_generalized_bloch_memory(gpu, memory):
     # the Green's-function memory reaches the kernel (the two memories differ by ~1e-3 in Mzb)
     one = lambda v: torch.full((4,), v, dtype=torch.float64)
-    ph = bp.Phantom(pos=torch.zeros(4, 3, dtype=torch.float64), pd=one(0.9), t1=one(1.0), t2=one(0.05),
-                    db0=torch.tensor([0.0, 50.0, -30.0, 10.0], dtype=torch.float64),
-                    bound=bp.BoundPool(f=one(0.1), k=one(60.0), t1=one(1.0), t2=one(12e-6), model="generalized",
-                                       memory=memory))
-    seq = (bp.SequenceBuilder().rf(1e-3, flip_deg=180.0, n_steps=100).delay(5e-3)
-           .rf(0.5e-3, flip_deg=90.0, n_steps=50).readout(32, 10e-6).build())
+    ph = bp.Phantom(
+        pos=torch.zeros(4, 3, dtype=torch.float64),
+        pd=one(0.9),
+        t1=one(1.0),
+        t2=one(0.05),
+        db0=torch.tensor([0.0, 50.0, -30.0, 10.0], dtype=torch.float64),
+        bound=bp.BoundPool(f=one(0.1), k=one(60.0), t1=one(1.0), t2=one(12e-6), model="generalized", memory=memory),
+    )
+    seq = (
+        bp.SequenceBuilder()
+        .rf(1e-3, flip_deg=180.0, n_steps=100)
+        .delay(5e-3)
+        .rf(0.5e-3, flip_deg=90.0, n_steps=50)
+        .readout(32, 10e-6)
+        .build()
+    )
     a, b = bp.simulate(ph, seq), gpu.simulate(ph, seq)
     assert float((a.signal - b.signal).abs().max() / a.signal.abs().max()) < 5e-5
     assert float((a.m_bound - b.m_bound.to(a.m_bound.dtype)).abs().max()) < 5e-6
@@ -179,8 +210,9 @@ def _pools_case(n_pools, with_bound, seed=0):
     n = len(ph)
     g = torch.Generator().manual_seed(seed + 11)
     rnd = lambda: torch.rand(n, generator=g, dtype=torch.float64)
-    mt = bp.ExchangePool(f=0.08 + 0.04 * rnd(), k=30 + 20 * rnd(), t1=0.8 + 0.2 * rnd(), t2=0.03 + 0.02 * rnd(),
-                         dw=-200 + 50 * rnd())
+    mt = bp.ExchangePool(
+        f=0.08 + 0.04 * rnd(), k=30 + 20 * rnd(), t1=0.8 + 0.2 * rnd(), t2=0.03 + 0.02 * rnd(), dw=-200 + 50 * rnd()
+    )
     pools = (*ph.pools, mt)[:n_pools]
     return replace(ph, pools=pools, b1=torch.linspace(0.8, 1.2, n, dtype=torch.float64)), with_readout(seq)
 
@@ -217,10 +249,18 @@ def test_free_pools_cest_spectrum(gpu):
     offsets = torch.tensor([-300.0, *torch.linspace(-5, 5, 41).tolist()], dtype=torch.float64) * f0
     n = len(offsets)
     one = torch.ones(n, dtype=torch.float64)
-    ph = bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=one, t1=1.2 * one, t2=0.08 * one, db0=-offsets,
-                    pools=(bp.ExchangePool(0.002 * one, 300 * one, one, 0.01 * one, 3.5 * f0 * one),
-                           bp.ExchangePool(0.004 * one, 2000 * one, one, 0.01 * one, 1.0 * f0 * one)),
-                    bound=bp.BoundPool(f=0.1 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-2.6 * f0 * one))
+    ph = bp.Phantom(
+        pos=torch.zeros(n, 3, dtype=torch.float64),
+        pd=one,
+        t1=1.2 * one,
+        t2=0.08 * one,
+        db0=-offsets,
+        pools=(
+            bp.ExchangePool(0.002 * one, 300 * one, one, 0.01 * one, 3.5 * f0 * one),
+            bp.ExchangePool(0.004 * one, 2000 * one, one, 0.01 * one, 1.0 * f0 * one),
+        ),
+        bound=bp.BoundPool(f=0.1 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-2.6 * f0 * one),
+    )
     t = (torch.arange(200, dtype=torch.float64) + 0.5) * 100e-6
     env = 120.0 * torch.exp(-0.5 * ((t - 0.01) / 0.004) ** 2)  # [Hz], ~2.8 uT peak
     b = bp.SequenceBuilder()
@@ -271,13 +311,19 @@ def test_long_rf_trains_do_not_drift(gpu, model):
     # until the increments were added by two_sum
     n = 32
     one = torch.ones(n, dtype=torch.float64)
-    ph = bp.Phantom(torch.zeros(n, 3, dtype=torch.float64), one, one, 0.05 * one,
-                    -torch.linspace(-2000, 2000, n, dtype=torch.float64))
+    ph = bp.Phantom(
+        torch.zeros(n, 3, dtype=torch.float64),
+        one,
+        one,
+        0.05 * one,
+        -torch.linspace(-2000, 2000, n, dtype=torch.float64),
+    )
     if model is not None:
         from dataclasses import replace
 
-        ph = replace(ph, bound=bp.BoundPool(f=0.135 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-383.0 * one,
-                                            model=model))
+        ph = replace(
+            ph, bound=bp.BoundPool(f=0.135 * one, k=30 * one, t1=one, t2=12e-6 * one, dw=-383.0 * one, model=model)
+        )
     n_seg = 2000 if model == "generalized" else 5000  # 3e-4 to 5e-4 of drift before the fix
     seq = bp.SequenceBuilder().rf(n_seg * 10e-6, amplitude=42.577 * 1.5, n_steps=n_seg).readout(4, 10e-6).build()
     ref, out = bp.simulate(ph, seq), gpu.simulate(ph, seq)

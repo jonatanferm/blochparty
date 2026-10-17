@@ -53,8 +53,17 @@ B1_UT, T_SAT, RF_RASTER = 1.5, 1.0, 10e-6
 
 
 def write_seq(path: Path, offsets_ppm) -> None:
-    sys = pp.Opts(max_grad=40, grad_unit="mT/m", max_slew=130, slew_unit="T/m/s", rf_ringdown_time=0,
-                  rf_dead_time=0, rf_raster_time=RF_RASTER, gamma=GAMMA_BAR, B0=B0)
+    sys = pp.Opts(
+        max_grad=40,
+        grad_unit="mT/m",
+        max_slew=130,
+        slew_unit="T/m/s",
+        rf_ringdown_time=0,
+        rf_dead_time=0,
+        rf_raster_time=RF_RASTER,
+        gamma=GAMMA_BAR,
+        B0=B0,
+    )
     seq = pp.Sequence(system=sys)
     flip = 2 * math.pi * GAMMA_BAR * B1_UT * 1e-6 * T_SAT
     spoil = pp.make_trapezoid("z", amplitude=0.8 * sys.max_grad, duration=5e-3, system=sys)
@@ -71,10 +80,18 @@ def run_bmctool(path: Path, lineshape: str) -> np.ndarray:
     from bmctool.parameters import Parameters
     from bmctool.simulation import BMCSim
 
-    cfg = {"water_pool": dict(f=1.0, **WATER),
-           "mt_pool": dict(f=MT["f"], t1=MT["t1"], t2=T2B[lineshape], k=MT["k"], dw=MT["dw_ppm"], lineshape=lineshape),
-           "b0": B0, "gamma": GAMMA_RAD, "b0_inhom": 0.0, "rel_b1": 1.0,
-           "verbose": False, "reset_init_mag": True, "scale": 1.0, "max_pulse_samples": 10**6}
+    cfg = {
+        "water_pool": dict(f=1.0, **WATER),
+        "mt_pool": dict(f=MT["f"], t1=MT["t1"], t2=T2B[lineshape], k=MT["k"], dw=MT["dw_ppm"], lineshape=lineshape),
+        "b0": B0,
+        "gamma": GAMMA_RAD,
+        "b0_inhom": 0.0,
+        "rel_b1": 1.0,
+        "verbose": False,
+        "reset_init_mag": True,
+        "scale": 1.0,
+        "max_pulse_samples": 10**6,
+    }
     sim = BMCSim(Parameters.from_dict(cfg), str(path), verbose=False)
     sim.run()
     return sim.get_zspec(return_abs=False)[1]
@@ -90,16 +107,25 @@ def bmctool_superlorentzian(delta: torch.Tensor, t2: torch.Tensor) -> torch.Tens
     s = (3 * u**2 - 1).abs()
 
     def rect(off):  # off [rad/s], any shape
-        return math.pi * 0.01 * (math.sqrt(2 / math.pi) * t2[..., None] / s
-                                 * torch.exp(-2 * (off[..., None] * t2[..., None] / s) ** 2)).sum(-1)
+        return (
+            math.pi
+            * 0.01
+            * (
+                math.sqrt(2 / math.pi) * t2[..., None] / s * torch.exp(-2 * (off[..., None] * t2[..., None] / s) ** 2)
+            ).sum(-1)
+        )
 
     dw = 2 * math.pi * delta
     px = torch.tensor([-300 - w0, -100 - w0, 100 + w0, 300 + w0], dtype=delta.dtype)
     py = [rect(x.expand_as(dw)) for x in px]
     d0, d1 = 30 * (py[1] - py[0]), 30 * (py[3] - py[2])
     c = ((dw - px[1] + 1) / (px[2] - px[1] + 1)).abs()
-    spline = ((2 * c**3 - 3 * c**2 + 1) * py[1] + (-2 * c**3 + 3 * c**2) * py[2] + (c**3 - 2 * c**2 + c) * d0
-              + (c**3 - c**2) * d1)
+    spline = (
+        (2 * c**3 - 3 * c**2 + 1) * py[1]
+        + (-2 * c**3 + 3 * c**2) * py[2]
+        + (c**3 - 2 * c**2 + c) * d0
+        + (c**3 - c**2) * d1
+    )
     return torch.where(dw.abs() >= w0, rect(dw), spline)
 
 
@@ -107,8 +133,9 @@ def bmctool_superlorentzian(delta: torch.Tensor, t2: torch.Tensor) -> torch.Tens
 def bmctool_lineshape():
     """Run blochparty with BMCTool's super-Lorentzian, to show the lineshape is the only difference."""
     orig = exchange.lineshape
-    exchange.lineshape = lambda pool, delta: (bmctool_superlorentzian(delta, pool.t2) if pool.lineshape == "superlorentzian"
-                                              else orig(pool, delta))
+    exchange.lineshape = lambda pool, delta: (
+        bmctool_superlorentzian(delta, pool.t2) if pool.lineshape == "superlorentzian" else orig(pool, delta)
+    )
     try:
         yield
     finally:
@@ -130,9 +157,14 @@ def simulator():
 def spin(db0: float | torch.Tensor, lineshape: str) -> bp.Phantom:
     db0 = torch.as_tensor(db0, dtype=torch.float64).reshape(-1)
     n = len(db0)
-    return bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=torch.ones(n, dtype=torch.float64),
-                      t1=torch.full((n,), WATER["t1"], dtype=torch.float64),
-                      t2=torch.full((n,), WATER["t2"], dtype=torch.float64), db0=db0, bound=bound_pool(lineshape))
+    return bp.Phantom(
+        pos=torch.zeros(n, 3, dtype=torch.float64),
+        pd=torch.ones(n, dtype=torch.float64),
+        t1=torch.full((n,), WATER["t1"], dtype=torch.float64),
+        t2=torch.full((n,), WATER["t2"], dtype=torch.float64),
+        db0=db0,
+        bound=bound_pool(lineshape),
+    )
 
 
 def blochparty_from_seq(path: Path, lineshape: str) -> np.ndarray:
@@ -148,8 +180,17 @@ def blochparty_from_seq(path: Path, lineshape: str) -> np.ndarray:
             seq.spoil[b - 1] = True
         if blk.adc is not None:  # Mz at the pseudo ADC, then back to equilibrium
             sl = slice(start, a)
-            part = replace(seq, dt=seq.dt[sl], rf=seq.rf[sl], grad=seq.grad[sl], adc_phase=seq.adc_phase[sl],
-                           is_rf=seq.is_rf[sl], adc=[False] * (a - start), spoil=seq.spoil[sl], meta={})
+            part = replace(
+                seq,
+                dt=seq.dt[sl],
+                rf=seq.rf[sl],
+                grad=seq.grad[sl],
+                adc_phase=seq.adc_phase[sl],
+                is_rf=seq.is_rf[sl],
+                adc=[False] * (a - start),
+                spoil=seq.spoil[sl],
+                meta={},
+            )
             out.append(float(simulator()(spin(0.0, lineshape), part).m[0, 2]))
             start = b
     return np.array(out)
@@ -167,13 +208,22 @@ def check_replica() -> None:
     from bmctool.parameters import Parameters
     from bmctool.simulation import BlochMcConnellSolver
 
-    cfg = {"water_pool": dict(f=1.0, **WATER), "b0": B0, "gamma": GAMMA_RAD, "b0_inhom": 0.0, "rel_b1": 1.0,
-           "mt_pool": dict(f=MT["f"], t1=MT["t1"], t2=T2B["superlorentzian"], k=MT["k"], dw=0.0, lineshape="superlorentzian")}
+    cfg = {
+        "water_pool": dict(f=1.0, **WATER),
+        "b0": B0,
+        "gamma": GAMMA_RAD,
+        "b0_inhom": 0.0,
+        "rel_b1": 1.0,
+        "mt_pool": dict(
+            f=MT["f"], t1=MT["t1"], t2=T2B["superlorentzian"], k=MT["k"], dw=0.0, lineshape="superlorentzian"
+        ),
+    }
     solver = BlochMcConnellSolver(Parameters.from_dict(cfg), 1)
     hz_grid = torch.tensor([0.0, 50.0, 127.0, 128.0, 140.0, 200.0, 1e3, 5e3, 3e4], dtype=torch.float64)
     ours = bmctool_superlorentzian(hz_grid, torch.full_like(hz_grid, T2B["superlorentzian"]))
-    theirs = torch.tensor([solver.get_mt_shape_at_offset(2 * math.pi * float(h), GAMMA_RAD * B0) for h in hz_grid],
-                          dtype=torch.float64)
+    theirs = torch.tensor(
+        [solver.get_mt_shape_at_offset(2 * math.pi * float(h), GAMMA_RAD * B0) for h in hz_grid], dtype=torch.float64
+    )
     err = float(((ours - theirs).abs() / theirs.abs()).max())
     print(f"BMCTool super-Lorentzian replica vs BMCTool: max rel. difference {err:.1e} (0-30 kHz)")
     assert err < 1e-12, (ours, theirs)
@@ -208,19 +258,25 @@ def main(argv=None):
             ref_s, ours_s = run_bmctool(short, shape), blochparty_from_seq(short, shape)
             t_seq = time.perf_counter() - t0
             m0 = ref[0]
-            print(f"\n{shape} (T2b {T2B[shape] * 1e6:.0f} us), Z = Mz / M0 at -300 ppm; BMCTool {t_bmc:.1f} s, "
-                  f"blochparty {t_ours:.1f} s ({len(offsets)} offsets as spins), .seq path {t_seq:.0f} s")
+            print(
+                f"\n{shape} (T2b {T2B[shape] * 1e6:.0f} us), Z = Mz / M0 at -300 ppm; BMCTool {t_bmc:.1f} s, "
+                f"blochparty {t_ours:.1f} s ({len(offsets)} offsets as spins), .seq path {t_seq:.0f} s"
+            )
             print("| offset [ppm] | BMCTool | blochparty | difference |\n|---|---|---|---|")
             for o, r, b in zip(offsets, ref / m0, ours / ours[0]):
                 print(f"| {o:g} | {r:.5f} | {b:.5f} | {b - r:+.1e} |")
             dz = ours / ours[0] - ref / m0
-            print(f"max |dZ| {np.abs(dz).max():.1e}; via .seq: max |dMz| {np.abs(ours_s - ref_s).max():.1e} "
-                  f"(offsets {', '.join(f'{o:g}' for o in seq_offsets)}); MTR_asym at 3 ppm: "
-                  f"BMCTool {float((ref / m0)[offsets == 3][0] - (ref / m0)[offsets == -3][0]):+.4f}, "
-                  f"blochparty {float((ours / ours[0])[offsets == 3][0] - (ours / ours[0])[offsets == -3][0]):+.4f}")
+            print(
+                f"max |dZ| {np.abs(dz).max():.1e}; via .seq: max |dMz| {np.abs(ours_s - ref_s).max():.1e} "
+                f"(offsets {', '.join(f'{o:g}' for o in seq_offsets)}); MTR_asym at 3 ppm: "
+                f"BMCTool {float((ref / m0)[offsets == 3][0] - (ref / m0)[offsets == -3][0]):+.4f}, "
+                f"blochparty {float((ours / ours[0])[offsets == 3][0] - (ours / ours[0])[offsets == -3][0]):+.4f}"
+            )
             if patched is not None:
-                print(f"blochparty with BMCTool's super-Lorentzian (replica): max |dZ| "
-                      f"{np.abs(patched / patched[0] - ref / m0).max():.1e}")
+                print(
+                    f"blochparty with BMCTool's super-Lorentzian (replica): max |dZ| "
+                    f"{np.abs(patched / patched[0] - ref / m0).max():.1e}"
+                )
 
 
 # ---------------------------------------------------------------- CEST: free exchanging pools
@@ -239,8 +295,10 @@ def cest_comparison(quick: bool = False) -> str:
     cfg = yaml.safe_load(cfg_path.read_text())
     cfg["max_pulse_samples"] = 10**6
     water = cfg["water_pool"]
-    pools = tuple(bp.ExchangePool(f=q["f"], k=float(q["k"]), t1=q["t1"], t2=q["t2"], dw=hz(q["dw"]))
-                  for q in cfg["cest_pool"].values())
+    pools = tuple(
+        bp.ExchangePool(f=q["f"], k=float(q["k"]), t1=q["t1"], t2=q["t2"], dw=hz(q["dw"]))
+        for q in cfg["cest_pool"].values()
+    )
     offsets = np.concatenate([[-300.0], np.arange(-6, 6.01, 0.25)])
 
     def ours_as_spins():
@@ -248,9 +306,14 @@ def cest_comparison(quick: bool = False) -> str:
         seq = bp.SequenceBuilder().rf(T_SAT, amplitude=amp).delay(5e-3).spoil().build()  # one exact segment
         db0 = -hz(torch.tensor(offsets, dtype=torch.float64))
         n = len(db0)
-        ph = bp.Phantom(pos=torch.zeros(n, 3, dtype=torch.float64), pd=torch.ones(n, dtype=torch.float64),
-                        t1=torch.full((n,), water["t1"], dtype=torch.float64),
-                        t2=torch.full((n,), water["t2"], dtype=torch.float64), db0=db0, pools=pools)
+        ph = bp.Phantom(
+            pos=torch.zeros(n, 3, dtype=torch.float64),
+            pd=torch.ones(n, dtype=torch.float64),
+            t1=torch.full((n,), water["t1"], dtype=torch.float64),
+            t2=torch.full((n,), water["t2"], dtype=torch.float64),
+            db0=db0,
+            pools=pools,
+        )
         return simulator()(ph, seq).m[:, 2].double().numpy()
 
     with tempfile.TemporaryDirectory() as tmp:
@@ -266,13 +329,16 @@ def cest_comparison(quick: bool = False) -> str:
         t_ours = time.perf_counter() - t0
     z_ref, z_ours = ref / ref[0], ours / ours[0]
     asym = lambda z, o: float(z[offsets == -o][0] - z[offsets == o][0])
-    lines = [f"\nCEST, BMCTool's config_5pool.yaml (water + amide 3.5, guanidine 2, NOE -3, MT -3 ppm as free pools), "
-             f"{B1_UT} uT block pulse {T_SAT} s; BMCTool {t_bmc:.1f} s, blochparty {t_ours:.1f} s ({len(offsets)} "
-             f"offsets as spins, one exact segment each)",
-             f"max |dZ| {np.abs(z_ours - z_ref).max():.1e}; MTR_asym(3.5 ppm) BMCTool {asym(z_ref, 3.5):+.5f}, "
-             f"blochparty {asym(z_ours, 3.5):+.5f} (the .seq path is checked with MT above; the exact engine costs "
-             f"~0.3 ms per segment with 4 pools)",
-             "| offset [ppm] | BMCTool | blochparty | difference |", "|---|---|---|---|"]
+    lines = [
+        f"\nCEST, BMCTool's config_5pool.yaml (water + amide 3.5, guanidine 2, NOE -3, MT -3 ppm as free pools), "
+        f"{B1_UT} uT block pulse {T_SAT} s; BMCTool {t_bmc:.1f} s, blochparty {t_ours:.1f} s ({len(offsets)} "
+        f"offsets as spins, one exact segment each)",
+        f"max |dZ| {np.abs(z_ours - z_ref).max():.1e}; MTR_asym(3.5 ppm) BMCTool {asym(z_ref, 3.5):+.5f}, "
+        f"blochparty {asym(z_ours, 3.5):+.5f} (the .seq path is checked with MT above; the exact engine costs "
+        f"~0.3 ms per segment with 4 pools)",
+        "| offset [ppm] | BMCTool | blochparty | difference |",
+        "|---|---|---|---|",
+    ]
     lines += [f"| {o:g} | {r:.6f} | {b:.6f} | {b - r:+.1e} |" for o, r, b in zip(offsets, z_ref, z_ours)]
     return "\n".join(lines)
 

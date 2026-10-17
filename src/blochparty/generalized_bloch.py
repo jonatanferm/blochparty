@@ -62,8 +62,18 @@ def _green(x: np.ndarray, shape: str) -> np.ndarray:
     raise ValueError(f"shape must be one of {GREENS}")
 
 
-def simulate_pulse(w: np.ndarray, h: float, *, t2s: float, shape: str, r1s: float = 1.0, m0s: float = 1.0,
-                   zs0: float | None = None, free: dict | None = None, k: float = 0.0) -> dict:
+def simulate_pulse(
+    w: np.ndarray,
+    h: float,
+    *,
+    t2s: float,
+    shape: str,
+    r1s: float = 1.0,
+    m0s: float = 1.0,
+    zs0: float | None = None,
+    free: dict | None = None,
+    k: float = 0.0,
+) -> dict:
     """Integrate a pulse given on a uniform grid: ``w`` (n,) complex RF in the bound pool's
     rotating frame [rad/s] at times (i + 1/2) h (piecewise constant). Optional free pool
     ``free`` = dict(m0, r1, r2, dw [rad/s], m=(x, y, z)), exchanging z with rate ``k`` (bound ->
@@ -89,7 +99,7 @@ def simulate_pulse(w: np.ndarray, h: float, *, t2s: float, shape: str, r1s: floa
         aa, bb = a_m[:j].copy(), b_m[:j].copy()
         if a_last is not None:
             aa[j - 1], bb[j - 1] = a_last, b_last
-        return -0.5j * h * ((aa * G[j:0:-1]).sum() + (bb * G[j - 1::-1][:j]).sum())
+        return -0.5j * h * ((aa * G[j:0:-1]).sum() + (bb * G[j - 1 :: -1][:j]).sum())
 
     def rhs(zj, fj, uj, wj):
         dz = (np.conj(wj) * uj).imag + r1s * (m0s - zj)
@@ -99,8 +109,9 @@ def simulate_pulse(w: np.ndarray, h: float, *, t2s: float, shape: str, r1s: floa
             x, y, z = fj
             r1f, r2f = free["r1"], free["r2"]
             # dm/dt = m x b, b = (wx, wy, dw) as blochparty (a pulse along +x tips +z to +y)
-            df = np.array([y * dw - z * wy, z * wx - x * dw, x * wy - y * wx]) \
-                - np.array([r2f * x, r2f * y, r1f * (z - free["m0"])])
+            df = np.array([y * dw - z * wy, z * wx - x * dw, x * wy - y * wx]) - np.array(
+                [r2f * x, r2f * y, r1f * (z - free["m0"])]
+            )
             df[2] += -kf * z + k * zj
             dz += kf * z - k * zj
         return dz, df
@@ -193,8 +204,11 @@ def modes(shape: str, memory: float = MEMORY) -> tuple[np.ndarray, np.ndarray]:
         g = green(x, 1.0, shape, memory)
         # the slowest pole need not sit at 1 / memory: pick the layout with the smallest error
         # (well-conditioned weights only); memory 100: 1.7e-5, 300: 3.8e-5
-        fits = [_fit_modes(x, g, np.logspace(math.log10(k / memory), math.log10(3.0), 6), floor)
-                for k in (1.0, 1.25, 1.5, 2.0) for floor in (1e-4, 1e-3)]
+        fits = [
+            _fit_modes(x, g, np.logspace(math.log10(k / memory), math.log10(3.0), 6), floor)
+            for k in (1.0, 1.25, 1.5, 2.0)
+            for floor in (1e-4, 1e-3)
+        ]
         out = min((f for f in fits if np.abs(f[1]).max() < 3.0), key=lambda f: f[2])[:2]
     else:  # Gaussian: gone within ~8 T2; fit to 40 T2 so the tail stays zero
         x = np.concatenate([np.linspace(0, 10, 800), np.linspace(10, 40, 300)[1:]])

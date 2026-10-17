@@ -24,8 +24,16 @@ def with_readout(seq: Sequence, n=16) -> Sequence:
     """Append a readout (gradient, receiver phase) so a sequence also produces signal."""
     ro = SequenceBuilder().readout(n, 10e-6, grad=(800.0, -300.0, 150.0), phase=0.7).build()
     cat = lambda f: torch.cat([getattr(seq, f), getattr(ro, f)])
-    return replace(seq, dt=cat("dt"), rf=cat("rf"), grad=cat("grad"), adc_phase=cat("adc_phase"),
-                   is_rf=seq.is_rf + ro.is_rf, adc=seq.adc + ro.adc, spoil=seq.spoil + ro.spoil)
+    return replace(
+        seq,
+        dt=cat("dt"),
+        rf=cat("rf"),
+        grad=cat("grad"),
+        adc_phase=cat("adc_phase"),
+        is_rf=seq.is_rf + ro.is_rf,
+        adc=seq.adc + ro.adc,
+        spoil=seq.spoil + ro.spoil,
+    )
 
 
 def head_3d(n=12, n_coils=4):
@@ -72,7 +80,11 @@ def weighted_loss(r, which="both"):
     w = lambda x: torch.randn(x.shape, generator=g, dtype=torch.float64)
     total = 0
     if which in ("both", "signal"):
-        total = total + (r.signal.real.double() * w(r.signal.real)).sum() + (r.signal.imag.double() * w(r.signal.imag)).sum()
+        total = (
+            total
+            + (r.signal.real.double() * w(r.signal.real)).sum()
+            + (r.signal.imag.double() * w(r.signal.imag)).sum()
+        )
     if which in ("both", "m"):
         total = total + (r.m.double() * w(r.m)).sum()
         if r.m_bound is not None:
@@ -94,7 +106,9 @@ def input_gradients(sim, phantom, seq, coils=None, m_init=None, scanner=None, wh
         ph = replace(ph, b1=leaf("b1", phantom.b1))
     if phantom.bound is not None:
         b = phantom.bound.expand(len(phantom), phantom.pd)
-        ph = replace(ph, bound=replace(b, **{k: leaf("bound." + k, getattr(b, k)) for k in ("f", "k", "t1", "t2", "dw")}))
+        ph = replace(
+            ph, bound=replace(b, **{k: leaf("bound." + k, getattr(b, k)) for k in ("f", "k", "t1", "t2", "dw")})
+        )
     sq = replace(seq, **{k: leaf(k, getattr(seq, k)) for k in ("dt", "rf", "grad", "adc_phase")})
     if seq.b0_offset is not None:
         sq = replace(sq, b0_offset=leaf("b0_offset", seq.b0_offset))

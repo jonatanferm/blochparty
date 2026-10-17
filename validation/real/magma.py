@@ -99,18 +99,32 @@ def wasabi_fit(z: np.ndarray) -> np.ndarray:
 # the library's phantom models (sim-library/phantoms/l-arginin at master, unchanged since 2024-05-02,
 # bbe45dd): (water T1, T2, CEST f, MT f or None); CEST pool 3 ppm, k 350 Hz, T1 1 s, T2 0.1 s; MT
 # pool Lorentzian, T2 40 us, k 30 Hz, T1 1 s
-TUBE_MODELS = {"20 mM": (1.5, 1.0, 3.6036e-4, None), "27 mM": (1.5, 1.0, 4.8649e-4, None),
-               "40 mM": (1.45, 0.05, 7.2072e-4, 0.04), "60 mM": (1.45, 0.05, 1.1e-3, 0.035),
-               "70 mM": (1.45, 0.05, 1.3e-3, 0.035)}
+TUBE_MODELS = {
+    "20 mM": (1.5, 1.0, 3.6036e-4, None),
+    "27 mM": (1.5, 1.0, 4.8649e-4, None),
+    "40 mM": (1.45, 0.05, 7.2072e-4, 0.04),
+    "60 mM": (1.45, 0.05, 1.1e-3, 0.035),
+    "70 mM": (1.45, 0.05, 1.3e-3, 0.035),
+}
 
 
 def _slice(seq, a, b):
     from dataclasses import replace
 
     cut = lambda t: None if t is None else t[a:b]  # noqa: E731
-    return replace(seq, dt=seq.dt[a:b], rf=seq.rf[a:b], grad=seq.grad[a:b], adc_phase=seq.adc_phase[a:b],
-                   is_rf=seq.is_rf[a:b], adc=seq.adc[a:b], spoil=seq.spoil[a:b], b0_offset=cut(seq.b0_offset),
-                   rf_freq=cut(seq.rf_freq), meta={})
+    return replace(
+        seq,
+        dt=seq.dt[a:b],
+        rf=seq.rf[a:b],
+        grad=seq.grad[a:b],
+        adc_phase=seq.adc_phase[a:b],
+        is_rf=seq.is_rf[a:b],
+        adc=seq.adc[a:b],
+        spoil=seq.spoil[a:b],
+        b0_offset=cut(seq.b0_offset),
+        rf_freq=cut(seq.rf_freq),
+        meta={},
+    )
 
 
 def coarsen_rf(seq, m: int):
@@ -135,10 +149,18 @@ def coarsen_rf(seq, m: int):
     rf = torch.zeros(len(groups), 2, dtype=seq.rf.dtype).index_add(0, seg, seq.rf * w) / dt[:, None]
     grad = torch.zeros(len(groups), 3, dtype=seq.grad.dtype).index_add(0, seg, seq.grad * w) / dt[:, None]
     last = [b - 1 for _, b in groups]
-    return Sequence(dt, rf, grad, seq.adc_phase[torch.tensor(last)], [seq.is_rf[a] for a, _ in groups],
-                    [seq.adc[k] for k in last], [seq.spoil[k] for k in last], {},
-                    None if seq.b0_offset is None else seq.b0_offset[idx],
-                    None if seq.rf_freq is None else seq.rf_freq[idx])
+    return Sequence(
+        dt,
+        rf,
+        grad,
+        seq.adc_phase[torch.tensor(last)],
+        [seq.is_rf[a] for a, _ in groups],
+        [seq.adc[k] for k in last],
+        [seq.spoil[k] for k in last],
+        {},
+        None if seq.b0_offset is None else seq.b0_offset[idx],
+        None if seq.rf_freq is None else seq.rf_freq[idx],
+    )
 
 
 def rf_frame(seq):
@@ -195,9 +217,16 @@ def simulate_z(model, db0_hz, rb1, trec_from=None, rf_step=100, frame=True):
     one = torch.ones(n, dtype=torch.float64)
     cest = ExchangePool(fc, 350.0, 1.0, 0.1, 3.0 * FREQ_APT)
     bound = None if fm is None else BoundPool(fm * one, 30.0 * one, one, 40e-6 * one, 0.0, lineshape="lorentzian")
-    ph = bp.Phantom(torch.zeros(n, 3, dtype=torch.float64), one, t1 * one, t2 * one,
-                    torch.as_tensor(db0_hz, dtype=torch.float64), torch.as_tensor(rb1, dtype=torch.float64),
-                    bound=bound, pools=(cest,))
+    ph = bp.Phantom(
+        torch.zeros(n, 3, dtype=torch.float64),
+        one,
+        t1 * one,
+        t2 * one,
+        torch.as_tensor(db0_hz, dtype=torch.float64),
+        torch.as_tensor(rb1, dtype=torch.float64),
+        bound=bound,
+        pools=(cest,),
+    )
     mz, start = [], 0
     from dataclasses import replace
 
@@ -242,11 +271,13 @@ def main():
         fields.append((db0, b1))
         agar = za[np.argmin(abs(APT_PPM[1:] - 1.5)), r].mean() < 0.6
         info.append((agar, np.median(mtr_asym(za[:, r], db0))))
-        print(f"tube {i + 1}: {r.sum()} voxels, centre {np.argwhere(r).mean(0).round(0)}, authors' ROI "
-              f"{bool((r & authors).any())}; WASABI rB1 {np.median(b1):.3f} (IQR {np.subtract(*np.percentile(b1, [75, 25])):.3f}), "
-              f"dB0 {np.median(db0):+.1f} Hz (IQR {np.subtract(*np.percentile(db0, [75, 25])):.1f}); "
-              f"Z(1.5 ppm) {za[np.argmin(abs(APT_PPM[1:] - 1.5)), r].mean():.3f} ({'agarose' if agar else 'no agarose'}), "
-              f"MTRasym(3 ppm) {info[-1][1]:+.4f}")
+        print(
+            f"tube {i + 1}: {r.sum()} voxels, centre {np.argwhere(r).mean(0).round(0)}, authors' ROI "
+            f"{bool((r & authors).any())}; WASABI rB1 {np.median(b1):.3f} (IQR {np.subtract(*np.percentile(b1, [75, 25])):.3f}), "
+            f"dB0 {np.median(db0):+.1f} Hz (IQR {np.subtract(*np.percentile(db0, [75, 25])):.1f}); "
+            f"Z(1.5 ppm) {za[np.argmin(abs(APT_PPM[1:] - 1.5)), r].mean():.3f} ({'agarose' if agar else 'no agarose'}), "
+            f"MTRasym(3 ppm) {info[-1][1]:+.4f}"
+        )
     # assignment: tube 1 is 20 mM (authors' ROI); the other plain tube 27 mM; the agarose tubes
     # 40 / 60 / 70 mM in the order of their measured MTRasym (assumption: monotonic in concentration)
     plain = [i for i in range(5) if not info[i][0] and i != 0]
@@ -254,8 +285,10 @@ def main():
     if len(plain) != 1 or len(agar) != 3:
         raise RuntimeError("expected two plain and three agarose tubes")
     names = {0: "20 mM", plain[0]: "27 mM", agar[0]: "40 mM", agar[1]: "60 mM", agar[2]: "70 mM"}
-    print("Z-spectra, measured vs blochparty (voxel-wise WASABI dB0 / B1, library models): rms over 33 offsets "
-          "of the ROI mean; MTRasym(3 ppm)")
+    print(
+        "Z-spectra, measured vs blochparty (voxel-wise WASABI dB0 / B1, library models): rms over 33 offsets "
+        "of the ROI mean; MTRasym(3 ppm)"
+    )
     q = np.array([1 / 6, 1 / 2, 5 / 6])
     for i, r in enumerate(rois):
         db0, b1 = fields[i]
@@ -268,9 +301,12 @@ def main():
             np.save(cache, sim)
             sim = np.abs(sim)  # the images are magnitudes
             e = meas.mean(1) - sim.mean(1)
-            print(f"  tube {i + 1} ({names[i]}, {label}): rms {np.sqrt(np.mean(e**2)):.4f}, max |dZ| {np.abs(e).max():.4f} "
-                  f"at {APT_PPM[1:][np.argmax(np.abs(e))]:+.2f} ppm; MTRasym measured {np.median(mtr_asym(meas, db0)):+.4f}, "
-                  f"simulated {np.median(mtr_asym(sim, g0.ravel())):+.4f}", flush=True)
+            print(
+                f"  tube {i + 1} ({names[i]}, {label}): rms {np.sqrt(np.mean(e**2)):.4f}, max |dZ| {np.abs(e).max():.4f} "
+                f"at {APT_PPM[1:][np.argmax(np.abs(e))]:+.2f} ppm; MTRasym measured {np.median(mtr_asym(meas, db0)):+.4f}, "
+                f"simulated {np.median(mtr_asym(sim, g0.ravel())):+.4f}",
+                flush=True,
+            )
 
 
 if __name__ == "__main__":

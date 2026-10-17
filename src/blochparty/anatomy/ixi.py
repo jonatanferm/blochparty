@@ -24,8 +24,9 @@ def ixi_subjects(root, prepared=None) -> list[int]:
     return out
 
 
-def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32, residual: bool = False,
-             prepared=None) -> tuple[Anatomy, dict]:
+def load_ixi(
+    subject: int, root, *, voxel=None, dtype=torch.float32, residual: bool = False, prepared=None
+) -> tuple[Anatomy, dict]:
     """An IXI 3 T head (Hammersmith, IXI dataset, CC BY-SA 3.0) prepared by validation/anatomy/prepare_ixi.py:
     BrainWeb's 12 classes on BrainWeb's 1 mm MNI grid, segmented from the subject's own T1 and T2 (EM with
     BrainWeb priors, affine registration), so the MNI-based steps (deep grey regions, ventricle prior, slice
@@ -39,8 +40,15 @@ def load_ixi(subject: int, root, *, voxel=None, dtype=torch.float32, residual: b
     meta = json.loads(str(data["meta"]))
     raw = data["fractions"]
     fractions = {k: torch.from_numpy(raw[i].astype(np.float32) / 255).to(dtype) for i, k in enumerate(meta["classes"])}
-    maps = {} if not residual else {k: torch.from_numpy(data[k].astype(np.float32)).to(dtype)
-                                    for k in ("t1_scale", "t2_scale", "pd_scale") if k in data.files}
+    maps = (
+        {}
+        if not residual
+        else {
+            k: torch.from_numpy(data[k].astype(np.float32)).to(dtype)
+            for k in ("t1_scale", "t2_scale", "pd_scale")
+            if k in data.files
+        }
+    )
     anatomy = Anatomy(_renormalize(fractions), tuple(meta["voxel"]), tuple(meta["origin"]), maps=maps)
     if voxel is not None and _triple(voxel, "voxel", True) != anatomy.voxel:
         anatomy = anatomy.resample(voxel)

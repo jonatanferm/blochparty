@@ -12,7 +12,7 @@ def test_paired_difference_cancels_shared_noise():
     n, k = 8, 6
     rois = [np.zeros((n, n), bool) for _ in range(3)]
     for i, r in enumerate(rois):
-        r[2 * i:2 * i + 2, 2:6] = True
+        r[2 * i : 2 * i + 2, 2:6] = True
     decay = np.exp(-np.arange(5) / 3.0)[:, None, None]
     a = decay * (1 + 0.3 * rng.normal(size=(k, 5, n, n)))  # seed noise shared by both models
     b = a * 1.02 ** np.arange(5)[:, None, None]  # model b: a slightly slower decay, same seeds
@@ -23,7 +23,6 @@ def test_paired_difference_cancels_shared_noise():
     assert se < 0.2 * np.hypot(ra.mean10_se, rb.mean10_se)
     assert mc_paired_difference(a, a, rois, real) == (0.0, 0.0)
     assert ra.clipped.shape == (3,) and (ra.clipped == 0).all()
-
 
 
 def test_qmc_filling_refuses_a_bad_sparse_fraction():

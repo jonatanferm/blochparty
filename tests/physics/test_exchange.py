@@ -45,7 +45,9 @@ def test_superlorentzian_matches_quadrature_and_has_unit_area():
     x_lo, x_hi = (2 * math.pi * float(d[i]) * 12e-6 for i in (0, -1))  # heavy tails: exact truncated area
     assert area(lorentzian(d, t2)) == pytest.approx(2 / math.pi * (math.atan(x_hi) - math.atan(x_lo)), abs=1e-6)
     # held constant inside the cutoff
-    assert float(superlorentzian(torch.tensor(10.0, dtype=f64), t2)) == float(superlorentzian(torch.tensor(1e3, dtype=f64), t2))
+    assert float(superlorentzian(torch.tensor(10.0, dtype=f64), t2)) == float(
+        superlorentzian(torch.tensor(1e3, dtype=f64), t2)
+    )
 
 
 def test_lineshape_without_cut_is_the_tapered_green_functions_transform():
@@ -73,8 +75,10 @@ def test_lineshape_without_cut_is_the_tapered_green_functions_transform():
     lor = BoundPool(f=0.1, k=30.0, t1=1.0, t2=torch.tensor(t2, dtype=f64), lineshape="lorentzian", cutoff=None)
     assert float((lineshape(lor, d) - lorentzian(d, lor.t2)).abs().max()) == 0.0
     p, c = pool_modes(pool, d)  # T2b as 1e-5 x s so the finite-difference step is small against it
-    assert torch.autograd.gradcheck(lambda dd, s: modes_lineshape(dd, 1e-5 * s, p, c),
-                                    (d.clone().requires_grad_(), torch.tensor(1.0, dtype=f64, requires_grad=True)))
+    assert torch.autograd.gradcheck(
+        lambda dd, s: modes_lineshape(dd, 1e-5 * s, p, c),
+        (d.clone().requires_grad_(), torch.tensor(1.0, dtype=f64, requires_grad=True)),
+    )
     with pytest.raises(ValueError, match="cutoff"):
         BoundPool(f=0.1, k=30.0, t1=1.0, t2=t2, cutoff=0.0)
 
@@ -85,11 +89,21 @@ def test_rf_frequency_sign_matches_resonance():
     f, dt, k = 1500.0, 10e-6, 200
     t = (torch.arange(k, dtype=f64) + 0.5) * dt
     amp = 90.0 / 360.0 / (k * dt)
-    seq = SequenceBuilder().rf_waveform(torch.stack([amp * torch.cos(-2 * math.pi * f * t),
-                                                     amp * torch.sin(-2 * math.pi * f * t)], -1), dt).build()
+    seq = (
+        SequenceBuilder()
+        .rf_waveform(
+            torch.stack([amp * torch.cos(-2 * math.pi * f * t), amp * torch.sin(-2 * math.pi * f * t)], -1), dt
+        )
+        .build()
+    )
     assert torch.allclose(rf_frequency(seq), torch.full((k,), f, dtype=f64))
-    ph = Phantom(pos=torch.zeros(2, 3, dtype=f64), pd=torch.ones(2, dtype=f64), t1=torch.full((2,), 1e9, dtype=f64),
-                 t2=torch.full((2,), 1e9, dtype=f64), db0=torch.tensor([f, -f], dtype=f64))
+    ph = Phantom(
+        pos=torch.zeros(2, 3, dtype=f64),
+        pd=torch.ones(2, dtype=f64),
+        t1=torch.full((2,), 1e9, dtype=f64),
+        t2=torch.full((2,), 1e9, dtype=f64),
+        db0=torch.tensor([f, -f], dtype=f64),
+    )
     mz = simulate(ph, seq).m[:, 2]
     assert abs(float(mz[0])) < 2e-3 and float(mz[1]) > 0.9  # 90 deg at +f (a sampled ramp: 6e-4); off resonance at -f
     # carried through subdivision, where the pieces of a sample have no phase step
@@ -177,10 +191,18 @@ def test_cw_saturation_reaches_linear_algebra_steady_state():
     pd, t1, t2, amp = 1.0, 0.2, 0.05, 85.0
     pool = BoundPool(f=0.15, k=40.0, t1=0.2, t2=12e-6, lineshape="superlorentzian")
     for offset in (1500.0, 4000.0):
-        ph = Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=torch.ones(1, dtype=f64), t1=torch.full((1,), t1, dtype=f64),
-                     t2=torch.full((1,), t2, dtype=f64), db0=torch.full((1,), -offset, dtype=f64), bound=pool)
+        ph = Phantom(
+            pos=torch.zeros(1, 3, dtype=f64),
+            pd=torch.ones(1, dtype=f64),
+            t1=torch.full((1,), t1, dtype=f64),
+            t2=torch.full((1,), t2, dtype=f64),
+            db0=torch.full((1,), -offset, dtype=f64),
+            bound=pool,
+        )
         res = simulate(ph, SequenceBuilder().rf(2.0, amplitude=amp, n_steps=20000).build())
-        w = (2 * math.pi * amp) ** 2 * float(superlorentzian(torch.tensor(offset, dtype=f64), torch.tensor(12e-6, dtype=f64)))
+        w = (2 * math.pi * amp) ** 2 * float(
+            superlorentzian(torch.tensor(offset, dtype=f64), torch.tensor(12e-6, dtype=f64))
+        )
         b = 2 * math.pi * np.array([amp, 0.0, -offset])
         kf, kb = pool.k * pool.f, pool.k
         A = np.zeros((4, 4))
@@ -198,8 +220,12 @@ def test_cw_saturation_reaches_linear_algebra_steady_state():
 def test_gradients_reach_bound_pool_parameters():
     ph, seq = bm_case(0, "superlorentzian")
     ph = replace(ph, pos=ph.pos[:2], pd=ph.pd[:2], t1=ph.t1[:2], t2=ph.t2[:2], db0=ph.db0[:2], bound=ph.bound[:2])
-    params = [ph.bound.f.clone().requires_grad_(), ph.bound.k.clone().requires_grad_(),
-              (ph.bound.t2 * 1e6).clone().requires_grad_(), seq.rf.clone().requires_grad_()]
+    params = [
+        ph.bound.f.clone().requires_grad_(),
+        ph.bound.k.clone().requires_grad_(),
+        (ph.bound.t2 * 1e6).clone().requires_grad_(),
+        seq.rf.clone().requires_grad_(),
+    ]
 
     def fn(f, k, t2b_us, rf):  # T2b in us: a finite-difference step stays inside one lineshape-table cell
         p = replace(ph, bound=replace(ph.bound, f=f, k=k, t2=t2b_us * 1e-6))
@@ -212,5 +238,6 @@ def test_gradients_reach_bound_pool_parameters():
 def test_no_bound_pool_rejected_by_other_engines():
     ph, seq = bm_case(0, "lorentzian")
     from blochparty.chunked import simulate_chunked
+
     with pytest.raises(NotImplementedError):
         simulate_chunked(ph, seq)

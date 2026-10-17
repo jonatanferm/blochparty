@@ -90,7 +90,7 @@ def k0_tr(seq: bp.Sequence, starts: list[int], first: int = 0) -> int:
         hits = np.flatnonzero(adc[s:e])
         if not len(hits):
             continue
-        area = abs(float((g[s:s + hits[0], pe] * dt[s:s + hits[0]]).sum()))
+        area = abs(float((g[s : s + hits[0], pe] * dt[s : s + hits[0]]).sum()))
         if area < best:
             best, arg = area, n
     return arg
@@ -131,7 +131,7 @@ def centre_samples(seq: bp.Sequence, a: int, b: int, n_read: int) -> np.ndarray:
     idx = np.flatnonzero(adc)
     out = []
     for e in range(len(idx) // n_read):
-        ii = idx[e * n_read:(e + 1) * n_read]
+        ii = idx[e * n_read : (e + 1) * n_read]
         j = int(np.flatnonzero(np.diff(np.sign(m[ii])) != 0)[0])  # sign change between samples j and j + 1
         out.append([a + ii[j], a + ii[j + 1]])
     return np.array(out)
@@ -148,8 +148,17 @@ def reduced(seq: bp.Sequence, n_warm: int, n_read: int, first: int = 0) -> tuple
     keep = np.zeros(len(seq), dtype=bool)
     keep[pairs.ravel()] = True
     adc = [bool(keep[i]) for i in range(a, b)]
-    out = replace(seq, dt=seq.dt[a:b], rf=seq.rf[a:b], grad=seq.grad[a:b], adc_phase=seq.adc_phase[a:b],
-                  is_rf=list(seq.is_rf[a:b]), adc=adc, spoil=list(seq.spoil[a:b]), meta={})
+    out = replace(
+        seq,
+        dt=seq.dt[a:b],
+        rf=seq.rf[a:b],
+        grad=seq.grad[a:b],
+        adc_phase=seq.adc_phase[a:b],
+        is_rf=list(seq.is_rf[a:b]),
+        adc=adc,
+        spoil=list(seq.spoil[a:b]),
+        meta={},
+    )
     order = np.cumsum(adc) - 1  # signal column of each kept sample
     return out, order[pairs - a]
 
@@ -161,13 +170,27 @@ def reduced(seq: bp.Sequence, n_warm: int, n_read: int, first: int = 0) -> tuple
 class Columns:
     """Columns of spins: ``phantom`` (all columns, listed column by column), ``column`` (column index
     per spin) and ``sphere`` (sphere index per column)."""
+
     phantom: bp.Phantom
     column: torch.Tensor
     sphere: torch.Tensor
 
 
-def columns(rois, radii, t1_ms, t2_ms, x0, *, n_slice=128, sub_read=16, grid=1, step=2, wall=1e-3,
-            water=(WATER_T1, WATER_T2), dtype=torch.float32) -> Columns:
+def columns(
+    rois,
+    radii,
+    t1_ms,
+    t2_ms,
+    x0,
+    *,
+    n_slice=128,
+    sub_read=16,
+    grid=1,
+    step=2,
+    wall=1e-3,
+    water=(WATER_T1, WATER_T2),
+    dtype=torch.float32,
+) -> Columns:
     """Columns at each ROI's centre (y from its row, z from its column, as ``nist.phantom``), or on
     a ``grid`` x ``grid`` lattice ``step`` pixels apart around it: x stratified over x0 +- 1.5
     slice thicknesses, y regularly over one pixel. Inside the sphere's ball (3D distance to its
@@ -194,8 +217,11 @@ def columns(rois, radii, t1_ms, t2_ms, x0, *, n_slice=128, sub_read=16, grid=1, 
                     parts.append((outside, water[0], water[1]))
                 for sel, tt1, tt2 in parts:
                     n = int(sel.sum())
-                    pos.append(torch.stack([x0 + gx[sel], y0 + oy + gy[sel], torch.full((n,), float(z0 + oz),
-                                                                                        dtype=torch.float64)], -1))
+                    pos.append(
+                        torch.stack(
+                            [x0 + gx[sel], y0 + oy + gy[sel], torch.full((n,), float(z0 + oz), dtype=torch.float64)], -1
+                        )
+                    )
                     t1.append(torch.full((n,), tt1, dtype=torch.float64))
                     t2.append(torch.full((n,), tt2, dtype=torch.float64))
                     pd.append(torch.full((n,), w, dtype=torch.float64))
@@ -261,8 +287,12 @@ class Bench:
             img = m.real_images()
             radii = [sphere_radius(img, r) for r in self.rois]
             t1, t2 = m.T1_REF["v2"], m.T2_REF["v2"]
-            self.seqs = [reduced(coarsen_rf(read_pulseq(m.DATA / "acq" / f"irse_T1_TI{ti}.seq").to(dtype=torch.float32), 4), 4, 128)
-                         for ti in m.TI]
+            self.seqs = [
+                reduced(
+                    coarsen_rf(read_pulseq(m.DATA / "acq" / f"irse_T1_TI{ti}.seq").to(dtype=torch.float32), 4), 4, 128
+                )
+                for ti in m.TI
+            ]
             x0 = slice_position(m.DATA / "acq" / f"irse_T1_TI{m.TI[0]}.seq")
         else:
             import nist_tse as m
@@ -284,7 +314,9 @@ class Bench:
         ph = self.cols.phantom
         if theta is not None:
             ph = replace(ph, b1=b1_field(ph.pos, theta).to(ph.pd.dtype))
-        return torch.cat([curves(sim, self.cols, played(s, delays), p, len(self.rois), phantom=ph) for s, p in self.seqs])
+        return torch.cat(
+            [curves(sim, self.cols, played(s, delays), p, len(self.rois), phantom=ph) for s, p in self.seqs]
+        )
 
 
 def shape_loss(sim_curves: torch.Tensor, real: np.ndarray, spheres) -> torch.Tensor:
@@ -322,8 +354,9 @@ def fit(bench: Bench, start=(0.9, 0.0, 0.0, 0.0, 0.0), max_iter=40, log=print) -
     Start off s = 1: inversion and refocusing are nearly symmetric in B1+ about 1, so the gradient
     vanishes there. Returns theta, the loss history and the fitted curves."""
     theta = torch.tensor(start, dtype=torch.float64, requires_grad=True)
-    opt = torch.optim.LBFGS([theta], lr=1, max_iter=max_iter, line_search_fn="strong_wolfe", tolerance_grad=1e-9,
-                            tolerance_change=1e-12)
+    opt = torch.optim.LBFGS(
+        [theta], lr=1, max_iter=max_iter, line_search_fn="strong_wolfe", tolerance_grad=1e-9, tolerance_change=1e-12
+    )
     hist = []
 
     def closure():
@@ -362,7 +395,11 @@ def fits(out: str):
                 row[other] = e.tolist()
                 tag = "fitted" if other == name else "PREDICTED"
                 print(f"    {tag} {other}: 1-10 {100 * e[:10].mean():.2f} %  {100 * e}", flush=True)
-            pos = [ob.cols.phantom.pos[ob.cols.column == c][0] for ob in benches.values() for c in range(0, len(ob.cols.sphere))]
+            pos = [
+                ob.cols.phantom.pos[ob.cols.column == c][0]
+                for ob in benches.values()
+                for c in range(0, len(ob.cols.sphere))
+            ]
             b1 = b1_field(torch.stack(pos).double(), th).numpy()
             print(f"    B1+ at the sphere columns: irse {b1[:14].round(3)}  tse {b1[14:].round(3)}", flush=True)
             res[f"{name}@{s0}"] = row
@@ -375,6 +412,7 @@ def fits(out: str):
 @dataclass
 class Physics:
     """What the full model includes; the ablation rows switch one thing at a time."""
+
     theta: tuple | None = None  # B1+ model; None: B1+ = 1
     fill: bool = True  # the water around the spheres (1 mm walls)
     slice_profile: bool = True  # False: spins of the nominal slice only, all at its centre (ideal slab)
@@ -419,8 +457,10 @@ class Full:
             self.img = m.real_images()
             self.radii = [sphere_radius(self.img, r) for r in self.rois]
             self.t1, self.t2 = m.T1_REF["v2"], m.T2_REF["v2"]
-            self.seqs = [coarsen_rf(read_pulseq(m.DATA / "acq" / f"irse_T1_TI{ti}.seq").to(dtype=torch.float32), 4)
-                         for ti in m.TI]
+            self.seqs = [
+                coarsen_rf(read_pulseq(m.DATA / "acq" / f"irse_T1_TI{ti}.seq").to(dtype=torch.float32), 4)
+                for ti in m.TI
+            ]
             self.x0 = slice_position(m.DATA / "acq" / f"irse_T1_TI{m.TI[0]}.seq")
             self.m0_image = self.img[-1]  # TI 3000 ms
         else:
@@ -445,9 +485,22 @@ class Full:
         r_in = self.radii[0] if self.name == "tse" else self.radii
         phs = [phantom_qmc(self.rois, self.radii, self.t1, self.t2, self.x0, n=self.n, seed=seed)]
         if phys.fill:
-            phs.append(fill_phantom_qmc(self.rois, self.water_mask, r_in, self.wall, self.x0, margin=self.margin * PIXEL,
-                                        t1_ms=WATER_T1 * 1e3, t2_ms=WATER_T2 * 1e3, n=self.n, dense=self.dense * PIXEL,
-                                        sparse=self.sparse, seed=seed))
+            phs.append(
+                fill_phantom_qmc(
+                    self.rois,
+                    self.water_mask,
+                    r_in,
+                    self.wall,
+                    self.x0,
+                    margin=self.margin * PIXEL,
+                    t1_ms=WATER_T1 * 1e3,
+                    t2_ms=WATER_T2 * 1e3,
+                    n=self.n,
+                    dense=self.dense * PIXEL,
+                    sparse=self.sparse,
+                    seed=seed,
+                )
+            )
         out = []
         for ph in phs:
             if not phys.slice_profile:  # an ideal slab: the nominal slice's spins, at its centre
@@ -456,7 +509,9 @@ class Full:
                 pos[:, 0] = self.x0
                 ph = bp.Phantom(pos, ph.pd[keep], ph.t1[keep], ph.t2[keep], ph.db0[keep])
             if phys.theta is not None:
-                ph = replace(ph, b1=b1_field(ph.pos.double(), torch.as_tensor(phys.theta, dtype=torch.float64)).to(ph.pd.dtype))
+                ph = replace(
+                    ph, b1=b1_field(ph.pos.double(), torch.as_tensor(phys.theta, dtype=torch.float64)).to(ph.pd.dtype)
+                )
             out.append(ph)
         return out
 
@@ -489,8 +544,10 @@ class Full:
             else:
                 out.append(self.m.sim_complex_images(sum(simulate_metal(ph, seqs[0], **kw).signal for ph in phs)))
             gpu.empty_cache()  # long runs on a 16 GB machine: give cached GPU buffers back between seeds
-            log(f"    seed {k}: {' + '.join(str(len(p)) for p in phs)} spins, {time.perf_counter() - t0:.0f} s, "
-                f"GPU driver memory {torch.mps.driver_allocated_memory() / 2**30:.1f} GB")
+            log(
+                f"    seed {k}: {' + '.join(str(len(p)) for p in phs)} spins, {time.perf_counter() - t0:.0f} s, "
+                f"GPU driver memory {torch.mps.driver_allocated_memory() / 2**30:.1f} GB"
+            )
         return np.array(out)
 
 
@@ -510,8 +567,15 @@ def scores(full: Full, imgs: np.ndarray) -> dict:
 
     ab, ab_se = jackknife(absolute, imgs)
     abr, abr_se = jackknife(lambda x: absolute(x, prof), imgs)
-    return {"shape": float(sh.mean10), "shape_se": float(sh.mean10_se), "per_sphere": sh.err.tolist(),
-            "abs": float(ab), "abs_se": float(ab_se), "abs_rx": float(abr), "abs_rx_se": float(abr_se)}
+    return {
+        "shape": float(sh.mean10),
+        "shape_se": float(sh.mean10_se),
+        "per_sphere": sh.err.tolist(),
+        "abs": float(ab),
+        "abs_se": float(ab_se),
+        "abs_rx": float(abr),
+        "abs_rx_se": float(abr_se),
+    }
 
 
 def predict(fits_json: str, key: str, target: str, out: str, seeds: str = "4"):
@@ -525,11 +589,14 @@ def predict(fits_json: str, key: str, target: str, out: str, seeds: str = "4"):
     theta = tuple(json.loads(Path(fits_json).read_text())[key]["theta"])
     full = Full(target)
     fill = target == "tse"  # benchmark 1's water fill changed nothing significant (RESULTS.md) at 7x the spins
-    rows = [("nothing fitted (B1+ = 1)", Physics(fill=fill)), (f"twin: B1+ fitted on {key}", Physics(theta=theta, fill=fill)),
-            ("twin, no water fill" if fill else "twin + water fill", Physics(theta=theta, fill=not fill)),
-            ("twin, ideal slab (no slice profile)", Physics(theta=theta, fill=fill, slice_profile=False)),
-            ("twin + concomitant fields (3 T)", Physics(theta=theta, fill=fill, concomitant=True)),
-            ("twin + Prisma GIRF (benchmark 7)", Physics(theta=theta, fill=fill, girf=True))]
+    rows = [
+        ("nothing fitted (B1+ = 1)", Physics(fill=fill)),
+        (f"twin: B1+ fitted on {key}", Physics(theta=theta, fill=fill)),
+        ("twin, no water fill" if fill else "twin + water fill", Physics(theta=theta, fill=not fill)),
+        ("twin, ideal slab (no slice profile)", Physics(theta=theta, fill=fill, slice_profile=False)),
+        ("twin + concomitant fields (3 T)", Physics(theta=theta, fill=fill, concomitant=True)),
+        ("twin + Prisma GIRF (benchmark 7)", Physics(theta=theta, fill=fill, girf=True)),
+    ]
     k = int(seeds)
     results, images = [], {}
     for i, (name, phys) in enumerate(rows):
@@ -538,11 +605,15 @@ def predict(fits_json: str, key: str, target: str, out: str, seeds: str = "4"):
         images[f"imgs{i}"] = imgs
         sc = scores(full, imgs)
         results.append((name, sc))
-        print(f"  shape {100 * sc['shape']:.2f} ± {100 * sc['shape_se']:.2f} %, absolute {100 * sc['abs']:.2f} ± "
-              f"{100 * sc['abs_se']:.2f} % (receive profile {100 * sc['abs_rx']:.2f} ± {100 * sc['abs_rx_se']:.2f} %)",
-              flush=True)
-        np.savez_compressed(out, names=[r[0] for r in rows[:i + 1]], **images)
-    print(f"\n| {target}, B1+ from {key} | shape, spheres 1-10 | vs twin (paired) | absolute | absolute, receive profile |")
+        print(
+            f"  shape {100 * sc['shape']:.2f} ± {100 * sc['shape_se']:.2f} %, absolute {100 * sc['abs']:.2f} ± "
+            f"{100 * sc['abs_se']:.2f} % (receive profile {100 * sc['abs_rx']:.2f} ± {100 * sc['abs_rx_se']:.2f} %)",
+            flush=True,
+        )
+        np.savez_compressed(out, names=[r[0] for r in rows[: i + 1]], **images)
+    print(
+        f"\n| {target}, B1+ from {key} | shape, spheres 1-10 | vs twin (paired) | absolute | absolute, receive profile |"
+    )
     print("|---|---|---|---|---|")
     for i, (name, sc) in enumerate(results):
         if i == 1:
@@ -550,8 +621,10 @@ def predict(fits_json: str, key: str, target: str, out: str, seeds: str = "4"):
         else:
             dd, se = mc_paired_difference(images["imgs1"], images[f"imgs{i}"], full.rois, full.real)
             d = f"{100 * dd:+.2f} ± {100 * se:.2f}"
-        print(f"| {name} | {100 * sc['shape']:.2f} ± {100 * sc['shape_se']:.2f} % | {d} | {100 * sc['abs']:.2f} ± "
-              f"{100 * sc['abs_se']:.2f} % | {100 * sc['abs_rx']:.2f} ± {100 * sc['abs_rx_se']:.2f} % |")
+        print(
+            f"| {name} | {100 * sc['shape']:.2f} ± {100 * sc['shape_se']:.2f} % | {d} | {100 * sc['abs']:.2f} ± "
+            f"{100 * sc['abs_se']:.2f} % | {100 * sc['abs_rx']:.2f} ± {100 * sc['abs_rx_se']:.2f} % |"
+        )
     Path(out).with_suffix(".json").write_text(json.dumps({n: sc for n, sc in results}, indent=1))
 
 
@@ -566,15 +639,23 @@ def gradcheck():
         e = torch.zeros(5, dtype=torch.float64)
         e[i] = h
         with torch.no_grad():
-            fd = (shape_loss(b.curves(theta + e), b.real, FIT_SPHERES) - shape_loss(b.curves(theta - e), b.real, FIT_SPHERES)) / (2 * h)
-        print(f"  d/dtheta[{i}]: adjoint {float(g[i]):+.5e}  central difference {float(fd):+.5e}  rel {abs(float(g[i] - fd)) / abs(float(fd)):.1e}")
+            fd = (
+                shape_loss(b.curves(theta + e), b.real, FIT_SPHERES)
+                - shape_loss(b.curves(theta - e), b.real, FIT_SPHERES)
+            ) / (2 * h)
+        print(
+            f"  d/dtheta[{i}]: adjoint {float(g[i]):+.5e}  central difference {float(fd):+.5e}  rel {abs(float(g[i] - fd)) / abs(float(fd)):.1e}"
+        )
 
 
 # ---------------------------------------------------------------- check against the full model
 
 
-VARIANTS = [("centre, no water ", dict(water=None)), ("3x3 grid, no water", dict(water=None, grid=3, sub_read=8, n_slice=64)),
-            ("3x3 grid, water   ", dict(grid=3, sub_read=8, n_slice=64))]
+VARIANTS = [
+    ("centre, no water ", dict(water=None)),
+    ("3x3 grid, no water", dict(water=None, grid=3, sub_read=8, n_slice=64)),
+    ("3x3 grid, water   ", dict(grid=3, sub_read=8, n_slice=64)),
+]
 
 
 def check():
@@ -600,7 +681,9 @@ def check():
     for name, kw in VARIANTS:
         cols = columns(rois, radii, b2.T1_REF, b2.T2_REF, x0, **kw)
         red_c = curves(simulate_metal, cols, red, pairs, 14).double().numpy()
-        print(f"  {name}: vs data {100 * shape_error(red_c, real)}\n  {' ' * len(name)}  vs full {100 * shape_error(red_c, full_c)}")
+        print(
+            f"  {name}: vs data {100 * shape_error(red_c, real)}\n  {' ' * len(name)}  vs full {100 * shape_error(red_c, full_c)}"
+        )
     # benchmark 1
     rois = b1.sphere_rois()
     real_img = b1.real_images()
@@ -620,7 +703,9 @@ def check():
     for name, kw in VARIANTS:
         cols = columns(rois, radii, t1, t2, x0, **kw)
         red_c = np.concatenate([curves(simulate_metal, cols, s, p, 14).double().numpy() for s, p in reds])
-        print(f"  {name}: vs data {100 * shape_error(red_c, real)}\n  {' ' * len(name)}  vs full {100 * shape_error(red_c, full_c)}")
+        print(
+            f"  {name}: vs data {100 * shape_error(red_c, real)}\n  {' ' * len(name)}  vs full {100 * shape_error(red_c, full_c)}"
+        )
 
 
 if __name__ == "__main__":

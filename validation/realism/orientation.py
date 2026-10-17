@@ -14,6 +14,7 @@ affines, consistent with the T1s registered to MNI by validation/anatomy/prepare
 the head posterior up. The simulated slices (to_real_orientation before the fix) preferred the template
 as-is, i.e. were shown anterior up.
 """
+
 import argparse
 import json
 from pathlib import Path
@@ -27,12 +28,12 @@ from scipy import ndimage
 IXI = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "ixi" / "T2"
 N = 64
 _yy, _xx = np.mgrid[:N, :N]
-ELLIPSE = ((_yy - N / 2 + .5) ** 2 + (_xx - N / 2 + .5) ** 2) <= (N / 2 * .7) ** 2
+ELLIPSE = ((_yy - N / 2 + 0.5) ** 2 + (_xx - N / 2 + 0.5) ** 2) <= (N / 2 * 0.7) ** 2
 
 
 def head_mask(img):
     """The head: above 12 % of the 99th percentile, opened once, holes filled, the largest piece."""
-    m = ndimage.binary_fill_holes(ndimage.binary_opening(img > .12 * np.percentile(img, 99), iterations=1))
+    m = ndimage.binary_fill_holes(ndimage.binary_opening(img > 0.12 * np.percentile(img, 99), iterations=1))
     lab, _ = ndimage.label(m)
     return lab == np.argmax(np.bincount(lab.ravel())[1:]) + 1
 
@@ -40,7 +41,7 @@ def head_mask(img):
 def standardised(img):
     m = head_mask(img)
     r, c = np.nonzero(m.any(1))[0], np.nonzero(m.any(0))[0]
-    box = img[r.min():r.max() + 1, c.min():c.max() + 1]
+    box = img[r.min() : r.max() + 1, c.min() : c.max() + 1]
     v = ndimage.zoom(box, (N / box.shape[0], N / box.shape[1]), order=1)[:N, :N][ELLIPSE]
     return (v - v.mean()) / v.std()
 
@@ -49,20 +50,21 @@ def width_peak(img):
     """Fraction of the head's length from the top row at which its (smoothed) width peaks."""
     m = head_mask(img)
     rows = np.nonzero(m.any(1))[0]
-    w = ndimage.uniform_filter1d(m.sum(1).astype(float), 5)[rows.min():rows.max() + 1]
+    w = ndimage.uniform_filter1d(m.sum(1).astype(float), 5)[rows.min() : rows.max() + 1]
     return np.argmax(w) / (len(w) - 1)
 
 
 def ixi_slices(count=30):
     """IXI axial T2 slices 45-75 mm below the head top, anterior up, at the volume's in-plane spacing."""
     import nibabel as nib
+
     out = []
     for f in sorted(IXI.glob("*-HH-*.nii.gz"))[:count]:
         img = nib.as_closest_canonical(nib.load(f))
         v, z = img.get_fdata(dtype=np.float32), img.header.get_zooms()
         if z[2] > 2:  # a few volumes are 5 mm thick
             continue
-        inside = v > .1 * np.percentile(v, 99)
+        inside = v > 0.1 * np.percentile(v, 99)
         top = np.nonzero(inside.sum((0, 1)) * z[0] * z[1] > 2000)[0].max()
         for depth in (75, 65, 55, 45):  # (x, y) RAS -> rows anterior first, isotropic
             sl = v[:, :, int(round(top - depth / z[2]))].T[::-1]
@@ -80,10 +82,12 @@ def report(name, items, template):
     for person, im in items:
         peaks.setdefault(person, []).append(width_peak(im))
     med = sorted(float(np.median(v)) for v in peaks.values())
-    up = "posterior" if np.mean(r[:, 1] > r[:, 0]) > .5 else "anterior"
-    print(f"{name}: {len(r)} slices, r {r[:, 0].mean():.3f} anterior up / {r[:, 1].mean():.3f} posterior up "
-          f"(posterior up better in {np.mean(r[:, 1] > r[:, 0]) * 100:.0f} %): {up} up; width peak "
-          f"{med[0]:.2f}-{med[-1]:.2f} of the length from the top row (median {np.median(med):.2f}, {len(med)} people)")
+    up = "posterior" if np.mean(r[:, 1] > r[:, 0]) > 0.5 else "anterior"
+    print(
+        f"{name}: {len(r)} slices, r {r[:, 0].mean():.3f} anterior up / {r[:, 1].mean():.3f} posterior up "
+        f"(posterior up better in {np.mean(r[:, 1] > r[:, 0]) * 100:.0f} %): {up} up; width peak "
+        f"{med[0]:.2f}-{med[-1]:.2f} of the length from the top row (median {np.median(med):.2f}, {len(med)} people)"
+    )
 
 
 def main():
@@ -104,8 +108,11 @@ def main():
         for f in sorted(args.sim.glob("sim_*.npz")):
             d = np.load(f)
             meta = json.loads(str(d["meta"]))
-            sims += [(f.stem, R.normalise(SH.to_real_orientation(R.recon(d[f"slice{s:02d}"].astype(np.complex128)))))
-                     for s in range(lo, hi + 1) if f"slice{s:02d}" in d]
+            sims += [
+                (f.stem, R.normalise(SH.to_real_orientation(R.recon(d[f"slice{s:02d}"].astype(np.complex128)))))
+                for s in range(lo, hi + 1)
+                if f"slice{s:02d}" in d
+            ]
         report(f"simulated ({args.sim.name}, {meta.get('source', 'brainweb')})", sims, template)
 
 

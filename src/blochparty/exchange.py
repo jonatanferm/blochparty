@@ -127,7 +127,10 @@ def _sl_table(dtype, device):
     if key not in _SL_TABLE:
         lx = np.linspace(math.log(_SL_XMIN), math.log(_SL_XMAX), _SL_N)
         log_f = np.log(np.maximum(_sl_integral(np.exp(lx)), 1e-300))  # in float64: finite in float32 too
-        _SL_TABLE[key] = (torch.as_tensor(lx, dtype=dtype, device=device), torch.as_tensor(log_f, dtype=dtype, device=device))
+        _SL_TABLE[key] = (
+            torch.as_tensor(lx, dtype=dtype, device=device),
+            torch.as_tensor(log_f, dtype=dtype, device=device),
+        )
     return _SL_TABLE[key]
 
 
@@ -232,8 +235,9 @@ def z_exchange(mz: Tensor, mb: Tensor, t, pd: Tensor, r1: Tensor, pool: BoundPoo
     lo = torch.exp((m - q) * t)
     e2q = torch.expm1(torch.where(small, 2 * q * t, torch.zeros_like(q)))
     qs = torch.where(q > 0, q, torch.ones_like(q))
-    sh = torch.where(small, torch.where(q > 0, lo * 0.5 * e2q / qs, t * torch.exp(m * t)),
-                     0.5 * (torch.exp((m + q) * t) - lo) / qs)  # e^{mt} sinh(qt)/q
+    sh = torch.where(
+        small, torch.where(q > 0, lo * 0.5 * e2q / qs, t * torch.exp(m * t)), 0.5 * (torch.exp((m + q) * t) - lo) / qs
+    )  # e^{mt} sinh(qt)/q
     d1, d2 = mz - z1, mb - z2
     n1 = chm1 * d1 + sh * (h * d1 + a12 * d2)
     n2 = chm1 * d2 + sh * (a21 * d1 - h * d2)
@@ -333,7 +337,6 @@ def _bm_matrix(rf, bz, b1, spins, pools, bound, w_sat, modes=None):
                 A[:, zb, a] += wy  # dMzb/dt = wy Re S - wx Im S
                 A[:, zb, b] -= wx
     return A
-
 
 
 def pool_modes(pool: BoundPool, like: Tensor) -> tuple[Tensor, Tensor]:

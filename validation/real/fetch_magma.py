@@ -13,8 +13,10 @@ from pathlib import Path
 
 RECORD = "https://zenodo.org/api/records/15053086"
 LIBRARY = "https://raw.githubusercontent.com/kherz/pulseq-cest-library/0bd96f5a3ccbf30897417afee9eab32d15e3242b"
-SEQS = ("seq-library/APTw_3T_001_2uT_36SincGauss_DC90_2s_braintumor/APTw_3T_001_2uT_36SincGauss_DC90_2s_braintumor.seq",
-        "seq-library/WASABI_3T_001_3p7uT_1block_5ms/WASABI_3T_001_3p7uT_1block_5ms.seq")
+SEQS = (
+    "seq-library/APTw_3T_001_2uT_36SincGauss_DC90_2s_braintumor/APTw_3T_001_2uT_36SincGauss_DC90_2s_braintumor.seq",
+    "seq-library/WASABI_3T_001_3p7uT_1block_5ms/WASABI_3T_001_3p7uT_1block_5ms.seq",
+)
 OUT = Path(__file__).with_name("data") / "magma"
 
 

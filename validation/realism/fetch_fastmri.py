@@ -19,6 +19,7 @@ it. Data stay outside the repository (no redistribution; fastMRI data-sharing ag
 Since 2026-10-14 the kept form is compact: ``--compact 128 --min-field 2`` stores each 3 T volume's central 128 x 128
 coil k-space per slice (~40 MB) and deletes the raw file; the cap still counts the raw bytes taken from the archive.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -55,14 +56,26 @@ def describe(path: Path) -> dict:
     h = ismrmrd.xsd.CreateFromDocument(xml)
     sys, seq, enc = h.acquisitionSystemInformation, h.sequenceParameters, h.encoding[0]
     first = lambda v: float(v[0]) if v else None
-    return {"kspace_shape": shape, "field_T": sys.systemFieldStrength_T, "model": sys.systemModel,
-            "vendor": sys.systemVendor, "protocol": h.measurementInformation.protocolName
-            if h.measurementInformation else None, "TR_ms": first(seq.TR), "TE_ms": first(seq.TE),
-            "TI_ms": first(seq.TI), "flip_deg": first(seq.flipAngle_deg), "echo_spacing_ms": first(seq.echo_spacing),
-            "encoded": [enc.encodedSpace.matrixSize.x, enc.encodedSpace.matrixSize.y],
-            "recon": [enc.reconSpace.matrixSize.x, enc.reconSpace.matrixSize.y],
-            "fov_mm": [enc.encodedSpace.fieldOfView_mm.x, enc.encodedSpace.fieldOfView_mm.y,
-                       enc.encodedSpace.fieldOfView_mm.z], "attrs": attrs}
+    return {
+        "kspace_shape": shape,
+        "field_T": sys.systemFieldStrength_T,
+        "model": sys.systemModel,
+        "vendor": sys.systemVendor,
+        "protocol": h.measurementInformation.protocolName if h.measurementInformation else None,
+        "TR_ms": first(seq.TR),
+        "TE_ms": first(seq.TE),
+        "TI_ms": first(seq.TI),
+        "flip_deg": first(seq.flipAngle_deg),
+        "echo_spacing_ms": first(seq.echo_spacing),
+        "encoded": [enc.encodedSpace.matrixSize.x, enc.encodedSpace.matrixSize.y],
+        "recon": [enc.reconSpace.matrixSize.x, enc.reconSpace.matrixSize.y],
+        "fov_mm": [
+            enc.encodedSpace.fieldOfView_mm.x,
+            enc.encodedSpace.fieldOfView_mm.y,
+            enc.encodedSpace.fieldOfView_mm.z,
+        ],
+        "attrs": attrs,
+    }
 
 
 def main():
@@ -71,11 +84,20 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--cap", action="append", default=[], help="CONTRAST=GB, e.g. AXT2=15 (repeatable)")
     ap.add_argument("--min-free", type=float, default=30.0, help="stop when free disk falls below this [GB]")
-    ap.add_argument("--compact", type=int, default=None,
-                    help="keep each volume as its central N x N coil k-space per slice (realism.coil_kspace) in a .npz "
-                         "and delete the raw file: ~40 MB a scan instead of ~500 (the realism score and the transfer "
-                         "test use nothing else)")
-    ap.add_argument("--min-field", type=float, default=None, help="drop volumes below this field strength [T] after reading their header")
+    ap.add_argument(
+        "--compact",
+        type=int,
+        default=None,
+        help="keep each volume as its central N x N coil k-space per slice (realism.coil_kspace) in a .npz "
+        "and delete the raw file: ~40 MB a scan instead of ~500 (the realism score and the transfer "
+        "test use nothing else)",
+    )
+    ap.add_argument(
+        "--min-field",
+        type=float,
+        default=None,
+        help="drop volumes below this field strength [T] after reading their header",
+    )
     args = ap.parse_args()
     if args.compact:
         import realism as R
@@ -102,8 +124,10 @@ def main():
                     break
                 name = Path(member.name).name
                 dest = args.out / name
-                if name in manifest and ((dest.exists() and dest.stat().st_size == manifest[name]["bytes"])
-                                         or ("compact" in manifest[name] and (args.out / manifest[name]["compact"]).exists())):
+                if name in manifest and (
+                    (dest.exists() and dest.stat().st_size == manifest[name]["bytes"])
+                    or ("compact" in manifest[name] and (args.out / manifest[name]["compact"]).exists())
+                ):
                     continue
                 digest = hashlib.sha256()
                 part = dest.with_suffix(".part")
@@ -132,9 +156,12 @@ def main():
                 kept[kind] += member.size
                 manifest_path.write_text(json.dumps(manifest, indent=1))
                 rate = streamed / GB / max(time.time() - t0, 1e-9) * 60
-                print(f"{name}: {member.size / GB:.2f} GB, {entry.get('field_T')} T; kept "
-                      + ", ".join(f"{k} {kept[k] / GB:.1f}/{caps[k] / GB:.0f}" for k in caps)
-                      + f"; streamed {streamed / GB:.1f} GB ({rate:.1f} GB/min)", flush=True)
+                print(
+                    f"{name}: {member.size / GB:.2f} GB, {entry.get('field_T')} T; kept "
+                    + ", ".join(f"{k} {kept[k] / GB:.1f}/{caps[k] / GB:.0f}" for k in caps)
+                    + f"; streamed {streamed / GB:.1f} GB ({rate:.1f} GB/min)",
+                    flush=True,
+                )
     finally:
         curl.kill()
         curl.stdout.close()

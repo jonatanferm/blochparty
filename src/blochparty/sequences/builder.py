@@ -142,9 +142,19 @@ class ADC:
         return self.delay + self.n * self.dwell
 
 
-def trapezoid(axis: str | None = None, *, area=None, amplitude=None, flat_area=None, flat_time=None,
-              duration=None, rise_time=None, delay: float = 0.0, system: System | None = None,
-              dtype=torch.float64) -> Trapezoid:
+def trapezoid(
+    axis: str | None = None,
+    *,
+    area=None,
+    amplitude=None,
+    flat_area=None,
+    flat_time=None,
+    duration=None,
+    rise_time=None,
+    delay: float = 0.0,
+    system: System | None = None,
+    dtype=torch.float64,
+) -> Trapezoid:
     """Trapezoid on ``axis`` ("x", "y", "z"), or along a direction when the given area /
     amplitude is a 3-vector (``axis=None``). Ramps are the shortest the slew rate allows,
     on the gradient raster; with several axes the largest component sets the timing. Give
@@ -208,8 +218,10 @@ def _check_limits(g, sysm: System) -> None:
     v = v.detach()
     peak = float(v.abs().max()) if v.numel() else 0.0
     if peak > sysm.max_grad * (1 + 1e-9):
-        raise ValueError(f"gradient {peak:.6g} Hz/m exceeds max_grad {sysm.max_grad:.6g} Hz/m "
-                         f"by {100 * (peak / sysm.max_grad - 1):.3g} %")
+        raise ValueError(
+            f"gradient {peak:.6g} Hz/m exceeds max_grad {sysm.max_grad:.6g} Hz/m "
+            f"by {100 * (peak / sysm.max_grad - 1):.3g} %"
+        )
     dt = torch.as_tensor(np.diff(t), dtype=v.dtype)
     dv = (v[1:] - v[:-1]).abs().max(dim=1).values
     jump = (dt <= _T_TOL) & (dv > 0)
@@ -217,12 +229,15 @@ def _check_limits(g, sysm: System) -> None:
         raise ValueError("gradient jumps instantaneously (infinite slew rate)")
     slew = float((dv / dt.clamp_min(_T_TOL)).max()) if dt.numel() else 0.0
     if slew > sysm.max_slew * (1 + 1e-9):
-        raise ValueError(f"slew rate {slew:.6g} Hz/m/s exceeds max_slew {sysm.max_slew:.6g} Hz/m/s "
-                         f"by {100 * (slew / sysm.max_slew - 1):.3g} %")
+        raise ValueError(
+            f"slew rate {slew:.6g} Hz/m/s exceeds max_slew {sysm.max_slew:.6g} Hz/m/s "
+            f"by {100 * (slew / sysm.max_slew - 1):.3g} %"
+        )
 
 
-def gradient_waveform(samples, raster: float | None = None, *, delay: float = 0.0,
-                      system: System | None = None, dtype=torch.float64) -> GradientWaveform:
+def gradient_waveform(
+    samples, raster: float | None = None, *, delay: float = 0.0, system: System | None = None, dtype=torch.float64
+) -> GradientWaveform:
     """Arbitrary gradient: ``samples`` (k, 3) [Hz/m] are the values at ``delay + j * raster``
     (default: the gradient raster), joined linearly, so each raster interval carries the
     exact average (g_j + g_{j+1}) / 2. Start and end at zero unless the neighbouring
@@ -249,8 +264,15 @@ def _rf_steps(duration) -> int:
     return max(1, math.ceil(float(torch.as_tensor(duration).detach()) / MAX_RF_STEP - 1e-6))
 
 
-def block_pulse(flip_deg, duration: float, *, phase=0.0, system: System | None = None,
-                dtype=torch.float64, n_steps: int | None = None) -> RFPulse:
+def block_pulse(
+    flip_deg,
+    duration: float,
+    *,
+    phase=0.0,
+    system: System | None = None,
+    dtype=torch.float64,
+    n_steps: int | None = None,
+) -> RFPulse:
     """Hard (rectangular) pulse after the system's RF dead time; flip and phase [rad] may be
     tensors. ``n_steps`` segments (default: <= ``MAX_RF_STEP`` long each)."""
     sysm = system or System()
@@ -261,9 +283,18 @@ def block_pulse(flip_deg, duration: float, *, phase=0.0, system: System | None =
     return RFPulse(signal, float(duration) / n, sysm.rf_dead_time, 0.5 * duration)
 
 
-def sinc_pulse(flip_deg, duration: float, *, slice_thickness: float, time_bw_product: float = 4.0,
-               apodization: float = 0.5, slice_offset: float = 0.0, phase=0.0, system: System | None = None,
-               dtype=torch.float64) -> tuple[RFPulse, Trapezoid, Tensor]:
+def sinc_pulse(
+    flip_deg,
+    duration: float,
+    *,
+    slice_thickness: float,
+    time_bw_product: float = 4.0,
+    apodization: float = 0.5,
+    slice_offset: float = 0.0,
+    phase=0.0,
+    system: System | None = None,
+    dtype=torch.float64,
+) -> tuple[RFPulse, Trapezoid, Tensor]:
     """Windowed-sinc slice-selective pulse: (rf, slice-select gradient, rephase area (3,)).
 
     The envelope is ((1 - a) + a cos(2 pi t / T)) sinc(BW t) on |t| < T/2 with
@@ -298,8 +329,9 @@ def sinc_pulse(flip_deg, duration: float, *, slice_thickness: float, time_bw_pro
     return rf, gz, rephase
 
 
-def block_duration(*grads, rf: RFPulse | None = None, adc: ADC | list[ADC] | None = None,
-                   system: System | None = None) -> float:
+def block_duration(
+    *grads, rf: RFPulse | None = None, adc: ADC | list[ADC] | None = None, system: System | None = None
+) -> float:
     """How long ``SequenceBuilder.block`` makes a block of these events: until the last
     gradient or ADC sample ends, or the RF pulse plus the ringdown time."""
     adcs = [] if adc is None else ([adc] if isinstance(adc, ADC) else list(adc))
@@ -387,8 +419,16 @@ class SequenceBuilder:
         dt = (dur / n_steps).expand(n_steps)
         start = len(self._is_rf)
         self._append(dt, rf, self._grad3(grad, n_steps), torch.zeros_like(dt), is_rf=True, adc=False)
-        self._record(start, "rf", duration=duration, flip_deg=flip_deg, amplitude=amplitude, phase=phase, grad=grad,
-                     n_steps=n_steps)
+        self._record(
+            start,
+            "rf",
+            duration=duration,
+            flip_deg=flip_deg,
+            amplitude=amplitude,
+            phase=phase,
+            grad=grad,
+            n_steps=n_steps,
+        )
         return self
 
     def rf_waveform(self, samples, dt, grad=None):
@@ -404,8 +444,14 @@ class SequenceBuilder:
     def delay(self, duration, grad=None):
         dt = self._t(duration).reshape(1)
         start = len(self._is_rf)
-        self._append(dt, torch.zeros(1, 2, dtype=self.dtype, device=self.device),
-                     self._grad3(grad, 1), torch.zeros_like(dt), is_rf=False, adc=False)
+        self._append(
+            dt,
+            torch.zeros(1, 2, dtype=self.dtype, device=self.device),
+            self._grad3(grad, 1),
+            torch.zeros_like(dt),
+            is_rf=False,
+            adc=False,
+        )
         self._record(start, "delay", duration=duration, grad=grad)
         return self
 
@@ -421,8 +467,9 @@ class SequenceBuilder:
         self._record(start, "readout", n=n, dwell=dwell, grad=grad, phase=phase)
         return self
 
-    def block(self, *grads, rf: RFPulse | None = None, adc: ADC | list[ADC] | None = None,
-              duration: float | None = None):
+    def block(
+        self, *grads, rf: RFPulse | None = None, adc: ADC | list[ADC] | None = None, duration: float | None = None
+    ):
         """Events played together, like a Pulseq block: any number of gradients
         (``Trapezoid`` / ``GradientWaveform``, summed where they overlap), at most one RF
         pulse and any number of ADC events. The block lasts until its last event ends (RF
@@ -432,8 +479,10 @@ class SequenceBuilder:
         sysm = self.system
         adcs = [] if adc is None else ([adc] if isinstance(adc, ADC) else list(adc))
         if rf is not None and rf.delay < sysm.rf_dead_time - _T_TOL:
-            raise ValueError(f"RF starts {rf.delay * 1e6:.4g} us into the block, before the dead time "
-                             f"({sysm.rf_dead_time * 1e6:.4g} us)")
+            raise ValueError(
+                f"RF starts {rf.delay * 1e6:.4g} us into the block, before the dead time "
+                f"({sysm.rf_dead_time * 1e6:.4g} us)"
+            )
         end = block_duration(*grads, rf=rf, adc=adcs, system=sysm)
         if duration is not None:
             if duration < end - _T_TOL:
@@ -498,8 +547,9 @@ class SequenceBuilder:
     def sinc_pulse(self, flip_deg, duration: float, *, slice_thickness: float, rephase: bool = True, **kwargs):
         """Append a slice-selective windowed-sinc excitation (pulse + slice-select gradient)
         and, with ``rephase``, its shortest rephasing lobe; options as for ``sinc_pulse()``."""
-        rf, gz, reph = sinc_pulse(flip_deg, duration, slice_thickness=slice_thickness, system=self.system,
-                                  dtype=self.dtype, **kwargs)
+        rf, gz, reph = sinc_pulse(
+            flip_deg, duration, slice_thickness=slice_thickness, system=self.system, dtype=self.dtype, **kwargs
+        )
         self.block(gz, rf=rf)
         return self.block(trapezoid(area=reph, system=self.system, dtype=self.dtype)) if rephase else self
 

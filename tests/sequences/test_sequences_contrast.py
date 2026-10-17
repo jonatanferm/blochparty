@@ -41,8 +41,10 @@ def test_rf_and_gradient_spoiled_gre_matches_epg():
     t1, t2, tr, flip = 0.5, 0.05, 10e-3, 15.0
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, spoiling="rf", ramps=True, n_dummy=n_dummy)
     epg = epg_spoiled_gre(t1, t2, tr, seq.meta["te"], flip, n_dummy + n, 117.0)[n_dummy:]
-    err = {k: (echoes(line_of_spins(k, fov / n, t1, t2, 0), seq, n) - epg).abs().max().item()
-           for k in (32, 64, 128, 256, 512)}
+    err = {
+        k: (echoes(line_of_spins(k, fov / n, t1, t2, 0), seq, n) - epg).abs().max().item()
+        for k in (32, 64, 128, 256, 512)
+    }
     assert err[32] > err[64] > err[128] > 1e-9
     assert err[256] < 1e-14 and err[512] < 1e-14
 
@@ -53,8 +55,9 @@ def test_gradient_spoiled_gre_matches_epg():
     t1, t2, tr, flip = 0.5, 0.05, 10e-3, 15.0
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, spoiling="gradient", spoiler_cycles=1.0, n_dummy=n_dummy)
     epg = epg_spoiled_gre(t1, t2, tr, seq.meta["te"], flip, n_dummy + n, None)[n_dummy:]
-    err = {k: (echoes(line_of_spins(k, fov / n, t1, t2, 0), seq, n) - epg).abs().max().item()
-           for k in (16, 32, 64, 128)}
+    err = {
+        k: (echoes(line_of_spins(k, fov / n, t1, t2, 0), seq, n) - epg).abs().max().item() for k in (16, 32, 64, 128)
+    }
     assert err[16] > err[32] > 1e-7 and err[64] < 1e-14 and err[128] < 1e-14
 
 
@@ -69,8 +72,10 @@ def test_tse_echo_train_matches_cpmg_epg():
     for flips in ([180.0] * 8, [120.0] * 8, [150.0, 90.0, 110.0, 130.0, 60.0, 170.0, 100.0, 140.0]):
         seq = tse_2d(n, fov, etl=8, refocus_flip_deg=flips, crusher_cycles=1.0)
         epg = epg_cpmg(t1, t2, seq.meta["esp"], flips)
-        err = {k: (echoes(line_of_spins(k, fov / n, t1, t2, 2), seq, n) - epg).abs().max().item()
-               for k in (4, 8, 16, 17, 32)}
+        err = {
+            k: (echoes(line_of_spins(k, fov / n, t1, t2, 2), seq, n) - epg).abs().max().item()
+            for k in (4, 8, 16, 17, 32)
+        }
         if flips[0] == 180.0:  # perfect refocusing: nothing to alias, any K
             assert max(err.values()) < 1e-14
             assert torch.allclose(epg.abs(), torch.exp(-torch.arange(1, 9, dtype=f64) * seq.meta["esp"] / t2))
@@ -120,8 +125,9 @@ def test_bssfp_alpha_half_preparation_matches_epg():
         state = epg_relax(state, tr / 2, t1, t2)
     s = echoes(line_of_spins(1, 0.0, t1, t2, 0), seq, n)
     assert (s - torch.stack(ref)).abs().max() < 1e-7
-    no_prep = echoes(line_of_spins(1, 0.0, t1, t2, 0), bssfp_2d(n, 0.2, flip_deg=flip, tr=tr, rf_duration=1e-9,
-                                                                  prep=False), n)
+    no_prep = echoes(
+        line_of_spins(1, 0.0, t1, t2, 0), bssfp_2d(n, 0.2, flip_deg=flip, tr=tr, rf_duration=1e-9, prep=False), n
+    )
     jitter = lambda x: x.abs().diff().abs().max()
     assert jitter(s) < 0.05 * jitter(no_prep)
 
@@ -161,8 +167,9 @@ def test_epi_off_resonance_shifts_along_phase_encode():
     seq = epi_2d(n, fov)
     df = 2 * seq.meta["bandwidth_per_pixel_pe"]
     assert df / bp.readout_bandwidth_per_pixel(seq) < 0.02
-    phantom = lambda off: bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], fov,
-                                               db0=torch.full_like(maps["pd"], off))
+    phantom = lambda off: bp.phantom_from_maps(
+        maps["pd"], maps["t1"], maps["t2"], fov, db0=torch.full_like(maps["pd"], off)
+    )
     recon = lambda p: cartesian_recon(bp.simulate(p, seq).signal, seq)[0].abs()
     img, ref = recon(phantom(df)), recon(phantom(0.0))
     err = lambda shift: ((img - ref.roll(shift, dims=-2)).norm() / ref.norm()).item()
@@ -185,8 +192,9 @@ def test_autograd_through_realistic_builders():
         return project(tse_2d(4, 0.2, etl=4, refocus_flip_deg=list(flips.unbind()), tr=0.05))
 
     def gre(flip):
-        return project(bp.gre_2d(4, 0.2, flip_deg=flip, spoiling="rf", ramps=True, slice_thickness=5e-3,
-                                 rf_duration=0.5e-3))
+        return project(
+            bp.gre_2d(4, 0.2, flip_deg=flip, spoiling="rf", ramps=True, slice_thickness=5e-3, rf_duration=0.5e-3)
+        )
 
     flips = torch.tensor([150.0, 120.0, 135.0, 170.0], dtype=f64, requires_grad=True)
     assert torch.autograd.gradcheck(tse, [flips])

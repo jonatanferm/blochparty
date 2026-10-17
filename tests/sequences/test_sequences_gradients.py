@@ -70,15 +70,18 @@ def grid_k(n, fov, index=None):
 # --- trapezoids and limits ------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kw", [
-    dict(axis="x", area=50.0),  # triangle
-    dict(axis="y", area=-2000.0),  # trapezoid at max_grad
-    dict(axis="z", area=300.0, duration=1.5e-3),
-    dict(axis="x", flat_area=290.9, flat_time=640e-6),
-    dict(axis="x", amplitude=-4e5, flat_time=1e-4),
-    dict(axis=None, area=(120.0, -45.0, 7.5)),
-    dict(axis=None, area=(0.0, 333.0, -1000.0), duration=2e-3),
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(axis="x", area=50.0),  # triangle
+        dict(axis="y", area=-2000.0),  # trapezoid at max_grad
+        dict(axis="z", area=300.0, duration=1.5e-3),
+        dict(axis="x", flat_area=290.9, flat_time=640e-6),
+        dict(axis="x", amplitude=-4e5, flat_time=1e-4),
+        dict(axis=None, area=(120.0, -45.0, 7.5)),
+        dict(axis=None, area=(0.0, 333.0, -1000.0), duration=2e-3),
+    ],
+)
 def test_trapezoid_area_limits_and_segments(kw):
     axis = kw.pop("axis")
     g = trapezoid(axis, **kw)
@@ -87,7 +90,9 @@ def test_trapezoid_area_limits_and_segments(kw):
     for t in (g.rise, g.flat if "duration" not in kw else g.rise, g.duration):  # on the gradient raster
         assert abs(t / SYS.grad_raster - round(t / SYS.grad_raster)) < 1e-9
     if "area" in kw:
-        assert torch.allclose(g.area, torch.as_tensor(bp.sequences.builder._vector(kw["area"], axis, torch.float64)), atol=1e-9)
+        assert torch.allclose(
+            g.area, torch.as_tensor(bp.sequences.builder._vector(kw["area"], axis, torch.float64)), atol=1e-9
+        )
     if "duration" in kw:
         assert abs(g.duration - kw["duration"]) < 1e-15
     # appended as segments: the total moment is the area, every ramp piece one raster step
@@ -136,8 +141,14 @@ def test_gradient_waveform_and_adc_moments_exact():
     # a smooth arbitrary waveform on all three axes, ADC samples off the raster: the moment
     # at each sample equals the integral of the piecewise-linear waveform
     t = np.arange(41) * SYS.grad_raster
-    w = np.stack([3e5 * np.sin(np.pi * t / t[-1]) ** 2, 2e5 * np.sin(2 * np.pi * t / t[-1]),
-                  -1e5 * np.sin(np.pi * t / t[-1]) ** 3], -1)
+    w = np.stack(
+        [
+            3e5 * np.sin(np.pi * t / t[-1]) ** 2,
+            2e5 * np.sin(2 * np.pi * t / t[-1]),
+            -1e5 * np.sin(np.pi * t / t[-1]) ** 3,
+        ],
+        -1,
+    )
     adc = ADC(23, 17e-6, delay=3e-6)
     seq = SequenceBuilder().block(gradient_waveform(w), adc=adc).build()
     k = moments(seq)[torch.tensor(seq.adc)].numpy()
@@ -151,27 +162,36 @@ def test_gradient_waveform_and_adc_moments_exact():
     a = ADC(9, 13e-6, delay=1e-6)
     seq = SequenceBuilder().block(g, adc=a).build()
     amp, r = 4e5, g.rise
-    kx = [amp * s * s / (2 * r) if s < r else amp * r / 2 + amp * (s - r) if s < r + g.flat else
-          amp * (r / 2 + g.flat) + amp * (s - r - g.flat) - amp * (s - r - g.flat) ** 2 / (2 * r) for s in a.times]
+    kx = [
+        amp * s * s / (2 * r)
+        if s < r
+        else amp * r / 2 + amp * (s - r)
+        if s < r + g.flat
+        else amp * (r / 2 + g.flat) + amp * (s - r - g.flat) - amp * (s - r - g.flat) ** 2 / (2 * r)
+        for s in a.times
+    ]
     assert np.abs(moments(seq)[torch.tensor(seq.adc), 0].numpy() - kx).max() < 1e-9
 
 
 # --- k-space of the builders --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("kw", [
-    dict(ramps=True),
-    dict(ramps=True, spoiling="rf", n_dummy=2),
-    dict(spoiling="gradient", te=2.5e-3),
-    dict(ramps=True, slice_thickness=5e-3, slice_offset=2e-3, spoiling="rf"),
-])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(ramps=True),
+        dict(ramps=True, spoiling="rf", n_dummy=2),
+        dict(spoiling="gradient", te=2.5e-3),
+        dict(ramps=True, slice_thickness=5e-3, slice_offset=2e-3, spoiling="rf"),
+    ],
+)
 def test_gre_kspace_and_per_tr_moment(kw):
     n, fov = 16, 0.22
     seq = bp.gre_2d(n, fov, **kw)
     k = k_at_adc(seq)
     assert (k - grid_k(n, fov)).abs().max() < 1e-9
     # TE: from the pulse centre to the k = 0 sample; TR between pulse centres
-    tc = rf_centres(seq)[kw.get("n_dummy", 0):]
+    tc = rf_centres(seq)[kw.get("n_dummy", 0) :]
     t_adc = torch.cumsum(seq.dt, 0)[torch.tensor(seq.adc)].reshape(n, n)
     assert (t_adc[:, n // 2] - tc - seq.meta["te"]).abs().max() < 1e-12
     assert (tc.diff() - seq.meta["tr"]).abs().max() < 1e-12
@@ -203,9 +223,15 @@ def test_bssfp_balanced_and_kspace(kw):
     assert (t_adc[:, n // 2] - tc[first:] - seq.meta["tr"] / 2).abs().max() < 1e-12  # TE = TR / 2
 
 
-@pytest.mark.parametrize("kw", [dict(etl=4), dict(etl=8, ordering="centric", slice_thickness=5e-3),
-                                dict(etl=4, ordering="reverse_centric"),
-                                dict(etl=16, ramps=False, refocus_flip_deg=140.0)])
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(etl=4),
+        dict(etl=8, ordering="centric", slice_thickness=5e-3),
+        dict(etl=4, ordering="reverse_centric"),
+        dict(etl=16, ramps=False, refocus_flip_deg=140.0),
+    ],
+)
 def test_tse_kspace_and_echo_times(kw):
     n, fov = 16, 0.22
     seq = tse_2d(n, fov, **kw)
@@ -271,25 +297,49 @@ def test_gre_matches_pypulseq_written_equivalent():
     n, fov, dwell, flip, tr, thk = 8, 0.22, 10e-6, 20.0, 10e-3, 5e-3
     dk = 1 / fov
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, dwell=dwell, ramps=True, spoiling="rf", slice_thickness=thk)
-    opts = pp.Opts(max_grad=SYS.max_grad, grad_unit="Hz/m", max_slew=SYS.max_slew, slew_unit="Hz/m/s",
-                   rf_dead_time=SYS.rf_dead_time, rf_ringdown_time=SYS.rf_ringdown_time, adc_dead_time=0,
-                   grad_raster_time=SYS.grad_raster, rf_raster_time=SYS.rf_raster, adc_raster_time=SYS.adc_raster)
+    opts = pp.Opts(
+        max_grad=SYS.max_grad,
+        grad_unit="Hz/m",
+        max_slew=SYS.max_slew,
+        slew_unit="Hz/m/s",
+        rf_dead_time=SYS.rf_dead_time,
+        rf_ringdown_time=SYS.rf_ringdown_time,
+        adc_dead_time=0,
+        grad_raster_time=SYS.grad_raster,
+        rf_raster_time=SYS.rf_raster,
+        adc_raster_time=SYS.adc_raster,
+    )
     # pypulseq's own designs of the slice-select pulse and the readout ...
-    rf, gz, gzr = pp.make_sinc_pulse(math.radians(flip), duration=2e-3, slice_thickness=thk, apodization=0.5,
-                                     time_bw_product=4, system=opts, return_gz=True, use="excitation",
-                                     delay=SYS.rf_dead_time)
+    rf, gz, gzr = pp.make_sinc_pulse(
+        math.radians(flip),
+        duration=2e-3,
+        slice_thickness=thk,
+        apodization=0.5,
+        time_bw_product=4,
+        system=opts,
+        return_gz=True,
+        use="excitation",
+        delay=SYS.rf_dead_time,
+    )
     gx = pp.make_trapezoid("x", flat_area=n * dk, flat_time=n * dwell, system=opts)
     # ... and lobes with the areas and durations the builder documents
     pre_x = -(n / 2 + 0.5) * dk - gx.amplitude * gx.rise_time / 2
-    t_pre = seq.meta["te"] - (pp.calc_duration(rf, gz) - rf.delay - pp.calc_rf_center(rf)[0]) \
-        - gx.rise_time - (n / 2 + 0.5) * dwell
+    t_pre = (
+        seq.meta["te"]
+        - (pp.calc_duration(rf, gz) - rf.delay - pp.calc_rf_center(rf)[0])
+        - gx.rise_time
+        - (n / 2 + 0.5) * dwell
+    )
     spoil_x = 4 * n / fov - (pre_x + gx.amplitude * (gx.rise_time + gx.flat_time))
 
     def lobes(areas, duration=None):
         # the builder plays a multi-axis lobe as one vector trapezoid (shared ramps)
         g = trapezoid(area=areas, duration=duration)
-        return [pp.make_trapezoid(ch, amplitude=float(a), rise_time=g.rise, flat_time=g.flat, fall_time=g.fall,
-                                  system=opts) for ch, a in zip("xyz", g.amplitude) if a != 0]
+        return [
+            pp.make_trapezoid(ch, amplitude=float(a), rise_time=g.rise, flat_time=g.flat, fall_time=g.fall, system=opts)
+            for ch, a in zip("xyz", g.amplitude)
+            if a != 0
+        ]
 
     t_spoil = trapezoid("x", area=max(abs(spoil_x), n // 2 * dk)).duration
     pseq = pp.Sequence(opts)
@@ -301,9 +351,15 @@ def test_gre_matches_pypulseq_written_equivalent():
         pseq.add_block(*lobes((pre_x, ky, gzr.area), t_pre))
         pseq.add_block(gx, pp.make_adc(n, dwell=dwell, delay=gx.rise_time, phase_offset=-psi, system=opts))
         sp = trapezoid(area=(spoil_x, -ky, 0.0), duration=t_spoil)
-        pseq.add_block(*[pp.make_trapezoid(ch, amplitude=float(a), rise_time=sp.rise, flat_time=sp.flat,
-                                           fall_time=sp.fall, system=opts) for ch, a in zip("xy", sp.amplitude[:2])
-                         if a != 0])
+        pseq.add_block(
+            *[
+                pp.make_trapezoid(
+                    ch, amplitude=float(a), rise_time=sp.rise, flat_time=sp.flat, fall_time=sp.fall, system=opts
+                )
+                for ch, a in zip("xy", sp.amplitude[:2])
+                if a != 0
+            ]
+        )
         pseq.add_block(pp.make_delay(round((tr - (pseq.duration()[0] - j * tr)) / 1e-6) * 1e-6))
     assert abs(pseq.duration()[0] - float(seq.duration)) < 1e-9
     ref = read_pulseq(pseq)
@@ -347,8 +403,9 @@ def _digest(seq):
 def test_default_builders_bit_identical_to_main():
     cases = {
         "gre_2d_default": lambda: bp.gre_2d(),
-        "gre_2d_opts": lambda: bp.gre_2d(16, 0.2, flip_deg=30.0, tr=8e-3, te=3e-3, dwell=5e-6, rf_duration=40e-6,
-                                         rf_phase=0.3, n_dummy=3, rf_steps=1),  # 40 us: 2 segments by default since 2026-10
+        "gre_2d_opts": lambda: bp.gre_2d(
+            16, 0.2, flip_deg=30.0, tr=8e-3, te=3e-3, dwell=5e-6, rf_duration=40e-6, rf_phase=0.3, n_dummy=3, rf_steps=1
+        ),  # 40 us: 2 segments by default since 2026-10
         "gre_3d": lambda: bp.gre_3d(8, n_dummy=2),
         "gre_cartesian_rect": lambda: bp.gre_cartesian((4, 6, 10), 0.25, dtype=torch.float32),
     }
@@ -364,11 +421,25 @@ def test_spin_echo_meta_reconstructs_with_bp_reconstruct():
 
 def test_sinc_pulse_matches_pypulseq_design():
     pp = pytest.importorskip("pypulseq")
-    opts = pp.Opts(max_grad=SYS.max_grad, grad_unit="Hz/m", max_slew=SYS.max_slew, slew_unit="Hz/m/s",
-                   rf_dead_time=SYS.rf_dead_time, rf_ringdown_time=SYS.rf_ringdown_time)
-    rf_pp, gz_pp, gzr_pp = pp.make_sinc_pulse(math.radians(70), duration=1.6e-3, slice_thickness=3e-3,
-                                              apodization=0.46, time_bw_product=5.2, system=opts, return_gz=True,
-                                              use="excitation", delay=SYS.rf_dead_time)
+    opts = pp.Opts(
+        max_grad=SYS.max_grad,
+        grad_unit="Hz/m",
+        max_slew=SYS.max_slew,
+        slew_unit="Hz/m/s",
+        rf_dead_time=SYS.rf_dead_time,
+        rf_ringdown_time=SYS.rf_ringdown_time,
+    )
+    rf_pp, gz_pp, gzr_pp = pp.make_sinc_pulse(
+        math.radians(70),
+        duration=1.6e-3,
+        slice_thickness=3e-3,
+        apodization=0.46,
+        time_bw_product=5.2,
+        system=opts,
+        return_gz=True,
+        use="excitation",
+        delay=SYS.rf_dead_time,
+    )
     rf, gz, reph = sinc_pulse(70.0, 1.6e-3, slice_thickness=3e-3, apodization=0.46, time_bw_product=5.2)
     # pypulseq's waveform is our field conjugated (phase convention); real here
     assert np.abs(rf.signal[:, 0].numpy() - rf_pp.signal.real).max() < 1e-9 * np.abs(rf_pp.signal).max()

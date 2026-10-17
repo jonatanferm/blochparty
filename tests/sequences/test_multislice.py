@@ -2,6 +2,7 @@
 their real phase-ramped pulses nearby and as bound-pool-only segments far away
 (``bound_only_beyond``) give the same signal as every pulse exact, at a fraction of the segments;
 the single-slice sequence is untouched; Metal agrees with the core."""
+
 import pytest
 import torch
 
@@ -22,11 +23,21 @@ def wm_column(n=29, half=3.5e-3, mt=True):
     z over this slice and into its neighbours, spread in x and in off-resonance."""
     z = torch.linspace(-half, half, n, dtype=f64)
     pos = torch.stack([torch.linspace(-0.04, 0.04, n, dtype=f64), torch.zeros_like(z), z], -1)
-    ph = bp.Phantom(pos, torch.ones(n, dtype=f64), torch.full((n,), 1.084, dtype=f64),
-                    torch.full((n,), 0.069, dtype=f64), torch.linspace(-15, 15, n, dtype=f64))
+    ph = bp.Phantom(
+        pos,
+        torch.ones(n, dtype=f64),
+        torch.full((n,), 1.084, dtype=f64),
+        torch.full((n,), 0.069, dtype=f64),
+        torch.linspace(-15, 15, n, dtype=f64),
+    )
     if mt:
-        ph.bound = BoundPool(torch.full((n,), 0.1277 / 0.8723, dtype=f64), torch.full((n,), 19.0, dtype=f64), ph.t1,
-                             torch.full((n,), 9.7e-6, dtype=f64), model="rate")
+        ph.bound = BoundPool(
+            torch.full((n,), 0.1277 / 0.8723, dtype=f64),
+            torch.full((n,), 19.0, dtype=f64),
+            ph.t1,
+            torch.full((n,), 9.7e-6, dtype=f64),
+            model="rate",
+        )
     return ph
 
 
@@ -64,8 +75,9 @@ def test_realism_setting_equals_every_pulse_exact():
     kw = dict(n=16, etl=16, esp=12.56e-3, tr=6.5, slice_thickness=5e-3, spoiling="gradient", n_dummy=1)
     single = bp.simulate(ph, bp.tse_2d(**kw, system=System(rf_raster=1e-4))).signal
     exact = bp.simulate(ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-5))).signal
-    fast = bp.simulate(ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-4),
-                                     bound_only_beyond=1.5 * sp)).signal
+    fast = bp.simulate(
+        ph, bp.tse_2d(**kw, slice_order=order, system=System(rf_raster=1e-4), bound_only_beyond=1.5 * sp)
+    ).signal
     loss = 1 - float(exact.abs().max() / single.abs().max())
     print(f"16 slices: {loss:.1%} white-matter loss; realism setting vs exact {rel(fast, exact):.1e}")
     assert loss > 0.2  # the other slices' pulses cost signal (MT and cross-talk)

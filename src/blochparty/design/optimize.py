@@ -10,9 +10,17 @@ from torch import Tensor
 # --- constrained optimisation ---------------------------------------------------------------
 
 
-def minimize(params: list[Tensor], objective: Callable[[], Tensor],
-             constraints: Callable[[], Tensor] | None = None, *, rho: float = 10.0, outer: int = 20,
-             inner: int = 50, tol: float = 1e-7, callback=None) -> dict:
+def minimize(
+    params: list[Tensor],
+    objective: Callable[[], Tensor],
+    constraints: Callable[[], Tensor] | None = None,
+    *,
+    rho: float = 10.0,
+    outer: int = 20,
+    inner: int = 50,
+    tol: float = 1e-7,
+    callback=None,
+) -> dict:
     """Minimise ``objective()`` subject to ``constraints() >= 0`` (a 1-D tensor, ideally
     normalised, e.g. 1 - value / limit) with the augmented Lagrangian method: L-BFGS on
     f + sum psi(g, lambda), psi = (relu(lambda - rho g)^2 - lambda^2) / (2 rho), then
@@ -30,11 +38,12 @@ def minimize(params: list[Tensor], objective: Callable[[], Tensor],
             return f
         g = constraints()
         lm = torch.zeros_like(g) if lam is None else lam
-        return f + ((torch.relu(lm - rho * g) ** 2 - lm ** 2) / (2 * rho)).sum()
+        return f + ((torch.relu(lm - rho * g) ** 2 - lm**2) / (2 * rho)).sum()
 
     for it in range(outer if constraints is not None else 1):
-        opt = torch.optim.LBFGS(params, lr=1, max_iter=inner, tolerance_grad=1e-12, tolerance_change=1e-15,
-                                line_search_fn="strong_wolfe")
+        opt = torch.optim.LBFGS(
+            params, lr=1, max_iter=inner, tolerance_grad=1e-12, tolerance_change=1e-15, line_search_fn="strong_wolfe"
+        )
 
         def closure():
             opt.zero_grad()

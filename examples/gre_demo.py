@@ -29,16 +29,18 @@ ref = signal_equation(phantom, seq, coils)
 rel_err = ((signal - ref).abs().max() / ref.abs().max()).item()
 print(f"max |Bloch - signal equation| / max |signal| = {rel_err:.2e}")
 
-noisy = bp.add_noise(signal, sigma=0.02 * signal.abs().max().item() / N,
-                        generator=torch.Generator().manual_seed(0))
+noisy = bp.add_noise(signal, sigma=0.02 * signal.abs().max().item() / N, generator=torch.Generator().manual_seed(0))
 coil_imgs = bp.ifft2c(bp.kspace_grid(noisy, seq))
 grid = bp.grid_positions(N, FOV).reshape(-1, 3)
 sens_grid = bp.birdcage_sensitivities(grid, n_coils=COILS).T.reshape(COILS, N, N)
 err_img = bp.ifft2c(bp.kspace_grid(signal - ref, seq))
 
 fig, ax = plt.subplots(3, 4, figsize=(13, 10))
-show = lambda a, img, title, **kw: (a.imshow(img, origin="lower", cmap=kw.pop("cmap", "gray"), **kw),
-                                    a.set_title(title), a.axis("off"))
+show = lambda a, img, title, **kw: (
+    a.imshow(img, origin="lower", cmap=kw.pop("cmap", "gray"), **kw),
+    a.set_title(title),
+    a.axis("off"),
+)
 show(ax[0, 0], maps["pd"], "PD")
 show(ax[0, 1], maps["t1"].where(maps["pd"] > 0, 0), "T1 [s]", cmap="magma")
 show(ax[0, 2], maps["t2"].where(maps["pd"] > 0, 0).clamp(max=0.3), "T2 [s] (clipped 0.3)", cmap="magma")

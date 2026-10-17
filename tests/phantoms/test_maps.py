@@ -17,8 +17,12 @@ f64 = torch.float64
 
 
 def grid(nz=3, ny=7, nx=7):
-    zz, yy, xx = torch.meshgrid(torch.linspace(-0.1, 0.1, nz, dtype=f64), torch.linspace(-0.3, 0.3, ny, dtype=f64),
-                                torch.linspace(-0.3, 0.3, nx, dtype=f64), indexing="ij")
+    zz, yy, xx = torch.meshgrid(
+        torch.linspace(-0.1, 0.1, nz, dtype=f64),
+        torch.linspace(-0.3, 0.3, ny, dtype=f64),
+        torch.linspace(-0.3, 0.3, nx, dtype=f64),
+        indexing="ij",
+    )
     return (-0.3, -0.3, -0.1), (0.1, 0.1, 0.1), xx, yy, zz
 
 
@@ -81,14 +85,22 @@ def test_adc_during_rf_under_mapped_coils():
 
 def test_gpu_matches_core(gpu):
     origin, spacing, xx, yy, _ = grid(4, 9, 9)
-    coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.02) * torch.exp(1j * 3 * yy),
-                         torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.02) * torch.exp(-2j * xx)])
+    coils = torch.stack(
+        [
+            torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.02) * torch.exp(1j * 3 * yy),
+            torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.02) * torch.exp(-2j * xx),
+        ]
+    )
     maps = bp.FieldMaps(origin, spacing, b0=40 * xx**2 - 20 * yy, b1=1 + 0.3 * xx, coils=coils)
     ph = bp.shepp_logan(16)
     g = torch.Generator().manual_seed(1)
-    mot = bp.Motion(velocity=(torch.rand(len(ph), 3, generator=g, dtype=f64) - 0.5) * 0.1,
-                    rigid=lambda t: (np.stack([np.eye(3)] * len(t)),
-                                     np.stack([[0.02 * math.sin(2 * math.pi * x / 0.1), 0, 0] for x in t])))
+    mot = bp.Motion(
+        velocity=(torch.rand(len(ph), 3, generator=g, dtype=f64) - 0.5) * 0.1,
+        rigid=lambda t: (
+            np.stack([np.eye(3)] * len(t)),
+            np.stack([[0.02 * math.sin(2 * math.pi * x / 0.1), 0, 0] for x in t]),
+        ),
+    )
     seq = bp.gre_2d(16, n_dummy=2)
     for p in (ph, replace(ph, motion=mot), replace(ph, motion=mot, diffusion=torch.full((len(ph),), 2e-9, dtype=f64))):
         assert rel(gpu.simulate(p, seq, maps=maps, seed=1).signal, bp.simulate(p, seq, maps=maps, seed=1).signal) < 1e-5

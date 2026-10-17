@@ -56,8 +56,9 @@ class _ChunkedSimulate(torch.autograd.Function):
         n = pd.shape[0]
         signal, ms = None, []
         for a in range(0, n, st.spin_chunk):
-            res = _simulate_chunk(st, (dt, rf, grad, adc_phase, b0_offset), (pos, pd, t1, t2, db0, coils, b1),
-                                  slice(a, a + st.spin_chunk))
+            res = _simulate_chunk(
+                st, (dt, rf, grad, adc_phase, b0_offset), (pos, pd, t1, t2, db0, coils, b1), slice(a, a + st.spin_chunk)
+            )
             signal = res.signal if signal is None else signal + res.signal
             ms.append(res.m)
         return signal, torch.cat(ms)
@@ -73,8 +74,7 @@ class _ChunkedSimulate(torch.autograd.Function):
         if grad_signal is None and grad_m is None:
             return None, *grads
         # Sequence tensors are shared by all chunks: one set of leaves, grads summed.
-        seq_leaves = [None if t is None else t.detach().requires_grad_(r)
-                      for t, r in zip(saved[:n_seq], need[:n_seq])]
+        seq_leaves = [None if t is None else t.detach().requires_grad_(r) for t, r in zip(saved[:n_seq], need[:n_seq])]
         # Per-spin tensors: full-size buffers that each chunk scatters its slice into.
         for i in range(n_seq, len(saved)):
             if need[i]:
@@ -83,8 +83,9 @@ class _ChunkedSimulate(torch.autograd.Function):
         n = saved[6].shape[0]
         for a in range(0, n, st.spin_chunk):
             s = slice(a, a + st.spin_chunk)
-            spin_leaves = [None if t is None else t[s].detach().requires_grad_(r)
-                           for t, r in zip(saved[n_seq:], need[n_seq:])]
+            spin_leaves = [
+                None if t is None else t[s].detach().requires_grad_(r) for t, r in zip(saved[n_seq:], need[n_seq:])
+            ]
             with torch.enable_grad():
                 res = _simulate_chunk(st, seq_leaves, spin_leaves, slice(None))
             outs, gouts = [], []
@@ -147,6 +148,19 @@ def simulate_chunked(
     if spin_chunk < 1:
         raise ValueError(f"spin_chunk must be positive, got {spin_chunk}")
     st = _Static(list(seq.is_rf), list(seq.adc), list(seq.spoil), seq.meta, spin_chunk, checkpoint_every)
-    signal, m = _ChunkedSimulate.apply(st, seq.dt, seq.rf, seq.grad, seq.adc_phase, seq.b0_offset, phantom.pos,
-                                       phantom.pd, phantom.t1, phantom.t2, phantom.db0, coils, phantom.b1)
+    signal, m = _ChunkedSimulate.apply(
+        st,
+        seq.dt,
+        seq.rf,
+        seq.grad,
+        seq.adc_phase,
+        seq.b0_offset,
+        phantom.pos,
+        phantom.pd,
+        phantom.t1,
+        phantom.t2,
+        phantom.db0,
+        coils,
+        phantom.b1,
+    )
     return SimResult(signal, m)

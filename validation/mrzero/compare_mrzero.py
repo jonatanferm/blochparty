@@ -45,8 +45,17 @@ from blochparty.pulseq import read_pulseq
 
 FOV = 0.22
 # 0.1 us RF / block raster so pulses can be 0.2 us long; generous gradient limits
-SYS = pp.Opts(rf_dead_time=0, rf_ringdown_time=0, adc_dead_time=0, rf_raster_time=1e-7,
-              block_duration_raster=1e-7, max_grad=80, grad_unit="mT/m", max_slew=200, slew_unit="T/m/s")
+SYS = pp.Opts(
+    rf_dead_time=0,
+    rf_ringdown_time=0,
+    adc_dead_time=0,
+    rf_raster_time=1e-7,
+    block_duration_raster=1e-7,
+    max_grad=80,
+    grad_unit="mT/m",
+    max_slew=200,
+    slew_unit="T/m/s",
+)
 T_RF = 0.2e-6
 
 
@@ -140,8 +149,10 @@ def epi(n=32, dwell=5e-6):
     gx, adc, pre = _readout(n, dwell)
     blip = pp.make_trapezoid("y", area=dk, system=SYS)
     seq.add_block(_hard(90))
-    seq.add_block(pp.make_trapezoid("x", area=pre, duration=0.5e-3, system=SYS),
-                  pp.make_trapezoid("y", area=-n / 2 * dk, duration=0.5e-3, system=SYS))
+    seq.add_block(
+        pp.make_trapezoid("x", area=pre, duration=0.5e-3, system=SYS),
+        pp.make_trapezoid("y", area=-n / 2 * dk, duration=0.5e-3, system=SYS),
+    )
     for i in range(n):
         seq.add_block(gx if i % 2 == 0 else pp.scale_grad(gx, -1), adc)
         if i < n - 1:
@@ -205,10 +216,18 @@ def mr0_data(maps, voxel="point"):
     else:  # uniform box voxel: integral of exp(-i 2 pi k.r) over the voxel
         dephasing = lambda k, nyq: torch.prod(torch.sinc(k * size.to(k.device)), dim=1)
     return mr0.SimData(
-        PD=f(maps["pd"]), T1=f(maps["t1"]), T2=f(maps["t2"]), T2dash=torch.full((nv,), 1e9),
-        D=torch.zeros(nv), B0=f(maps["db0"]), B1=torch.ones(1, nv),
-        coil_sens=maps["coils"][:, mask].to(torch.complex64), size=torch.tensor([FOV, FOV, 1.0]),
-        affine=torch.eye(4), voxel_pos=pos, nyquist=torch.full((3,), float("inf")),
+        PD=f(maps["pd"]),
+        T1=f(maps["t1"]),
+        T2=f(maps["t2"]),
+        T2dash=torch.full((nv,), 1e9),
+        D=torch.zeros(nv),
+        B0=f(maps["db0"]),
+        B1=torch.ones(1, nv),
+        coil_sens=maps["coils"][:, mask].to(torch.complex64),
+        size=torch.tensor([FOV, FOV, 1.0]),
+        affine=torch.eye(4),
+        voxel_pos=pos,
+        nyquist=torch.full((3,), float("inf")),
         dephasing_func=dephasing,
     )
 
@@ -268,8 +287,9 @@ def run_mrzero(path, data, strict=True, float64=False):
         if strict:
             # one pre-pass per tissue: the default mean-tissue pre-pass would prune the
             # long-lived CSF states (T2 = 2 s) as decayed
-            graph = mr0.compute_graph(seq, data, max_state_count=10**7, min_state_mag=PRUNE,
-                                      tissues=TISSUES, threaded=False)
+            graph = mr0.compute_graph(
+                seq, data, max_state_count=10**7, min_state_mag=PRUNE, tissues=TISSUES, threaded=False
+            )
             run = dict(min_emitted_signal=PRUNE, min_latent_signal=PRUNE)
         else:
             graph = mr0.compute_graph(seq, data)
@@ -296,8 +316,11 @@ def exact_signal(seq, phantom, coils):
     m[:, 2, 0], m[:, 3, 0] = phantom.pd, 1.0
     out = []
     for s in range(len(seq)):
-        w = 2 * math.pi * torch.stack([seq.rf[s, 0].expand(n), seq.rf[s, 1].expand(n),
-                                       phantom.pos @ seq.grad[s] + phantom.db0], -1)  # dM/dt = M x w
+        w = (
+            2
+            * math.pi
+            * torch.stack([seq.rf[s, 0].expand(n), seq.rf[s, 1].expand(n), phantom.pos @ seq.grad[s] + phantom.db0], -1)
+        )  # dM/dt = M x w
         a = torch.zeros(n, 4, 4, dtype=torch.float64)
         a[:, 0, 1], a[:, 0, 2], a[:, 1, 2] = w[:, 2], -w[:, 1], w[:, 0]
         a[:, 1, 0], a[:, 2, 0], a[:, 2, 1] = -w[:, 2], w[:, 1], -w[:, 0]
@@ -387,8 +410,10 @@ def main():
         k_pp = pseq.calculate_kspace()[0].T
         dtraj = rel_max(k_mr, k_pp)
         rows.append((name, dk, nrmse, dk64, nrmse64, dk_def, nrmse_def, c, dtraj, t_bp, t_mr))
-        print(f"{name:34s} dk {dk:.1e} nrmse {nrmse:.1e} | float64 {dk64:.1e} {nrmse64:.1e} | "
-              f"defaults {dk_def:.1e} {nrmse_def:.1e} | c {c:.6f} | traj {dtraj:.1e} | {t_bp:.1f}s {t_mr:.1f}s")
+        print(
+            f"{name:34s} dk {dk:.1e} nrmse {nrmse:.1e} | float64 {dk64:.1e} {nrmse64:.1e} | "
+            f"defaults {dk_def:.1e} {nrmse_def:.1e} | c {c:.6f} | traj {dtraj:.1e} | {t_bp:.1f}s {t_mr:.1f}s"
+        )
 
         # exact reference on a few voxels
         phantom, coils = bp_phantom(few)
@@ -397,7 +422,9 @@ def main():
         e_mr = rel_max(run_mrzero(path, data_few)[0], ref)
         e_mr64 = rel_max(run_mrzero(path, data_few, float64=True)[0], ref)
         exact_rows.append((name, e_bp, e_mr, e_mr64))
-        print(f"{'':34s} vs exact on {len(phantom)} voxels: bp {e_bp:.1e}  MRzero {e_mr:.1e}  MRzero float64 {e_mr64:.1e}")
+        print(
+            f"{'':34s} vs exact on {len(phantom)} voxels: bp {e_bp:.1e}  MRzero {e_mr:.1e}  MRzero float64 {e_mr64:.1e}"
+        )
 
     # voxel model: MRzero box voxels vs. blochparty with sub x sub jittered isochromats
     vox = {}
@@ -428,7 +455,7 @@ def write_results(out, n, rows, exact_rows, vox):
         "",
         "MRzero runs point-like (voxel dephasing function 1, no Nyquist cut-off) with pruning "
         f"thresholds at {PRUNE:g} and one pre-pass per tissue; blochparty reads with "
-        "`convention=\"mrzero\"`. Differences are after removing the expected constant factor −i; "
+        '`convention="mrzero"`. Differences are after removing the expected constant factor −i; '
         "*fitted c* is the least-squares factor s_MRzero ≈ c·s_blochparty. *Trajectory*: max "
         "difference between MRzero's own k-space at its ADC samples and pypulseq's "
         "`calculate_kspace`, relative to max |k| (same sample ordering, same trajectory).",
@@ -438,9 +465,11 @@ def write_results(out, n, rows, exact_rows, vox):
         "|---|---|---|---|---|---|---|---|",
     ]
     for name, dk, nrmse, dk64, nrmse64, dk_def, nrmse_def, c, dtraj, t_bp, t_mr in rows:
-        lines.append(f"| {name} | {dk:.1e} | {nrmse:.1e} | {dk64:.1e} / {nrmse64:.1e} | "
-                     f"{dk_def:.1e} / {nrmse_def:.1e} | {c.real:+.6f}{c.imag:+.6f}i | {dtraj:.1e} "
-                     f"| {t_bp:.1f} s / {t_mr:.1f} s |")
+        lines.append(
+            f"| {name} | {dk:.1e} | {nrmse:.1e} | {dk64:.1e} / {nrmse64:.1e} | "
+            f"{dk_def:.1e} / {nrmse_def:.1e} | {c.real:+.6f}{c.imag:+.6f}i | {dtraj:.1e} "
+            f"| {t_bp:.1f} s / {t_mr:.1f} s |"
+        )
     lines += [
         "",
         "Independent tie-breaker: an exact per-segment matrix-exponential solution of the Bloch "
@@ -461,12 +490,18 @@ def write_results(out, n, rows, exact_rows, vox):
         "uniform square voxel; no Nyquist cut-off) against blochparty with K×K stratified-jittered "
         "isochromats per voxel (one uniform random point per sub-cell).",
         "",
-        "| sequence | box vs. point voxels in MRzero | " + " | ".join(f"{s}×{s}" for s, _, _ in next(iter(vox.values()))[1]) + " |",
+        "| sequence | box vs. point voxels in MRzero | "
+        + " | ".join(f"{s}×{s}" for s, _, _ in next(iter(vox.values()))[1])
+        + " |",
         "|---|---|" + "---|" * len(next(iter(vox.values()))[1]),
     ]
     for make, (box_vs_point, conv) in vox.items():
         name = next(k for k, v in SEQUENCES.items() if v is make)
-        lines.append(f"| {name} | {box_vs_point:.0%} | " + " | ".join(f"{dk_s:.1e} / {nrmse_s:.1e}" for _, dk_s, nrmse_s in conv) + " |")
+        lines.append(
+            f"| {name} | {box_vs_point:.0%} | "
+            + " | ".join(f"{dk_s:.1e} / {nrmse_s:.1e}" for _, dk_s, nrmse_s in conv)
+            + " |"
+        )
     lines += [
         "",
         "Entries: max rel. k-space difference / image NRMSE; the second column is the relative "
@@ -506,8 +541,8 @@ NOTES = [
     "`scale_grad(prephaser, -1)`.",
     "- **Conventions.** MRzero rotates by the Pulseq RF phase as written, tips +z to −y (it "
     "rotates the other way from blochparty) and multiplies the signal by exp(i(π/2 − ADC phase)); "
-    "with `convention=\"mrzero\"` that is the constant −i, fitted above to 1e-5 or better. "
-    "blochparty's default (\"physical\") reading conjugates RF and ADC phases so that a frequency "
+    'with `convention="mrzero"` that is the constant −i, fitted above to 1e-5 or better. '
+    'blochparty\'s default ("physical") reading conjugates RF and ADC phases so that a frequency '
     "offset excites the slice at +f/G; `tests/sequences/test_pulseq.py` checks that the two readings are exact "
     "mirror images. MRzero ignores ADC frequency offsets, so none are used here.",
     "- **Ordering.** Both return samples in time order; the trajectory column shows MRzero's own "

@@ -17,6 +17,7 @@ Readers of ISMRMRD (Gadgetron, ismrmrd-python, BART) see an ordinary dataset; th
 * attributes: engine, seed, git commit (and whether the tree was dirty), package versions.
 
 Requires the optional extra ``io`` (``ismrmrd``, ``h5py``)."""
+
 from __future__ import annotations
 
 import dataclasses
@@ -55,8 +56,11 @@ def _encode(x):
     """JSON-able form of ``meta`` values: tensors, arrays, tuples and dataclasses tagged."""
     if isinstance(x, Tensor):
         x = x.detach().cpu()
-        return {"__tensor__": str(x.dtype).removeprefix("torch."), "shape": list(x.shape),
-                "data": x.reshape(-1).tolist()}
+        return {
+            "__tensor__": str(x.dtype).removeprefix("torch."),
+            "shape": list(x.shape),
+            "data": x.reshape(-1).tolist(),
+        }
     if isinstance(x, np.ndarray):
         return {"__ndarray__": x.dtype.str, "shape": list(x.shape), "data": x.reshape(-1).tolist()}
     if isinstance(x, np.generic):
@@ -70,8 +74,10 @@ def _encode(x):
             return {"__items__": [[_encode(k), _encode(v)] for k, v in x.items()]}
         return {k: _encode(v) for k, v in x.items()}
     if dataclasses.is_dataclass(x) and not isinstance(x, type):
-        return {"__dataclass__": type(x).__qualname__,
-                **{f.name: _encode(getattr(x, f.name)) for f in dataclasses.fields(x)}}
+        return {
+            "__dataclass__": type(x).__qualname__,
+            **{f.name: _encode(getattr(x, f.name)) for f in dataclasses.fields(x)},
+        }
     if x is None or isinstance(x, (bool, int, float, str)):
         return x
     return {"__repr__": repr(x)}
@@ -111,10 +117,18 @@ def _from_json_bytes(dataset) -> object:
 def _git():
     here = Path(__file__).resolve().parent
     try:
-        commit = subprocess.run(["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True, text=True,
-                                check=True, timeout=10).stdout.strip()
-        dirty = bool(subprocess.run(["git", "-C", str(here), "status", "--porcelain", "--untracked-files=no"],
-                                    capture_output=True, text=True, check=True, timeout=10).stdout.strip())
+        commit = subprocess.run(
+            ["git", "-C", str(here), "rev-parse", "HEAD"], capture_output=True, text=True, check=True, timeout=10
+        ).stdout.strip()
+        dirty = bool(
+            subprocess.run(
+                ["git", "-C", str(here), "status", "--porcelain", "--untracked-files=no"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=10,
+            ).stdout.strip()
+        )
         return commit, dirty
     except (OSError, subprocess.SubprocessError):
         return "", False
@@ -157,30 +171,52 @@ def _header(ismrmrd, seq, field_T, channels, shape, name):
     nz, ny, nx = shape or (1, 1, seq.n_adc)
     thickness = meta.get("slice_thickness")
     z_mm = fov if nz > 1 else (float(thickness) * 1e3 if thickness else fov)
-    space = xsd.encodingSpaceType(matrixSize=xsd.matrixSizeType(x=nx, y=ny, z=nz),
-                                  fieldOfView_mm=xsd.fieldOfViewMm(x=fov, y=fov, z=z_mm))
+    space = xsd.encodingSpaceType(
+        matrixSize=xsd.matrixSizeType(x=nx, y=ny, z=nz), fieldOfView_mm=xsd.fieldOfViewMm(x=fov, y=fov, z=z_mm)
+    )
     limit = lambda n: xsd.limitType(minimum=0, maximum=max(n - 1, 0), center=n // 2)
     encoding = xsd.encodingType(
-        encodedSpace=space, reconSpace=space,
-        encodingLimits=xsd.encodingLimitsType(kspace_encoding_step_0=limit(nx), kspace_encoding_step_1=limit(ny),
-                                              kspace_encoding_step_2=limit(nz)),
+        encodedSpace=space,
+        reconSpace=space,
+        encodingLimits=xsd.encodingLimitsType(
+            kspace_encoding_step_0=limit(nx), kspace_encoding_step_1=limit(ny), kspace_encoding_step_2=limit(nz)
+        ),
         trajectory=xsd.trajectoryType.CARTESIAN if shape else xsd.trajectoryType.OTHER,
-        echoTrainLength=int(meta["etl"]) if "etl" in meta else None)
+        echoTrainLength=int(meta["etl"]) if "etl" in meta else None,
+    )
     ms = lambda key: [float(meta[key]) * 1e3] if key in meta and meta[key] is not None else []
     params = xsd.sequenceParametersType(TR=ms("tr"), TE=ms("te"), TI=ms("ti"), sequence_type=name)
-    user = xsd.userParametersType(userParameterString=[
-        xsd.userParameterStringType(name="trajectory_units", value="1/m (cycles per metre); x, y, z"),
-        xsd.userParameterStringType(name="simulator", value="blochparty")])
+    user = xsd.userParametersType(
+        userParameterString=[
+            xsd.userParameterStringType(name="trajectory_units", value="1/m (cycles per metre); x, y, z"),
+            xsd.userParameterStringType(name="simulator", value="blochparty"),
+        ]
+    )
     header = xsd.ismrmrdHeader(
         experimentalConditions=xsd.experimentalConditionsType(H1resonanceFrequency_Hz=int(round(GAMMA_BAR * field_T))),
         acquisitionSystemInformation=xsd.acquisitionSystemInformationType(
-            systemVendor="blochparty (simulated)", systemFieldStrength_T=float(field_T), receiverChannels=channels),
-        encoding=[encoding], sequenceParameters=params, userParameters=user)
+            systemVendor="blochparty (simulated)", systemFieldStrength_T=float(field_T), receiverChannels=channels
+        ),
+        encoding=[encoding],
+        sequenceParameters=params,
+        userParameters=user,
+    )
     return xsd.ToXML(header)
 
 
-def write_dataset(path, signal, seq: Sequence, *, phantom=None, coils=None, noise=None, seed=None,
-                  engine: str | None = None, field_T: float | None = None, name: str = "blochparty") -> Path:
+def write_dataset(
+    path,
+    signal,
+    seq: Sequence,
+    *,
+    phantom=None,
+    coils=None,
+    noise=None,
+    seed=None,
+    engine: str | None = None,
+    field_T: float | None = None,
+    name: str = "blochparty",
+) -> Path:
     """Write ``signal`` ((C, n_adc) or (n_adc,), or a ``SimResult``) of ``seq`` to ``path`` as an
     ISMRMRD HDF5 file with a ``/provenance`` group (module docstring). ``phantom`` is a
     ``DigitalPhantom`` (its field strength is then the default ``field_T``, else 3 T) or any
@@ -200,8 +236,12 @@ def write_dataset(path, signal, seq: Sequence, *, phantom=None, coils=None, nois
         raise ValueError(f"signal must be (coils, {seq.n_adc}) for this sequence, got {tuple(sig.shape)}")
     if isinstance(phantom, DigitalPhantom):
         field_T = phantom.field_T if field_T is None else field_T
-        phantom = {"field_T": phantom.field_T, "options": phantom.options, "meta": phantom.meta,
-                   "tissues": {k: dataclasses.asdict(p) for k, p in phantom.tissues.items()}}
+        phantom = {
+            "field_T": phantom.field_T,
+            "options": phantom.options,
+            "meta": phantom.meta,
+            "tissues": {k: dataclasses.asdict(p) for k, p in phantom.tissues.items()},
+        }
     field_T = 3.0 if field_T is None else float(field_T)
     data = sig.to(torch.complex64).numpy()
     traj = kspace_trajectory(seq).to(torch.float32).numpy()
@@ -216,8 +256,9 @@ def write_dataset(path, signal, seq: Sequence, *, phantom=None, coils=None, nois
         runs = _readouts(seq)
         for n, run in enumerate(runs):
             samples = adc_rank[run]
-            acq = ismrmrd.Acquisition.from_array(np.ascontiguousarray(data[:, samples]),
-                                                 np.ascontiguousarray(traj[samples]))
+            acq = ismrmrd.Acquisition.from_array(
+                np.ascontiguousarray(data[:, samples]), np.ascontiguousarray(traj[samples])
+            )
             acq.scan_counter = n
             acq.sample_time_us = float(np.median(seq.dt.detach().cpu().double().numpy()[run])) * 1e6
             acq.acquisition_time_stamp = int(round(tb[run[0]] / TICK))
@@ -284,9 +325,11 @@ def read_dataset(path) -> dict:
     finally:
         dset.close()
     acqs.sort(key=lambda a: a.scan_counter)
-    out = {"header": header.decode() if isinstance(header, bytes) else header,
-           "signal": torch.from_numpy(np.concatenate([a.data for a in acqs], 1)) if acqs else None,
-           "trajectory": torch.from_numpy(np.concatenate([a.traj for a in acqs], 0)) if acqs else None}
+    out = {
+        "header": header.decode() if isinstance(header, bytes) else header,
+        "signal": torch.from_numpy(np.concatenate([a.data for a in acqs], 1)) if acqs else None,
+        "trajectory": torch.from_numpy(np.concatenate([a.traj for a in acqs], 0)) if acqs else None,
+    }
     with h5py.File(path, "r") as f:
         prov = f.get("provenance")
         if prov is None:
@@ -294,9 +337,18 @@ def read_dataset(path) -> dict:
         group = prov["sequence"]
         arrays = {k: torch.from_numpy(group[k][()]) for k in _ARRAYS if k in group}
         flags = {k: [bool(v) for v in group[k][()]] for k in _FLAGS}
-        out["sequence"] = Sequence(arrays["dt"], arrays["rf"], arrays["grad"], arrays["adc_phase"], flags["is_rf"],
-                                   flags["adc"], flags["spoil"], _from_json_bytes(group["meta.json"]),
-                                   arrays.get("b0_offset"), arrays.get("rf_freq"))
+        out["sequence"] = Sequence(
+            arrays["dt"],
+            arrays["rf"],
+            arrays["grad"],
+            arrays["adc_phase"],
+            flags["is_rf"],
+            flags["adc"],
+            flags["spoil"],
+            _from_json_bytes(group["meta.json"]),
+            arrays.get("b0_offset"),
+            arrays.get("rf_freq"),
+        )
         out["seq_file"] = bytes(prov["sequence.seq"][()]).decode() if "sequence.seq" in prov else None
         for key in ("phantom", "coils", "noise"):
             out[key] = _from_json_bytes(prov[f"{key}.json"]) if f"{key}.json" in prov else None

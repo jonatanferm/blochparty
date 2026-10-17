@@ -37,8 +37,11 @@ def test_core_is_the_core_with_every_argument():
     out = bp.simulate(walk, seq, **kw, seed=5, merge_free_runs=False, engine="core")
     assert torch.equal(out.signal, ref.signal) and torch.equal(out.m, ref.m)
     assert torch.equal(bp.simulate(walk, seq, **kw, seed=5).signal, core(walk, seq, **kw, seed=5).signal)
-    for name, changed in (("coils", dict(kw, coils=None)), ("m_init", dict(kw, m_init=None)),
-                          ("scanner", dict(kw, scanner=None))):
+    for name, changed in (
+        ("coils", dict(kw, coils=None)),
+        ("m_init", dict(kw, m_init=None)),
+        ("scanner", dict(kw, scanner=None)),
+    ):
         assert rel(core(walk, seq, **changed, seed=5).signal[:, :1], ref.signal[:, :1]) > 1e-3, name
     assert rel(core(walk, seq, **kw, seed=6).signal, ref.signal) > 1e-6, "seed"
 
@@ -59,8 +62,11 @@ def test_gpu_engine_by_name(gpu):
     out = bp.simulate(p32, s32, **kw32, engine=gpu.name, mma=False)
     assert rel(out.signal, ref.signal) < 1e-6 and rel(out.m, ref.m) < 1e-6  # float atomics: not bit for bit
     assert out.signal.dtype == torch.complex64
-    for name, changed in (("coils", dict(kw32, coils=None)), ("m_init", dict(kw32, m_init=None)),
-                          ("scanner", dict(kw32, scanner=None))):
+    for name, changed in (
+        ("coils", dict(kw32, coils=None)),
+        ("m_init", dict(kw32, m_init=None)),
+        ("scanner", dict(kw32, scanner=None)),
+    ):
         assert rel(gpu.simulate(p32, s32, **changed, mma=False).signal[:, :1], ref.signal[:, :1]) > 1e-3, name
     core_ref = core(ph, seq, **kw)
     assert rel(out.signal.to(core_ref.signal.dtype), core_ref.signal) < 1e-4

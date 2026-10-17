@@ -75,30 +75,43 @@ def main():
 
     truth = cached("digital_truth.npz", make_truth)
     cached("digital_data.npz", lambda p: recon_stage("digital", CACHE / "digital_truth.npz", p))
-    dig = cached(f"digital_K{args.K}.npz",
-                 lambda p: recon_stage("recon", CACHE / "basis.npz", args.K, p, CACHE / "digital_data.npz"))
+    dig = cached(
+        f"digital_K{args.K}.npz",
+        lambda p: recon_stage("recon", CACHE / "basis.npz", args.K, p, CACHE / "digital_data.npz"),
+    )
 
     W = {"0.1-1 s": slice(20, 205), "1-4.9 s": slice(205, 1000)}
     print("\nreconstruction error on the digital phantom (rms / rms truth):")
     for j in range(14):
         t = truth["amps"][j] * truth["curves"][j]
-        print(f"  sphere {j + 1:2d}: " + "  ".join(
-            f"{w} {100 * np.linalg.norm(dig['curves'][j][sl] - t[sl]) / np.linalg.norm(t[sl]):5.1f}%" for w, sl in W.items()))
+        print(
+            f"  sphere {j + 1:2d}: "
+            + "  ".join(
+                f"{w} {100 * np.linalg.norm(dig['curves'][j][sl] - t[sl]) / np.linalg.norm(t[sl]):5.1f}%"
+                for w, sl in W.items()
+            )
+        )
 
     centre = np.where(np.arange(14) < 10, t2g, t2n)
     rows = {}
-    for name, curves, model, b1v in (("digital, full", dig["curves"][:14], "full", b1s),
-                                     ("measured, full", real["curves"][:14], "full", b1s),
-                                     ("measured, full, B1 = 1", real["curves"][:14], "full", np.ones(14)),
-                                     ("measured, perfect inversion", real["curves"][:14], "perfect_inv", b1s),
-                                     ("measured, no slice profile", real["curves"][:14], "no_slice", b1s),
-                                     ("measured, simple", real["curves"][:14], "simple", b1s)):
-        ref = cached(f"fit_{name.replace(', ', '_').replace(' ', '').replace('=', '')}_K{args.K}.npz",
-                     lambda p: np.savez(p, **dict(zip(("best", "edge"), s.fit(curves, t1g, centre, b1v, model)))))
+    for name, curves, model, b1v in (
+        ("digital, full", dig["curves"][:14], "full", b1s),
+        ("measured, full", real["curves"][:14], "full", b1s),
+        ("measured, full, B1 = 1", real["curves"][:14], "full", np.ones(14)),
+        ("measured, perfect inversion", real["curves"][:14], "perfect_inv", b1s),
+        ("measured, no slice profile", real["curves"][:14], "no_slice", b1s),
+        ("measured, simple", real["curves"][:14], "simple", b1s),
+    ):
+        ref = cached(
+            f"fit_{name.replace(', ', '_').replace(' ', '').replace('=', '')}_K{args.K}.npz",
+            lambda p: np.savez(p, **dict(zip(("best", "edge"), s.fit(curves, t1g, centre, b1v, model)))),
+        )
         rows[name] = ref
     truth_t2 = t2_true
-    print("\nfitted T1 / T2, % from the reference (digital: from its truth; measured: gold standard 1-10, "
-          "NIST T2 11-14); * = optimum on the grid edge")
+    print(
+        "\nfitted T1 / T2, % from the reference (digital: from its truth; measured: gold standard 1-10, "
+        "NIST T2 11-14); * = optimum on the grid edge"
+    )
     print("sphere  ref T1   ref T2 | " + " | ".join(f"{n[:26]:>26s}" for n in rows))
     for j in range(14):
         line = f"{j + 1:5d} {t1g[j] * 1e3:7.0f} {t2_true[j] * 1e3:7.1f} |"

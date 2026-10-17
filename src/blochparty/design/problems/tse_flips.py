@@ -37,8 +37,9 @@ TARGET = FRACTION * torch.exp(-torch.arange(1, N_ECHO + 1, dtype=torch.float64) 
 
 _x = torch.arange(K, dtype=torch.float64) * (L / K)
 _full = lambda v: torch.full((K,), v, dtype=torch.float64)
-VOXEL = Phantom(pos=torch.stack([_x, 0 * _x, 0 * _x], dim=-1), pd=_full(1.0), t1=_full(T1), t2=_full(T2),
-                db0=_full(0.0))
+VOXEL = Phantom(
+    pos=torch.stack([_x, 0 * _x, 0 * _x], dim=-1), pd=_full(1.0), t1=_full(T1), t2=_full(T2), db0=_full(0.0)
+)
 
 
 def crusher(duration):
@@ -100,9 +101,16 @@ def optimize(start=None, simulate=None):
     seconds = time.perf_counter() - t0
     found = flips.detach().abs()
     seq = cpmg_sequence(found.unbind())
-    return {"flips": found, "energy": float(rf_energy(seq)), "baseline_flip": base, "baseline_energy": e_ref,
-            "echoes": echoes(seq, simulate), "peak_b1": float(b1_uT(seq).max()), "n_evals": info["n_evals"],
-            "seconds": seconds}
+    return {
+        "flips": found,
+        "energy": float(rf_energy(seq)),
+        "baseline_flip": base,
+        "baseline_energy": e_ref,
+        "echoes": echoes(seq, simulate),
+        "peak_b1": float(b1_uT(seq).max()),
+        "n_evals": info["n_evals"],
+        "seconds": seconds,
+    }
 
 
 def slsqp_on_epg(start):
@@ -114,7 +122,13 @@ def slsqp_on_epg(start):
     def cons(b):
         return epg_echoes(b).numpy() / TARGET.numpy() - 1
 
-    r = scipy_minimize(lambda b: float(np.sum(b ** 2)), np.asarray(start, dtype=float), jac=lambda b: 2 * b,
-                       method="SLSQP", bounds=[(0, 180)] * N_ECHO, constraints=[{"type": "ineq", "fun": cons}],
-                       options={"ftol": 1e-14, "maxiter": 500})
+    r = scipy_minimize(
+        lambda b: float(np.sum(b**2)),
+        np.asarray(start, dtype=float),
+        jac=lambda b: 2 * b,
+        method="SLSQP",
+        bounds=[(0, 180)] * N_ECHO,
+        constraints=[{"type": "ineq", "fun": cons}],
+        options={"ftol": 1e-14, "maxiter": 500},
+    )
     return torch.as_tensor(r.x)

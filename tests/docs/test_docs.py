@@ -35,7 +35,9 @@ def test_lessons_index_and_topic_files_agree():
     for name in files:
         text = (DOCS / "lessons" / name).read_text()
         count = sum(1 for line in text.split("\n") if line.startswith("- "))
-        assert f"(lessons/{name}) ({count})" in (DOCS / "LESSONS.md").read_text(), f"{name}: the index's count is {count}"
+        assert f"(lessons/{name}) ({count})" in (DOCS / "LESSONS.md").read_text(), (
+            f"{name}: the index's count is {count}"
+        )
 
 
 def test_readme_layout_is_generated_from_the_docstrings():
@@ -52,8 +54,15 @@ def test_relative_links_resolve():
     """Every relative link in the living documents points at a file that exists (the journal and the archived
     roadmap keep the paths of their day)."""
     root = DOCS.parent
-    files = [*root.glob("*.md"), *DOCS.glob("*.md"), *DOCS.glob("lessons/*.md"), *DOCS.glob("specs/*.md"),
-             *DOCS.glob("reviews/*.md"), *root.glob("validation/**/*.md"), *root.glob("src/**/*.md")]
+    files = [
+        *root.glob("*.md"),
+        *DOCS.glob("*.md"),
+        *DOCS.glob("lessons/*.md"),
+        *DOCS.glob("specs/*.md"),
+        *DOCS.glob("reviews/*.md"),
+        *root.glob("validation/**/*.md"),
+        *root.glob("src/**/*.md"),
+    ]
     broken = []
     for f in files:
         if f.name in ("ROADMAP_ARCHIVE.md",):

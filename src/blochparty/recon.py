@@ -63,7 +63,7 @@ def ifft2c_ortho(k: Tensor) -> Tensor:
 def uniform_mask(n: int, lines: int, centre: int = 4) -> Tensor:
     """(n,) bool over the phase-encode lines: ``lines`` of them, the central ``centre`` always, the rest evenly spaced."""
     keep = torch.zeros(n, dtype=torch.bool)
-    keep[n // 2 - centre // 2: n // 2 - centre // 2 + centre] = True
+    keep[n // 2 - centre // 2 : n // 2 - centre // 2 + centre] = True
     rest = max(lines - centre, 0)
     if rest:
         cand = torch.nonzero(~keep).squeeze(1)
@@ -78,7 +78,7 @@ def variable_density_mask(n: int, lines: int, centre: int = 4, seed: int = 0) ->
     head); deterministic in ``seed``."""
     keep = uniform_mask(n, centre, centre)
     k = torch.arange(n, dtype=torch.float32) - n / 2
-    w = torch.exp(-k ** 2 / (2 * (n / 5) ** 2)) * (~keep)
+    w = torch.exp(-(k**2) / (2 * (n / 5) ** 2)) * (~keep)
     rest = max(lines - centre, 0)
     if rest:  # (torch.multinomial refuses zero samples)
         g = torch.Generator().manual_seed(seed)
@@ -90,7 +90,7 @@ def random_mask(n: int, accel: int, centre: float, rng: np.random.Generator) -> 
     """(n,) bool: n // accel lines, the central fraction ``centre`` always, the rest uniformly at random (``rng``)."""
     keep = np.zeros(n, bool)
     c = int(round(centre * n))
-    keep[n // 2 - c // 2:n // 2 - c // 2 + c] = True
+    keep[n // 2 - c // 2 : n // 2 - c // 2 + c] = True
     rest = np.flatnonzero(~keep)
     m = max(n // accel - c, 0)
     keep[rng.choice(rest, size=m, replace=False)] = True
@@ -110,7 +110,9 @@ def cg_sense(k: Tensor, maps: Tensor, mask: Tensor, iters: int = 20, lam: float 
 
     b = AH(k)
     x = torch.zeros_like(b)
-    r = b.clone(); p = r.clone(); rs = (r.conj() * r).sum().real
+    r = b.clone()
+    p = r.clone()
+    rs = (r.conj() * r).sum().real
     for _ in range(iters):
         Ap = AH(A(p)) + lam * p
         alpha = rs / (p.conj() * Ap).sum().real

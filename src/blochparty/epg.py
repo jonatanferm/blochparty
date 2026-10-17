@@ -59,11 +59,13 @@ def rf_matrix(alpha, phase=0.0, dtype=torch.complex128) -> Tensor:
     p = torch.exp(1j * torch.as_tensor(phase, dtype=_REAL[dtype])).to(dtype)
     c2, s2 = (torch.cos(a / 2) ** 2).to(dtype), (torch.sin(a / 2) ** 2).to(dtype)
     s, c = torch.sin(a).to(dtype), torch.cos(a).to(dtype)
-    return torch.stack([
-        torch.stack([c2, p * p * s2, 1j * p * s]),
-        torch.stack([s2 / (p * p), c2, -1j * s / p]),
-        torch.stack([0.5j * s / p, -0.5j * p * s, c]),
-    ])
+    return torch.stack(
+        [
+            torch.stack([c2, p * p * s2, 1j * p * s]),
+            torch.stack([s2 / (p * p), c2, -1j * s / p]),
+            torch.stack([0.5j * s / p, -0.5j * p * s, c]),
+        ]
+    )
 
 
 def epg_rf(state: Tensor, alpha, phase=0.0) -> Tensor:
@@ -106,12 +108,24 @@ def rf_spoil_phases(n_pulses: int, increment_deg: float = 117.0) -> Tensor:
     """Quadratic RF-spoiling phases phi_j = increment * j(j+1)/2 [rad], j = 0..n-1
     (the phase step grows by ``increment`` every TR). Wrapped exactly in degrees
     so long trains do not lose precision."""
-    return torch.tensor([math.radians((increment_deg * j * (j + 1) / 2) % 360.0) for j in range(n_pulses)],
-                        dtype=torch.float64)
+    return torch.tensor(
+        [math.radians((increment_deg * j * (j + 1) / 2) % 360.0) for j in range(n_pulses)], dtype=torch.float64
+    )
 
 
-def epg_spoiled_gre(t1, t2, tr, te, flip, n_pulses: int, rf_spoil_increment_deg: float | None = 117.0,
-                    *, ideal_spoil: bool = False, m0=1.0, n_states: int | None = None) -> Tensor:
+def epg_spoiled_gre(
+    t1,
+    t2,
+    tr,
+    te,
+    flip,
+    n_pulses: int,
+    rf_spoil_increment_deg: float | None = 117.0,
+    *,
+    ideal_spoil: bool = False,
+    m0=1.0,
+    n_states: int | None = None,
+) -> Tensor:
     """Gradient-spoiled GRE: per TR an RF pulse of ``flip`` degrees (centre at t=0),
     echo at ``te``, then one unit of spoiler gradient before the next pulse.
 
@@ -120,8 +134,11 @@ def epg_spoiled_gre(t1, t2, tr, te, flip, n_pulses: int, rf_spoil_increment_deg:
     zeros all transverse states at the end of each TR (the ``Sequence.spoil`` model).
     Returns the (n_pulses,) complex echo signal.
     """
-    phases = (rf_spoil_phases(n_pulses, rf_spoil_increment_deg) if rf_spoil_increment_deg is not None
-              else torch.zeros(n_pulses, dtype=torch.float64))
+    phases = (
+        rf_spoil_phases(n_pulses, rf_spoil_increment_deg)
+        if rf_spoil_increment_deg is not None
+        else torch.zeros(n_pulses, dtype=torch.float64)
+    )
     alpha = torch.deg2rad(torch.as_tensor(flip, dtype=torch.float64))
     state = epg_init(n_states or n_pulses + 1, m0, _cdtype(flip, t1, t2))
     out = []
@@ -152,8 +169,9 @@ def epg_cpmg(t1, t2, esp, refocus_flips, excite_flip=90.0, *, m0=1.0, n_states: 
     return torch.stack(out)
 
 
-def epg_bssfp(t1, t2, tr, flip, n_pulses: int, off_resonance_hz=0.0, *, phase_cycle_deg: float = 180.0,
-              m0=1.0) -> Tensor:
+def epg_bssfp(
+    t1, t2, tr, flip, n_pulses: int, off_resonance_hz=0.0, *, phase_cycle_deg: float = 180.0, m0=1.0
+) -> Tensor:
     """Balanced SSFP: pulses of ``flip`` degrees with phase j * ``phase_cycle_deg``,
     no net gradient (so only order 0 is ever populated), echo at TE = TR/2,
     demodulated by the RF phase. Returns the (n_pulses,) complex signal."""

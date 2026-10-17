@@ -17,6 +17,7 @@ regression on 32 intensity quantiles) shows how much the plain intensity histogr
 
     uv run python validation/realism/score.py --sim ~/data/realism_sim --out outputs/realism
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,8 +40,11 @@ CORNER = 12
 def background(img):
     """Median of the four 12 x 12 corners (outside the head) of a normalised image."""
     c = CORNER
-    return float(np.median(np.concatenate([img[:c, :c].ravel(), img[:c, -c:].ravel(), img[-c:, :c].ravel(),
-                                           img[-c:, -c:].ravel()])))
+    return float(
+        np.median(
+            np.concatenate([img[:c, :c].ravel(), img[:c, -c:].ravel(), img[-c:, :c].ravel(), img[-c:, -c:].ravel()])
+        )
+    )
 
 
 def real_set(cache: Path, root: Path = R.FASTMRI, slices=SLICES):
@@ -112,7 +116,9 @@ def sim_set(sim_dir: Path, floor: dict, seed=0, slices=SLICES, covariances=None)
                 noise = np.tensordot(chol, noise, 1)
             noisy = k + sigma * noise
             img = R.normalise(SH.to_real_orientation(R.recon(noisy)))
-            items.append((f"sim:{meta.get('source') or 'brainweb'}{meta['subject']:03d}", s, img))  # heads of one subject: one person
+            items.append(
+                (f"sim:{meta.get('source') or 'brainweb'}{meta['subject']:03d}", s, img)
+            )  # heads of one subject: one person
     return items
 
 
@@ -169,7 +175,7 @@ def cnn_scores(X, y, groups, folds=5, epochs=30, seed=0, device="cpu"):
             net.train()
             perm = train[torch.randperm(len(train), generator=gen).numpy()]
             for i in range(0, len(perm), 32):
-                idx = perm[i:i + 32]
+                idx = perm[i : i + 32]
                 xb = augment(Xt[idx], gen).to(device)
                 loss = nn.functional.binary_cross_entropy_with_logits(net(xb), yt[idx].to(device))
                 opt.zero_grad()
@@ -200,6 +206,7 @@ def histogram_scores(X, y, groups, folds=5, seed=0):
             out = nn.functional.binary_cross_entropy_with_logits(z, yt) + 1e-2 * (w[:-1] ** 2).sum()
             out.backward()
             return out
+
         opt.step(loss)
         with torch.no_grad():
             scores[te] = torch.sigmoid(f[te] @ w[:-1] + w[-1]).numpy()
@@ -218,8 +225,11 @@ def intensity_gap(items_a, items_b, threshold=0.15):
         out.append(float(np.mean(np.abs(np.quantile(a, q) - np.quantile(b, q)))))
         qa.append(np.quantile(a, [0.25, 0.5, 0.75]))
         qb.append(np.quantile(b, [0.25, 0.5, 0.75]))
-    return {"w1": float(np.mean(out)), "quartiles_a": np.round(np.mean(qa, 0), 3).tolist(),
-            "quartiles_b": np.round(np.mean(qb, 0), 3).tolist()}
+    return {
+        "w1": float(np.mean(out)),
+        "quartiles_a": np.round(np.mean(qa, 0), 3).tolist(),
+        "quartiles_b": np.round(np.mean(qb, 0), 3).tolist(),
+    }
 
 
 def run(name, items_a, items_b, device, epochs):
@@ -228,8 +238,16 @@ def run(name, items_a, items_b, device, epochs):
     groups = np.array([i[0] for i in items_a + items_b])
     s = cnn_scores(X, y, groups, epochs=epochs, device=device)
     h = histogram_scores(X, y, groups)
-    res = {"test": name, "intensity": intensity_gap(items_a, items_b), "n": [len(items_a), len(items_b)], "people": [len({i[0] for i in items_a}), len({i[0] for i in items_b})],
-           "cnn_auc": auc(y, s), "cnn_ci": bootstrap(y, s, groups), "histogram_auc": auc(y, h), "histogram_ci": bootstrap(y, h, groups)}
+    res = {
+        "test": name,
+        "intensity": intensity_gap(items_a, items_b),
+        "n": [len(items_a), len(items_b)],
+        "people": [len({i[0] for i in items_a}), len({i[0] for i in items_b})],
+        "cnn_auc": auc(y, s),
+        "cnn_ci": bootstrap(y, s, groups),
+        "histogram_auc": auc(y, h),
+        "histogram_ci": bootstrap(y, h, groups),
+    }
     slices = np.array([i[1] for i in items_a + items_b])
     res["cnn_auc_by_slice"] = {int(k): round(auc(y[slices == k], s[slices == k]), 3) for k in sorted(set(slices))}
     print(json.dumps({k: v for k, v in res.items() if k != "cnn_auc_by_slice"}), flush=True)
@@ -240,15 +258,23 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", type=Path, default=Path.home() / "data" / "realism_sim")
     ap.add_argument("--cache", type=Path, default=Path.home() / "data" / "realism_cache")
-    ap.add_argument("--fastmri", type=Path, default=R.FASTMRI, help="directory with the fastMRI files and manifest.json")
+    ap.add_argument(
+        "--fastmri", type=Path, default=R.FASTMRI, help="directory with the fastMRI files and manifest.json"
+    )
     ap.add_argument("--out", type=Path, default=Path("outputs/realism"))
     ap.add_argument("--epochs", type=int, default=30)
     ap.add_argument("--slices", default="0-12", help="slice indices used on both sides, a-b or a-b:step")
-    ap.add_argument("--quick", action="store_true",
-                    help="real vs simulated only (no real-vs-real / simulated-vs-simulated null checks): for fast iteration")
-    ap.add_argument("--white-noise", action="store_true",
-                    help="simulated noise white and equal across coils (before 2026-10-12) instead of each paired "
-                         "scan's coil covariance (noise_covariances)")
+    ap.add_argument(
+        "--quick",
+        action="store_true",
+        help="real vs simulated only (no real-vs-real / simulated-vs-simulated null checks): for fast iteration",
+    )
+    ap.add_argument(
+        "--white-noise",
+        action="store_true",
+        help="simulated noise white and equal across coils (before 2026-10-12) instead of each paired "
+        "scan's coil covariance (noise_covariances)",
+    )
     args = ap.parse_args()
     rng_, _, step = args.slices.partition(":")
     slices = range(int(rng_.split("-")[0]), int(rng_.split("-")[-1]) + 1, int(step or 1))
@@ -257,8 +283,11 @@ def main():
     real, floor = real_set(args.cache, args.fastmri, slices)
     covs = None if args.white_noise else noise_covariances(args.cache, args.fastmri)
     sim = sim_set(args.sim, floor, slices=slices, covariances=covs)
-    print(f"{len(real)} real slices from {len({i[0] for i in real})} scans, {len(sim)} simulated from "
-          f"{len({i[0] for i in sim})} source subjects; real noise floor {np.median(list(floor.values())):.4f} of p99", flush=True)
+    print(
+        f"{len(real)} real slices from {len({i[0] for i in real})} scans, {len(sim)} simulated from "
+        f"{len({i[0] for i in sim})} source subjects; real noise floor {np.median(list(floor.values())):.4f} of p99",
+        flush=True,
+    )
     results = []
     res, s = run("real vs simulated", real, sim, device, args.epochs)
     results.append(res)
@@ -268,11 +297,23 @@ def main():
         people = sorted({i[0] for i in items})
         rng.shuffle(people)
         half = set(people[: len(people) // 2])
-        results.append(run(kind, [i for i in items if i[0] in half], [i for i in items if i[0] not in half], device, args.epochs)[0])
+        results.append(
+            run(kind, [i for i in items if i[0] in half], [i for i in items if i[0] not in half], device, args.epochs)[
+                0
+            ]
+        )
     (args.out / "score.json").write_text(json.dumps(results, indent=1))
-    np.savez(args.out / "examples.npz", real=np.stack([i[2] for i in real]), sim=np.stack([i[2] for i in sim]),
-             sim_scores=s[len(real):], real_scores=s[: len(real)], real_groups=[i[0] for i in real],
-             sim_groups=[i[0] for i in sim], real_slices=[i[1] for i in real], sim_slices=[i[1] for i in sim])
+    np.savez(
+        args.out / "examples.npz",
+        real=np.stack([i[2] for i in real]),
+        sim=np.stack([i[2] for i in sim]),
+        sim_scores=s[len(real) :],
+        real_scores=s[: len(real)],
+        real_groups=[i[0] for i in real],
+        sim_groups=[i[0] for i in sim],
+        real_slices=[i[1] for i in real],
+        sim_slices=[i[1] for i in sim],
+    )
 
 
 if __name__ == "__main__":

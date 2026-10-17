@@ -45,8 +45,14 @@ def normals(seed: int, spin: np.ndarray, segment: int, sub: int = 0) -> np.ndarr
     spin = np.asarray(spin, dtype=np.uint64)
     out = []
     for block in (0, 1):
-        x = philox(spin, np.uint64(segment & _MASK), np.uint64(sub & _MASK), np.uint64(block),
-                   seed & _MASK, (seed >> 32) & _MASK)
+        x = philox(
+            spin,
+            np.uint64(segment & _MASK),
+            np.uint64(sub & _MASK),
+            np.uint64(block),
+            seed & _MASK,
+            (seed >> 32) & _MASK,
+        )
         for a, b in ((x[0], x[1]), (x[2], x[3])):
             r = np.sqrt(-2.0 * np.log(uniform(a)))
             th = 2.0 * np.pi * uniform(b)
@@ -59,6 +65,12 @@ START = 0xFFFFFFFF  # the (segment, sub) counter of the start offsets
 
 def uniforms(seed: int, spin: np.ndarray) -> np.ndarray:
     """(len(spin), 4) uniforms in (0, 1) for a walker's start within its compartment."""
-    x = philox(np.asarray(spin, dtype=np.uint64), np.uint64(START), np.uint64(START), np.uint64(0),
-               seed & _MASK, (seed >> 32) & _MASK)
+    x = philox(
+        np.asarray(spin, dtype=np.uint64),
+        np.uint64(START),
+        np.uint64(START),
+        np.uint64(0),
+        seed & _MASK,
+        (seed >> 32) & _MASK,
+    )
     return np.stack([uniform(v) for v in x], -1)

@@ -85,19 +85,29 @@ def _library_source() -> str:
     # each kernel four times (advance<V>): plain, with the rate-model bound pool and/or the field
     # model, with the generalized Bloch modes, and with free exchanging pools; extra per-thread
     # state costs the plain kernels ~10-30 % in register pressure otherwise
-    variants = [(suffix + dsuf, v, diff, "0") for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
-                for dsuf, diff in (("", "false"), ("_diff", "true"))]
+    variants = [
+        (suffix + dsuf, v, diff, "0")
+        for suffix, v in (("", "0"), ("_full", "1"), ("_gen", "2"))
+        for dsuf, diff in (("", "false"), ("_diff", "true"))
+    ]
     # free pools, one kernel per pool count
-    variants += [(f"_bm{k}{dsuf}", "3", diff, str(k)) for k in range(1, MAX_POOLS + 1)
-                 for dsuf, diff in (("", "false"), ("_diff", "true"))]
-    kernels = "".join(_KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@DIFF@", diff)
-                      .replace("@NP@", np_) for suffix, v, diff, np_ in variants)
+    variants += [
+        (f"_bm{k}{dsuf}", "3", diff, str(k))
+        for k in range(1, MAX_POOLS + 1)
+        for dsuf, diff in (("", "false"), ("_diff", "true"))
+    ]
+    kernels = "".join(
+        _KERNELS.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@DIFF@", diff).replace("@NP@", np_)
+        for suffix, v, diff, np_ in variants
+    )
     assert f"#define MAX_POOLS {MAX_POOLS} " in _SOURCE
     replay, adjoint = _ADJOINT_KERNEL.split("// NC: coils held in registers")
     adjoint = "// NC: coils held in registers" + adjoint
     for suffix, v in (("", "0"), ("_full", "1")):
         kernels += replay.replace("@SUFFIX@", suffix).replace("@V@", v)
-        kernels += "".join(adjoint.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@NC@", str(c)) for c in ADJOINT_COILS)
+        kernels += "".join(
+            adjoint.replace("@SUFFIX@", suffix).replace("@V@", v).replace("@NC@", str(c)) for c in ADJOINT_COILS
+        )
     for suffix, v in (("", "0"), ("_full", "1")):
         kernels += _PULSE_KERNEL.replace("@SUFFIX@", suffix).replace("@V@", v)
     return _SOURCE + _ADJOINT_COMMON + kernels
@@ -134,13 +144,28 @@ class _Metal:
     def synchronize(self) -> None:
         torch.mps.synchronize()
 
+
 METAL = _Metal()
 
 
-def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
-                   chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None,
-                   seed: int = 0, maps=None, checkpoint_every: int | None = None, readouts: str = "direct",
-                   nufft_width: int = 6, nufft_terms: int = 3, pulses: str = "step") -> SimResult:
+def simulate_metal(
+    phantom: Phantom,
+    seq: Sequence,
+    coils: Tensor | None = None,
+    *,
+    m_init: Tensor | None = None,
+    chunk: int = 32768,
+    group: int = 256,
+    scanner=None,
+    mma: bool | None = None,
+    seed: int = 0,
+    maps=None,
+    checkpoint_every: int | None = None,
+    readouts: str = "direct",
+    nufft_width: int = 6,
+    nufft_terms: int = 3,
+    pulses: str = "step",
+) -> SimResult:
     """Forward simulation on the Apple GPU; same arguments and result as ``blochparty.simulate``
     (results come back on the CPU, float32). ``chunk`` segments per dispatch; ``group`` threads
     per threadgroup (must be 256). ``mma`` picks the coil reduction: matrix products on simdgroup
@@ -168,5 +193,21 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     ``PULSE_MEMORY`` bytes at most of maps (12 or 20 floats per spin and pulse, the most-used pulses
     first); for static spins without concomitant fields, diffusion, motion, free pools or the
     generalized bound pool (raises otherwise)."""
-    return _simulate(METAL, phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps, checkpoint_every,
-                     readouts, nufft_width, nufft_terms, pulses)
+    return _simulate(
+        METAL,
+        phantom,
+        seq,
+        coils,
+        m_init,
+        chunk,
+        group,
+        scanner,
+        mma,
+        seed,
+        maps,
+        checkpoint_every,
+        readouts,
+        nufft_width,
+        nufft_terms,
+        pulses,
+    )

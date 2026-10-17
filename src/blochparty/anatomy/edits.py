@@ -31,7 +31,7 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     fr = anatomy.fractions
     if not {"skin", "fat", "background"} <= set(fr):
         raise ValueError("layer_scalp needs the background, skin and fat classes (BrainWeb)")
-    inside = ((1 - fr["background"]) > .5).numpy()
+    inside = ((1 - fr["background"]) > 0.5).numpy()
     h = float(np.mean(anatomy.voxel))
     # distance to the nearest outside voxel centre, less half a voxel: the boundary lies between them
     depth = ndimage.distance_transform_edt(inside, sampling=anatomy.voxel) - h / 2
@@ -41,7 +41,11 @@ def layer_scalp(anatomy: Anatomy, dermis: float = SCALP_LAYERS[0], subcutaneous:
     return replace(anatomy, fractions=fr | {"skin": fr["skin"] - move, "fat": fr["fat"] + move})
 
 
-GENERATED = ("dermis", "eye", "lesion")  # classes the head generator adds (add_dermis; prepare_ixi's orbit eye class; add_lesions)
+GENERATED = (
+    "dermis",
+    "eye",
+    "lesion",
+)  # classes the head generator adds (add_dermis; prepare_ixi's orbit eye class; add_lesions)
 
 
 def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
@@ -57,11 +61,11 @@ def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
     if "background" not in fr or "dermis" in fr:
         raise ValueError("add_dermis needs a background class and no dermis yet")
     tissue = 1 - fr["background"]
-    inside = (tissue > .5).numpy()
+    inside = (tissue > 0.5).numpy()
     h = float(np.mean(anatomy.voxel))
     depth = ndimage.distance_transform_edt(inside, sampling=anatomy.voxel) - h / 2
     w = np.clip((np.minimum(depth + h / 2, thickness) - np.maximum(depth + h / 2 - h, 0)) / h, 0, 1)
-    w = torch.from_numpy(np.where(inside, w, 1.)).to(tissue.dtype)
+    w = torch.from_numpy(np.where(inside, w, 1.0)).to(tissue.dtype)
     out = {k: (v if k == "background" else v * (1 - w)) for k, v in fr.items()}
     out["dermis"] = tissue * w
     return replace(anatomy, fractions=out)
@@ -70,8 +74,18 @@ def add_dermis(anatomy: Anatomy, thickness: float = SCALP_LAYERS[0]) -> Anatomy:
 LESION_REGIONS = ("any", "periventricular", "deep", "juxtacortical")
 
 
-def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), region: str = "any",
-                edge_mm: float = 1.0, spacing_mm: float = 10., z_mm=None, z_tolerance_mm: float = 3.) -> tuple[Anatomy, list[dict]]:
+def add_lesions(
+    anatomy: Anatomy,
+    rng,
+    *,
+    count: int = 3,
+    size_mm=(3.0, 10.0),
+    region: str = "any",
+    edge_mm: float = 1.0,
+    spacing_mm: float = 10.0,
+    z_mm=None,
+    z_tolerance_mm: float = 3.0,
+) -> tuple[Anatomy, list[dict]]:
     """White-matter lesions as their own class (``lesion``; ROADMAP M7: "a brain with this kind of lesion there"): ``count``
     ellipsoidal blobs with soft edges, each replacing the white matter it covers (every voxel's total is conserved; grey
     matter, CSF and the rest keep their fractions), centred on white matter of ``region``: "periventricular" (within
@@ -92,9 +106,9 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
         raise ValueError("add_lesions needs a wm class")
     voxel = np.asarray(anatomy.voxel, float)
     wm = fr["wm"].numpy()
-    candidates = wm > .5
+    candidates = wm > 0.5
     if region != "any":
-        gm = (fr["gm"].numpy() > .5) if "gm" in fr else np.zeros_like(candidates)
+        gm = (fr["gm"].numpy() > 0.5) if "gm" in fr else np.zeros_like(candidates)
         d_gm = ndimage.distance_transform_edt(~gm, sampling=voxel)
         if region == "juxtacortical":
             candidates &= d_gm <= 3e-3
@@ -126,13 +140,17 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
     records = []
     for c in centres:
         a = np.exp(rng.uniform(np.log(size_mm[0]), np.log(size_mm[1]))) * 1e-3 / 2
-        axes = np.array([a, a * rng.uniform(.5, 1.), a * rng.uniform(.5, 1.)])
+        axes = np.array([a, a * rng.uniform(0.5, 1.0), a * rng.uniform(0.5, 1.0)])
         q = rng.standard_normal(4)
         q /= np.linalg.norm(q)
         w_, x_, y_, z_ = q  # a uniform random rotation from a unit quaternion
-        rot = np.array([[1 - 2 * (y_ ** 2 + z_ ** 2), 2 * (x_ * y_ - z_ * w_), 2 * (x_ * z_ + y_ * w_)],
-                        [2 * (x_ * y_ + z_ * w_), 1 - 2 * (x_ ** 2 + z_ ** 2), 2 * (y_ * z_ - x_ * w_)],
-                        [2 * (x_ * z_ - y_ * w_), 2 * (y_ * z_ + x_ * w_), 1 - 2 * (x_ ** 2 + y_ ** 2)]])
+        rot = np.array(
+            [
+                [1 - 2 * (y_**2 + z_**2), 2 * (x_ * y_ - z_ * w_), 2 * (x_ * z_ + y_ * w_)],
+                [2 * (x_ * y_ + z_ * w_), 1 - 2 * (x_**2 + z_**2), 2 * (y_ * z_ - x_ * w_)],
+                [2 * (x_ * z_ - y_ * w_), 2 * (y_ * z_ + x_ * w_), 1 - 2 * (x_**2 + y_**2)],
+            ]
+        )
         reach = axes.max() + 3 * edge_mm * 1e-3
         lo = np.maximum(np.floor((c - reach) / voxel).astype(int), 0)
         hi = np.minimum(np.ceil((c + reach) / voxel).astype(int) + 1, np.array(candidates.shape))
@@ -145,14 +163,19 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
         w = 1 / (1 + np.exp(-dist / (edge_mm * 1e-3 / 4)))
         w = np.maximum(w, lesion[sub])
         lesion[sub] = w
-        records.append({"centre_mm": ((c + np.array(anatomy.origin[::-1])) * 1e3)[::-1].round(1).tolist(),
-                        "semi_axes_mm": (axes * 1e3).round(2).tolist(), "rotation": rot.round(4).tolist()})
+        records.append(
+            {
+                "centre_mm": ((c + np.array(anatomy.origin[::-1])) * 1e3)[::-1].round(1).tolist(),
+                "semi_axes_mm": (axes * 1e3).round(2).tolist(),
+                "rotation": rot.round(4).tolist(),
+            }
+        )
     taken = wm * lesion
     out = {k: (v - torch.from_numpy(taken).to(v.dtype) if k == "wm" else v) for k, v in fr.items()}
     out["lesion"] = torch.from_numpy(taken).to(fr["wm"].dtype) + (out["lesion"] if "lesion" in out else 0)
     placed = replace(anatomy, fractions=out)
     for r in records:  # the volume each lesion took from white matter, at the placed (soft) fractions
-        c = (np.array(r["centre_mm"][::-1]) * 1e-3 - np.array(anatomy.origin[::-1]))
+        c = np.array(r["centre_mm"][::-1]) * 1e-3 - np.array(anatomy.origin[::-1])
         reach = max(r["semi_axes_mm"]) * 1e-3 + 3 * edge_mm * 1e-3
         lo = np.maximum(np.floor((c - reach) / voxel).astype(int), 0)
         hi = np.minimum(np.ceil((c + reach) / voxel).astype(int) + 1, np.array(candidates.shape))
@@ -165,10 +188,12 @@ def add_lesions(anatomy: Anatomy, rng, *, count: int = 3, size_mm=(3., 10.), reg
 # ellipsoids (centre |x|, y, z; semi-axes) [mm], drawn around the nuclei in the models' grey-matter
 # maps (subjects 4, 38, 44 and 54 by eye) and centred near their usual MNI centroids. They hold no
 # cortex: the insula, cingulate and amygdala lie outside them. The caudate is a head and a body.
-DEEP_GREY = {"caudate": (((14., 14., 9.), (6., 13., 12.)), ((17., -6., 21.), (5., 14., 8.))),
-             "putamen": (((25., 1., 1.), (7., 20., 13.)),),
-             "pallidum": (((19., -4., -1.), (5., 9., 6.)),),
-             "thalamus": (((11., -19., 6.), (9., 15., 10.)),)}
+DEEP_GREY = {
+    "caudate": (((14.0, 14.0, 9.0), (6.0, 13.0, 12.0)), ((17.0, -6.0, 21.0), (5.0, 14.0, 8.0))),
+    "putamen": (((25.0, 1.0, 1.0), (7.0, 20.0, 13.0)),),
+    "pallidum": (((19.0, -4.0, -1.0), (5.0, 9.0, 6.0)),),
+    "thalamus": (((11.0, -19.0, 6.0), (9.0, 15.0, 10.0)),),
+}
 
 
 def label_deep_grey(anatomy: Anatomy) -> Anatomy:
@@ -181,12 +206,17 @@ def label_deep_grey(anatomy: Anatomy) -> Anatomy:
     fr = anatomy.fractions
     if "gm" not in fr or set(DEEP_GREY) & set(fr):
         raise ValueError("label_deep_grey needs a gm class and no deep grey classes yet (BrainWeb)")
-    x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1]))
+    x, y, z = (
+        (o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1])
+    )
     score = np.full((len(DEEP_GREY),) + tuple(anatomy.shape), -np.inf, dtype=np.float32)
     for i, regions in enumerate(DEEP_GREY.values()):
         for (cx, cy, cz), (ax, ay, az) in regions:
-            r2 = ((((z - cz) / az) ** 2)[:, None, None] + (((y - cy) / ay) ** 2)[None, :, None]
-                  + (((np.abs(x) - cx) / ax) ** 2)[None, None, :])
+            r2 = (
+                (((z - cz) / az) ** 2)[:, None, None]
+                + (((y - cy) / ay) ** 2)[None, :, None]
+                + (((np.abs(x) - cx) / ax) ** 2)[None, None, :]
+            )
             np.maximum(score[i], 1 - r2, out=score[i])
     best, inside = torch.from_numpy(score.argmax(0)), torch.from_numpy(score.max(0) > 0)
     gm, zero = fr["gm"], torch.zeros_like(fr["gm"])
@@ -204,8 +234,12 @@ FALX_THICKNESS = 0.91e-3
 FALX_ABOVE_CALLOSUM = 6e-3
 
 
-def add_falx(anatomy: Anatomy, thickness: float = FALX_THICKNESS, above_callosum: float = FALX_ABOVE_CALLOSUM,
-             half_width: float = 8e-3) -> Anatomy:
+def add_falx(
+    anatomy: Anatomy,
+    thickness: float = FALX_THICKNESS,
+    above_callosum: float = FALX_ABOVE_CALLOSUM,
+    half_width: float = 8e-3,
+) -> Anatomy:
     """The falx cerebri as dura in the interhemispheric fissure. BrainWeb's and IXI-segmented heads have none (dura
     0 at the midline), so their fissure is solid CSF: simulated T2w, its peak 4.7 x white matter against fastMRI's
     3.9. On an MNI-frame anatomy the subject's midsagittal plane x = a + b y + c z is fitted to the CSF-weighted
@@ -233,8 +267,9 @@ def add_falx(anatomy: Anatomy, thickness: float = FALX_THICKNESS, above_callosum
         amount = csf.sum(-1)
         cx = (csf * off).sum(-1) / np.maximum(amount, 1e-9)
         d = off - cx[..., None]
-        cortex = (((gm_all * ((d < -vx / 2) & (d >= -6e-3))).max(-1) >= .3)
-                  & ((gm_all * ((d > vx / 2) & (d <= 6e-3))).max(-1) >= .3))
+        cortex = ((gm_all * ((d < -vx / 2) & (d >= -6e-3))).max(-1) >= 0.3) & (
+            (gm_all * ((d > vx / 2) & (d <= 6e-3))).max(-1) >= 0.3
+        )
         return amount, centre + cx, cortex
 
     plane = np.zeros((nz, ny))
@@ -250,7 +285,8 @@ def add_falx(anatomy: Anatomy, thickness: float = FALX_THICKNESS, above_callosum
     def wm_at(shift):  # white matter at the voxel nearest the plane + shift, per row
         i = np.clip(np.round((plane + shift - x[0]) / vx).astype(int), 0, nx - 1)
         return np.take_along_axis(wm_all, i[..., None], -1)[..., 0]
-    callosum = (wm_at(0.) > .5) & (wm_at(-3e-3) > .5) & (wm_at(3e-3) > .5)  # (z, y)
+
+    callosum = (wm_at(0.0) > 0.5) & (wm_at(-3e-3) > 0.5) & (wm_at(3e-3) > 0.5)  # (z, y)
     above = np.flip(np.cumsum(np.flip(callosum, 0), 0), 0) - callosum > 0  # callosum somewhere higher
     below = np.zeros_like(callosum)
     for k in range(1, int(round(above_callosum / vz)) + 1):
@@ -265,8 +301,8 @@ def add_falx(anatomy: Anatomy, thickness: float = FALX_THICKNESS, above_callosum
 # Lateral-ventricle volume [mL] by age: Yamada et al. 2023 (Eur Radiol 33:7099, doi:10.1007/s00330-023-09632-x,
 # Table 3; 133 healthy Japanese adults, AI segmentation of 3D T1): < 40 y 17.3 +- 7.2 (n 47), 40-59 y
 # 19.4 +- 7.5 (n 49), >= 60 y 33.4 +- 13.4 (n 37); placed at 30, 50 and 70 y, linear between, flat beyond.
-BRAINWEB_AGE = 30.  # BrainWeb's 20 models are young adults, taken as 30
-VENTRICLE_AGE = ((30., 17.3, 7.2), (50., 19.4, 7.5), (70., 33.4, 13.4))
+BRAINWEB_AGE = 30.0  # BrainWeb's 20 models are young adults, taken as 30
+VENTRICLE_AGE = ((30.0, 17.3, 7.2), (50.0, 19.4, 7.5), (70.0, 33.4, 13.4))
 
 
 def ventricle_factor(age: float) -> float:
@@ -286,12 +322,14 @@ def ventricle_mask(anatomy: Anatomy) -> np.ndarray:
     from scipy import ndimage
 
     fr = anatomy.fractions
-    x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1]))
+    x, y, z = (
+        (o + np.arange(n) * h) * 1e3 for o, n, h in zip(anatomy.origin, anatomy.shape[::-1], anatomy.voxel[::-1])
+    )
     ax, Y, Z = np.abs(x)[None, None, :], y[None, :, None], z[:, None, None]
     region = (ax >= 1.5) & (ax <= 32) & (Y >= -48) & (Y <= 38) & (Z >= -2) & (Z <= 36)
     region &= ~((Y < -22) & (ax < 9)) & ~((Z < 8) & (ax > 24))
-    csf = (fr["csf"].numpy() > .5) & region
-    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *DEEP_GREY)).numpy() > .5
+    csf = (fr["csf"].numpy() > 0.5) & region
+    brain = sum(v for k, v in fr.items() if k in ("gm", "wm", *DEEP_GREY)).numpy() > 0.5
     hull = ndimage.binary_fill_holes(ndimage.binary_closing(brain, iterations=round(4e-3 / anatomy.voxel[1])))
     deep = ndimage.distance_transform_edt(hull, sampling=anatomy.voxel) > 12e-3
     lab, _ = ndimage.label(csf)
@@ -322,10 +360,12 @@ def ventricle_displacement(anatomy: Anatomy, mask: np.ndarray, offset: float, de
         core = core if core.any() else m
         d = ndimage.distance_transform_edt(~m, sampling=anatomy.voxel)
         _, idx = ndimage.distance_transform_edt(~core, sampling=anatomy.voxel, return_indices=True)
-        w = np.where(d <= 0, 0., np.where(d <= offset, 1., offset / np.maximum(d, 1e-9) * np.exp(-(d - offset) / decay)))
-        w[d > offset + 5 * decay] = 0.
+        w = np.where(
+            d <= 0, 0.0, np.where(d <= offset, 1.0, offset / np.maximum(d, 1e-9) * np.exp(-(d - offset) / decay))
+        )
+        w[d > offset + 5 * decay] = 0.0
         out += (idx * h - grid) * w
-    return torch.from_numpy(np.stack([ndimage.gaussian_filter(c, 1.) for c in out]))
+    return torch.from_numpy(np.stack([ndimage.gaussian_filter(c, 1.0) for c in out]))
 
 
 def ventricle_offset(anatomy: Anatomy, factor: float, mask: np.ndarray | None = None) -> tuple[float, float]:
@@ -335,20 +375,26 @@ def ventricle_offset(anatomy: Anatomy, factor: float, mask: np.ndarray | None = 
     csf = anatomy.fractions["csf"] * torch.from_numpy(mask).to(anatomy.fractions["csf"].dtype)
     v0 = float(csf.sum())
     if factor <= 1:
-        return 0., v0 * float(np.prod(anatomy.voxel))
+        return 0.0, v0 * float(np.prod(anatomy.voxel))
     ref = anatomy.fractions["csf"]
     region = torch.from_numpy(ndimage_dilate(mask, 20e-3, anatomy.voxel)).to(ref.dtype)
-    vol = lambda a: float((deform(Anatomy({"c": ref * region}, anatomy.voxel, anatomy.origin),
-                                  ventricle_displacement(anatomy, mask, a).to(ref.dtype)).fractions["c"]).sum())
-    base = vol(0.)
+    vol = lambda a: float(
+        (
+            deform(
+                Anatomy({"c": ref * region}, anatomy.voxel, anatomy.origin),
+                ventricle_displacement(anatomy, mask, a).to(ref.dtype),
+            ).fractions["c"]
+        ).sum()
+    )
+    base = vol(0.0)
     target = base + (factor - 1) * v0
-    lo, hi = 0., 1e-3
+    lo, hi = 0.0, 1e-3
     while vol(hi) < target and hi < 16e-3:
         lo, hi = hi, 2 * hi
     for _ in range(12):
         mid = (lo + hi) / 2
         lo, hi = (mid, hi) if vol(mid) < target else (lo, mid)
-        if hi - lo < .02 * hi:
+        if hi - lo < 0.02 * hi:
             break
     return (lo + hi) / 2, v0 * float(np.prod(anatomy.voxel))
 
@@ -372,14 +418,14 @@ def sulcal_width(age: float) -> tuple[float, float]:
     """Mean and between-subject SD of sulcal width [m] at ``age`` [years] (``SULCAL_WIDTH_AGE``)."""
     (a0, w0, s0), (a1, w1, s1) = SULCAL_WIDTH_AGE
     t = (float(age) - a0) / (a1 - a0)
-    return w0 + t * (w1 - w0), max(s0 + t * (s1 - s0), 0.)
+    return w0 + t * (w1 - w0), max(s0 + t * (s1 - s0), 0.0)
 
 
 def sulcal_widening(age: float) -> float:
     """Sulcal widening [m] beyond ``BRAINWEB_AGE`` at ``age`` [years]: the slope of ``SULCAL_WIDTH_AGE``
     (0.011 mm per year), none below."""
     (a0, w0, _), (a1, w1, _) = SULCAL_WIDTH_AGE
-    return max(float(age) - BRAINWEB_AGE, 0.) * (w1 - w0) / (a1 - a0)
+    return max(float(age) - BRAINWEB_AGE, 0.0) * (w1 - w0) / (a1 - a0)
 
 
 def gather_cortical_csf(anatomy: Anatomy) -> Anatomy:
@@ -392,12 +438,18 @@ def gather_cortical_csf(anatomy: Anatomy) -> Anatomy:
     gm, csf = fr["gm"], fr["csf"]
     deep = np.zeros(tuple(gm.shape), bool)
     for r2 in _deep_grey_r2(anatomy.origin, tuple(gm.shape), anatomy.voxel):
-        deep |= r2 < 1.3 ** 2
+        deep |= r2 < 1.3**2
     mix = (gm > 0) & (csf > 0) & ~torch.from_numpy(deep)
     to_csf = mix & (csf >= gm)
     both, zero = gm + csf, torch.zeros_like(gm)
-    return replace(anatomy, fractions=fr | {"gm": torch.where(mix, torch.where(to_csf, zero, both), gm),
-                                            "csf": torch.where(mix, torch.where(to_csf, both, zero), csf)})
+    return replace(
+        anatomy,
+        fractions=fr
+        | {
+            "gm": torch.where(mix, torch.where(to_csf, zero, both), gm),
+            "csf": torch.where(mix, torch.where(to_csf, both, zero), csf),
+        },
+    )
 
 
 def _deep_grey_r2(origin, shape, voxel):
@@ -405,12 +457,22 @@ def _deep_grey_r2(origin, shape, voxel):
     x, y, z = ((o + np.arange(n) * h) * 1e3 for o, n, h in zip(origin, shape[::-1], voxel[::-1]))
     for regions in DEEP_GREY.values():
         for (cx, cy, cz), (ax, ay, az) in regions:
-            yield ((((z - cz) / az) ** 2)[:, None, None] + (((y - cy) / ay) ** 2)[None, :, None]
-                   + (((np.abs(x) - cx) / ax) ** 2)[None, None, :])
+            yield (
+                (((z - cz) / az) ** 2)[:, None, None]
+                + (((y - cy) / ay) ** 2)[None, :, None]
+                + (((np.abs(x) - cx) / ax) ** 2)[None, None, :]
+            )
 
 
-def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float = 3e-3, opposed: float = 0.5, *,
-               volume: float | None = None, widen: float = 0.) -> Anatomy:
+def open_sulci(
+    anatomy: Anatomy,
+    width: float | None = None,
+    separation: float = 3e-3,
+    opposed: float = 0.5,
+    *,
+    volume: float | None = None,
+    widen: float = 0.0,
+) -> Anatomy:
     """Open closed sulci to ``width`` [m] of CSF, or to the width that adds ``volume`` [m^3] of CSF
     (solved by bisection), plus ``widen`` [m]. BrainWeb's fuzzy models (1.5 T scans at 1 mm) give
     narrow sulci to grey matter: two cortical banks touch with no CSF between them, and T2-weighted
@@ -434,7 +496,7 @@ def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float =
         return anatomy
     fr = anatomy.fractions
     gm_all, wm_all, csf_all = (fr[k].numpy() for k in ("gm", "wm", "csf"))
-    brain = (gm_all + wm_all) > .5
+    brain = (gm_all + wm_all) > 0.5
     if not brain.any():
         return anatomy
     vox = np.array(anatomy.voxel, dtype=np.float64)
@@ -445,8 +507,10 @@ def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float =
         box.append(slice(max(int(idx[0]) - pad[k], 0), int(idx[-1]) + pad[k] + 1))
     box = tuple(box)
     gm, wm, csf = (a[box].astype(np.float32) for a in (gm_all, wm_all, csf_all))
-    white = wm > .5
-    F = ndimage.distance_transform_edt(~white, sampling=vox, return_distances=False, return_indices=True).astype(np.int32)
+    white = wm > 0.5
+    F = ndimage.distance_transform_edt(~white, sampling=vox, return_distances=False, return_indices=True).astype(
+        np.int32
+    )
     # the strongest shock at each voxel: its partner across it (axis, side) and the separation
     best = np.zeros(gm.shape, np.float32)
     part = np.full(gm.shape, -1, np.int8)
@@ -456,10 +520,16 @@ def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float =
         a[ax], b[ax] = slice(0, -1), slice(1, None)
         a, b = tuple(a), tuple(b)
         sep = np.sqrt(sum(((F[k][a] - F[k][b]) * vox[k]) ** 2 for k in range(3))).astype(np.float32)
-        dot = sum((F[k][a] - grid[k][a]).astype(np.float32) * (F[k][b] - grid[k][b]).astype(np.float32)
-                  * np.float32(vox[k] ** 2) for k in range(3))
-        norm = np.sqrt(sum(((F[k][a] - grid[k][a]) * vox[k]) ** 2 for k in range(3))
-                       * sum(((F[k][b] - grid[k][b]) * vox[k]) ** 2 for k in range(3))).astype(np.float32)
+        dot = sum(
+            (F[k][a] - grid[k][a]).astype(np.float32)
+            * (F[k][b] - grid[k][b]).astype(np.float32)
+            * np.float32(vox[k] ** 2)
+            for k in range(3)
+        )
+        norm = np.sqrt(
+            sum(((F[k][a] - grid[k][a]) * vox[k]) ** 2 for k in range(3))
+            * sum(((F[k][b] - grid[k][b]) * vox[k]) ** 2 for k in range(3))
+        ).astype(np.float32)
         hit = np.where((sep >= separation) & (dot < -opposed * norm), sep, 0).astype(np.float32)
         for sl, code in ((a, 2 * ax), (b, 2 * ax + 1)):
             upd = hit > best[sl]
@@ -469,10 +539,10 @@ def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float =
     origin = tuple(o + sl.start * h for o, sl, h in zip(anatomy.origin, box[::-1], anatomy.voxel[::-1]))
     deep = np.zeros(gm.shape, bool)
     for r2 in _deep_grey_r2(origin, gm.shape, anatomy.voxel):
-        deep |= r2 < 1.3 ** 2
-    sheet = (best > 0) & (gm > .2) & ~deep
+        deep |= r2 < 1.3**2
+    sheet = (best > 0) & (gm > 0.2) & ~deep
     # the CSF around the brain: CSF > 0.5 connected to the space outside the (closed, filled) brain
-    c = csf > .5
+    c = csf > 0.5
     outside = ~ndimage.binary_fill_holes(ndimage.binary_closing(brain[box], iterations=max(pad[0] * 3 // 4, 1)))
     lab, _ = ndimage.label(c | outside)
     outer = np.isin(lab, np.unique(lab[outside])) & c
@@ -501,10 +571,10 @@ def open_sulci(anatomy: Anatomy, width: float | None = None, separation: float =
     cell = float(np.prod(vox))
 
     def fill(w):
-        return np.clip(np.minimum(np.clip((w / 2 - r) / h + .5, 0, 1) - csf_n, gm_n), 0, None) * keep
+        return np.clip(np.minimum(np.clip((w / 2 - r) / h + 0.5, 0, 1) - csf_n, gm_n), 0, None) * keep
 
     if width is None:  # the width whose fill adds `volume`
-        lo, hi = 0., 4e-3
+        lo, hi = 0.0, 4e-3
         for _ in range(40):
             mid = (lo + hi) / 2
             lo, hi = (mid, hi) if fill(mid).sum() * cell < volume else (lo, mid)

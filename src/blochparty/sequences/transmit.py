@@ -55,8 +55,9 @@ def pulses(seq: Sequence) -> list[tuple[int, int]]:
     return out
 
 
-def amplifier(seq: Sequence, gain: float = 1.0, a_sat: float = math.inf, p: float = 2.0, phi_max: float = 0.0,
-              droop: float = 0.0) -> Sequence:
+def amplifier(
+    seq: Sequence, gain: float = 1.0, a_sat: float = math.inf, p: float = 2.0, phi_max: float = 0.0, droop: float = 0.0
+) -> Sequence:
     """The sequence with the RF the amplifier delivers (see the module docstring)."""
     rf = seq.rf.clone()
     for a, b in pulses(seq):

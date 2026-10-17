@@ -35,13 +35,20 @@ class Phantom:
 
     def to(self, dtype=None, device=None) -> Phantom:
         conv = lambda t: None if t is None else t.to(dtype=dtype, device=device)
-        return replace(self, pos=conv(self.pos), pd=conv(self.pd), t1=conv(self.t1),
-                       t2=conv(self.t2), db0=conv(self.db0), b1=conv(self.b1),
-                       bound=None if self.bound is None else self.bound.to(dtype=dtype, device=device),
-                       pools=None if self.pools is None else tuple(q.to(dtype=dtype, device=device) for q in self.pools),
-                       diffusion=conv(self.diffusion),
-                       restriction=None if self.restriction is None else self.restriction.to(dtype=dtype, device=device),
-                       motion=None if self.motion is None else self.motion.to(dtype=dtype, device=device))
+        return replace(
+            self,
+            pos=conv(self.pos),
+            pd=conv(self.pd),
+            t1=conv(self.t1),
+            t2=conv(self.t2),
+            db0=conv(self.db0),
+            b1=conv(self.b1),
+            bound=None if self.bound is None else self.bound.to(dtype=dtype, device=device),
+            pools=None if self.pools is None else tuple(q.to(dtype=dtype, device=device) for q in self.pools),
+            diffusion=conv(self.diffusion),
+            restriction=None if self.restriction is None else self.restriction.to(dtype=dtype, device=device),
+            motion=None if self.motion is None else self.motion.to(dtype=dtype, device=device),
+        )
 
 
 def grid_positions(shape: int | tuple[int, ...], fov: float, dtype=torch.float64) -> Tensor:
@@ -59,7 +66,6 @@ def grid_positions(shape: int | tuple[int, ...], fov: float, dtype=torch.float64
     return torch.stack(xyz, dim=-1)
 
 
-
 # Six-peak fat spectrum (Ren et al., J Lipid Res 2008; ISMRM fat-water toolbox): chemical shift
 # relative to water [ppm] and relative amplitude. Fat resonates below water: negative shifts.
 FAT_PEAKS = ((-3.80, 0.087), (-3.40, 0.693), (-2.60, 0.128), (-1.94, 0.004), (-0.39, 0.039), (0.60, 0.048))
@@ -70,8 +76,10 @@ def _subvoxel_counts(spins_per_voxel, ndim: int) -> tuple[int, ...]:
     if isinstance(spins_per_voxel, int):
         side = round(spins_per_voxel ** (1 / ndim))
         if side**ndim != spins_per_voxel:
-            raise ValueError(f"spins_per_voxel={spins_per_voxel} is not a perfect {ndim}-th power; "
-                             f"give spins per side along each axis as a tuple instead")
+            raise ValueError(
+                f"spins_per_voxel={spins_per_voxel} is not a perfect {ndim}-th power; "
+                f"give spins per side along each axis as a tuple instead"
+            )
         return (side,) * ndim
     counts = tuple(int(k) for k in spins_per_voxel)
     if len(counts) != ndim or min(counts) < 1:
@@ -150,8 +158,11 @@ def phantom_from_maps(
         # offset of each spin from its voxel centre, as a fraction of the voxel, per axis (x, y, z)
         frac = torch.zeros(n_vox, k, 3, dtype=pd.dtype)
         cells = torch.cartesian_prod(*(torch.arange(c) for c in counts)).reshape(k, len(counts))
-        u = (torch.rand(n_vox, k, len(counts), generator=gen, dtype=pd.dtype) if jitter == "stratified"
-             else torch.full((n_vox, k, len(counts)), 0.5, dtype=pd.dtype))
+        u = (
+            torch.rand(n_vox, k, len(counts), generator=gen, dtype=pd.dtype)
+            if jitter == "stratified"
+            else torch.full((n_vox, k, len(counts)), 0.5, dtype=pd.dtype)
+        )
         sides = torch.tensor(counts, dtype=pd.dtype)
         frac[..., : len(counts)] = ((cells + u) / sides - 0.5).flip(-1)  # map axes (z, y, x) -> (x, y, z)
         voxel = torch.tensor([fov / n for n in reversed(pd.shape)] + [0.0] * (3 - pd.ndim), dtype=pd.dtype)
@@ -256,8 +267,9 @@ def shepp_logan_maps(n: int, ndim: int = 2, dtype=torch.float64) -> dict[str, Te
     return {"label": label, "pd": props[..., 0], "t1": props[..., 1], "t2": props[..., 2]}
 
 
-def shepp_logan(n: int = 64, fov: float = 0.22, ndim: int = 2, dtype=torch.float64, *,
-                chemical_shift: bool = False, **kwargs) -> Phantom:
+def shepp_logan(
+    n: int = 64, fov: float = 0.22, ndim: int = 2, dtype=torch.float64, *, chemical_shift: bool = False, **kwargs
+) -> Phantom:
     """Shepp-Logan phantom; ``kwargs`` go to ``phantom_from_maps`` (sub-voxel spins, T2',
     B1+, ...). ``chemical_shift`` makes the "fat" tissue fat (fat fraction 1, multi-peak
     spectrum) instead of a water-like spin with fat's T1 / T2."""
@@ -279,8 +291,17 @@ def b0_shim(pos: Tensor, *, offset=0.0, x=0.0, y=0.0, z=0.0, z2=0.0, zx=0.0, zy=
     ``z`` [Hz/m]; ``z2`` * (z^2 - (x^2 + y^2) / 2), ``zx`` * z x, ``zy`` * z y,
     ``x2y2`` * (x^2 - y^2), ``xy`` * x y [Hz/m^2]. Coefficients may be tensors."""
     px, py, pz = pos.unbind(-1)
-    return (offset + x * px + y * py + z * pz + z2 * (pz**2 - 0.5 * (px**2 + py**2)) + zx * pz * px
-            + zy * pz * py + x2y2 * (px**2 - py**2) + xy * px * py)
+    return (
+        offset
+        + x * px
+        + y * py
+        + z * pz
+        + z2 * (pz**2 - 0.5 * (px**2 + py**2))
+        + zx * pz * px
+        + zy * pz * py
+        + x2y2 * (px**2 - py**2)
+        + xy * px * py
+    )
 
 
 def b0_sphere(pos: Tensor, centre, radius: float, dchi: float, field_strength: float = 3.0) -> Tensor:
@@ -295,8 +316,9 @@ def b0_sphere(pos: Tensor, centre, radius: float, dchi: float, field_strength: f
     return torch.where(r2 > radius**2, out, torch.zeros_like(out))
 
 
-def b0_cylinder(pos: Tensor, centre, radius: float, dchi: float, axis=(1.0, 0.0, 0.0),
-                field_strength: float = 3.0) -> Tensor:
+def b0_cylinder(
+    pos: Tensor, centre, radius: float, dchi: float, axis=(1.0, 0.0, 0.0), field_strength: float = 3.0
+) -> Tensor:
     """Field of an infinite cylinder (through ``centre``, along ``axis``) whose susceptibility
     differs by ``dchi`` (SI), B0 along z, theta the angle between axis and B0. Closed form,
     Lorentz corrected: inside gamma_bar B0 dchi / 6 (3 cos^2(theta) - 1); outside
@@ -311,6 +333,7 @@ def b0_cylinder(pos: Tensor, centre, radius: float, dchi: float, axis=(1.0, 0.0,
     scale = GAMMA_BAR * field_strength * dchi
     inside = scale / 6 * (3 * cos_t2 - 1)
     # sin^2(theta) cos(2 phi) = 2 perp_z^2 / rho^2 - sin^2(theta)
-    outside = scale / 2 * radius**2 / rho2.clamp_min(1e-300) * (2 * perp[..., 2] ** 2 / rho2.clamp_min(1e-300)
-                                                               - (1 - cos_t2))
+    outside = (
+        scale / 2 * radius**2 / rho2.clamp_min(1e-300) * (2 * perp[..., 2] ** 2 / rho2.clamp_min(1e-300) - (1 - cos_t2))
+    )
     return torch.where(rho2 > radius**2, outside, inside.expand_as(outside))

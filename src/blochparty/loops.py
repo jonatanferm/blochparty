@@ -47,7 +47,8 @@ class Loop:
         e2 = torch.linalg.cross(n, e1)
         phi = torch.linspace(0, 2 * math.pi, self.n_seg + 1, dtype=dtype)
         pts = torch.as_tensor(self.centre, dtype=dtype) + self.radius * (
-            torch.cos(phi)[:, None] * e1 + torch.sin(phi)[:, None] * e2)
+            torch.cos(phi)[:, None] * e1 + torch.sin(phi)[:, None] * e2
+        )
         return 0.5 * (pts[1:] + pts[:-1]), pts[1:] - pts[:-1]
 
 
@@ -59,7 +60,7 @@ def fields(loops: list[Loop], pts: Tensor, chunk: int = 4096) -> tuple[Tensor, T
         mid, dl = lp.segments(pts.dtype)
         b, a = [], []
         for s in range(0, pts.shape[0], chunk):
-            r = pts[s:s + chunk, None, :] - mid[None]  # (p, n_seg, 3)
+            r = pts[s : s + chunk, None, :] - mid[None]  # (p, n_seg, 3)
             d = r.norm(dim=-1, keepdim=True)
             b.append(MU0 / (4 * math.pi) * (torch.linalg.cross(dl[None].expand_as(r), r) / d**3).sum(1))
             a.append(MU0 / (4 * math.pi) * (dl[None] / d).sum(1))
@@ -89,8 +90,15 @@ def resistance(A: Tensor, conductivity: Tensor, volume: Tensor, freq_hz: float, 
     return R + coil_r * torch.eye(A.shape[0], dtype=A.dtype)
 
 
-def field_maps(loops: list[Loop], origin, spacing, shape, reference=(0.0, 0.0, 0.0), drive: Tensor | None = None,
-               scale: float | None = None):
+def field_maps(
+    loops: list[Loop],
+    origin,
+    spacing,
+    shape,
+    reference=(0.0, 0.0, 0.0),
+    drive: Tensor | None = None,
+    scale: float | None = None,
+):
     """``maps.FieldMaps`` of a loop array on a grid (shape (nz, ny, nx); origin and spacing in x y
     z): receive sensitivities B1- (scaled by ``scale``, default 1 / max |B1-| over the grid)
     and |B1+| of the driven array relative to ``reference``."""
@@ -99,12 +107,17 @@ def field_maps(loops: list[Loop], origin, spacing, shape, reference=(0.0, 0.0, 0
     nz, ny, nx = shape
     o = torch.as_tensor(origin, dtype=torch.float64)
     h = torch.as_tensor(spacing, dtype=torch.float64)
-    zz, yy, xx = torch.meshgrid(*(o[i] + h[i] * torch.arange(m, dtype=torch.float64) for i, m in ((2, nz), (1, ny), (0, nx))),
-                                indexing="ij")
+    zz, yy, xx = torch.meshgrid(
+        *(o[i] + h[i] * torch.arange(m, dtype=torch.float64) for i, m in ((2, nz), (1, ny), (0, nx))), indexing="ij"
+    )
     pts = torch.stack([xx, yy, zz], -1).reshape(-1, 3)
     B, _ = fields(loops, torch.cat([pts, torch.as_tensor([reference], dtype=torch.float64)]))
     sens = receive_sensitivities(B[:, :-1])  # (P, C)
     scale = 1 / float(sens.abs().max()) if scale is None else scale
     bp = b1_plus(B, drive).abs()
-    return FieldMaps(origin, spacing, b1=(bp[:-1] / bp[-1]).reshape(nz, ny, nx),
-                     coils=(scale * sens).T.reshape(len(loops), nz, ny, nx))
+    return FieldMaps(
+        origin,
+        spacing,
+        b1=(bp[:-1] / bp[-1]).reshape(nz, ny, nx),
+        coils=(scale * sens).T.reshape(len(loops), nz, ny, nx),
+    )

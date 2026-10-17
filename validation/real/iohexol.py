@@ -209,8 +209,10 @@ def phantom(par: dict, db0_hz, b1, f_hz, period: float, gap: float, g: float, si
     pos = torch.zeros(nt * nf, 3, dtype=torch.float64)
     pos[:, 0] = dpsi / (2 * math.pi * g * gap)
     one = torch.ones(nt * nf, dtype=torch.float64)
-    pools = (ExchangePool(rep(par["f_nh"]), rep(par["k_nh"]), one, 0.01 * one, 4.3 * F_SCANNER * one),
-             ExchangePool(rep(par["f_oh"]), rep(par["k_oh"]), one, 0.01 * one, rep(par["dw_oh"]) * F_SCANNER))
+    pools = (
+        ExchangePool(rep(par["f_nh"]), rep(par["k_nh"]), one, 0.01 * one, 4.3 * F_SCANNER * one),
+        ExchangePool(rep(par["f_oh"]), rep(par["k_oh"]), one, 0.01 * one, rep(par["dw_oh"]) * F_SCANNER),
+    )
     return bp.Phantom(pos, one, rep(par["t1"]), rep(par["t2"]), rep(db0_hz) - f, rep(b1), pools=pools)
 
 
@@ -220,7 +222,6 @@ def spectra(par: dict, db0_hz, b1, n_pulses: int, passes: int = 2, step: float =
     ``passes`` times from ``start`` (Mz at the start of each offset's preparation, (n_tubes * 58,);
     default equilibrium). Returns (Z, Mz before readout, start states for the next call)."""
     import torch
-
 
     env, period, sign, _, _ = sat_pulse(step)
     prep, ro, g, gap = build_offsets(n_pulses, env, period, step)
@@ -262,21 +263,37 @@ def measured():
         zz = mag[1:, 1] / np.maximum(mag[0, 1], 1e-9)
         drift[t] = float(np.median(water_shift(zz[:, bath], w) - b0[bath])) * F_SEQ
         z[t] = np.stack([zz[:, r].mean(1) for r in rois])
-    return rois, z, np.array([np.median(b0[r]) for r in rois]) * F_SCANNER, np.array([np.median(b1[r]) for r in rois]), drift, int(bath.sum())
+    return (
+        rois,
+        z,
+        np.array([np.median(b0[r]) for r in rois]) * F_SCANNER,
+        np.array([np.median(b1[r]) for r in rois]),
+        drift,
+        int(bath.sum()),
+    )
 
 
 NAMES = ("t1", "t2", "f_nh", "k_nh", "f_oh", "k_oh", "dw_oh")
 LOG = {"t1", "t2", "f_nh", "k_nh", "f_oh", "k_oh"}
 START = dict(t1=1.0, t2=0.2, f_nh=0.002, k_nh=1000.0, f_oh=0.005, k_oh=1500.0, dw_oh=0.8)
-BOUNDS = dict(t1=(0.2, 4.0), t2=(0.01, 3.0), f_nh=(1e-5, 0.05), k_nh=(20.0, 2e4), f_oh=(1e-5, 0.1),
-              k_oh=(20.0, 4e4), dw_oh=(0.2, 2.5))
+BOUNDS = dict(
+    t1=(0.2, 4.0),
+    t2=(0.01, 3.0),
+    f_nh=(1e-5, 0.05),
+    k_nh=(20.0, 2e4),
+    f_oh=(1e-5, 0.1),
+    k_oh=(20.0, 4e4),
+    dw_oh=(0.2, 2.5),
+)
 
 
 def _to_par(theta: np.ndarray) -> dict:
     import torch
 
-    return {n: torch.as_tensor(np.exp(theta[:, j]) if n in LOG else theta[:, j], dtype=torch.float64)
-            for j, n in enumerate(NAMES)}
+    return {
+        n: torch.as_tensor(np.exp(theta[:, j]) if n in LOG else theta[:, j], dtype=torch.float64)
+        for j, n in enumerate(NAMES)
+    }
 
 
 def _clip(theta):
@@ -286,8 +303,16 @@ def _clip(theta):
     return theta
 
 
-def fit(z_meas: np.ndarray, db0_hz, b1, n_pulses: int = 15, iters: int = 10, h: float = 1e-3, step: float = 200e-6,
-        fixed: dict | None = None):
+def fit(
+    z_meas: np.ndarray,
+    db0_hz,
+    b1,
+    n_pulses: int = 15,
+    iters: int = 10,
+    h: float = 1e-3,
+    step: float = 200e-6,
+    fixed: dict | None = None,
+):
     """Levenberg-Marquardt per tube on (n_tubes, 57) measured Z; the Jacobian by forward differences
     of all parameters at once (each tube's 1 + 7 parameter sets are spins of one simulation). The
     offsets' coupling (readout + Trec) is carried between iterations: one pass each after the first
@@ -306,8 +331,15 @@ def fit(z_meas: np.ndarray, db0_hz, b1, n_pulses: int = 15, iters: int = 10, h: 
         sets = np.repeat(theta[:, None, :], nf + 1, 1)
         for q, j in enumerate(free):
             sets[:, q + 1, j] += h
-        zs, _, st = spectra(_to_par(sets.reshape(-1, npar)), np.repeat(db0_hz, nf + 1), np.repeat(b1, nf + 1),
-                            n_pulses, passes=2 if start is None else 1, step=step, start=start)
+        zs, _, st = spectra(
+            _to_par(sets.reshape(-1, npar)),
+            np.repeat(db0_hz, nf + 1),
+            np.repeat(b1, nf + 1),
+            n_pulses,
+            passes=2 if start is None else 1,
+            step=step,
+            start=start,
+        )
         start = st.reshape(nt, nf + 1, -1)[:, :1].expand(nt, nf + 1, -1).reshape(-1)
         zs = zs.numpy().reshape(nt, nf + 1, -1)
         r = zs[:, 0] - z_meas
@@ -342,8 +374,10 @@ def main(argv):
             z = mag[1:, 1] / np.maximum(mag[0, 1], 1e-9)
             core = mag[0, 1] > 0.5 * mag[0, 1].max()
             zz = np.median(z[:, core], axis=1)
-            print(f"Tsat {tsat} s: images {mag.shape}; median Z over the bright region: min {zz.min():.3f} at "
-                  f"{w[1:][np.argmin(zz)]:+.2f} ppm, Z(-5) {zz[0]:.3f}, Z(+6) {zz[-1]:.3f}, Z(4.2) {zz[np.argmin(abs(w[1:] - 4.2))]:.3f}")
+            print(
+                f"Tsat {tsat} s: images {mag.shape}; median Z over the bright region: min {zz.min():.3f} at "
+                f"{w[1:][np.argmin(zz)]:+.2f} ppm, Z(-5) {zz[0]:.3f}, Z(+6) {zz[-1]:.3f}, Z(4.2) {zz[np.argmin(abs(w[1:] - 4.2))]:.3f}"
+            )
     if what in ("fit", "fit_t1"):
         import json
 
@@ -375,16 +409,22 @@ def main(argv):
         rms = lambda a, b: np.sqrt(np.mean((a - b) ** 2, axis=1))  # noqa: E731
         fit_rms, pred_rms, same_rms = rms(sim[1.5], z[1.5]), rms(sim[4.0], z[4.0]), rms(z[1.5], z[4.0])
         dz_meas, dz_sim = z[4.0] - z[1.5], sim[4.0] - sim[1.5]
-        print("tube: fitted T1 / T2 [s], f_nh, k_nh, f_oh, k_oh, dw_oh | rms: fit at 1.5 s, predicted 4 s, "
-              "'no change' 4 s | change 4 - 1.5 s at 4.3 ppm measured / predicted")
+        print(
+            "tube: fitted T1 / T2 [s], f_nh, k_nh, f_oh, k_oh, dw_oh | rms: fit at 1.5 s, predicted 4 s, "
+            "'no change' 4 s | change 4 - 1.5 s at 4.3 ppm measured / predicted"
+        )
         k43 = np.argmin(abs(w - 4.3))
         for i in range(len(db0)):
-            print(f"  {i + 1}: {par['t1'][i]:.3f} / {par['t2'][i]:.3f}, {par['f_nh'][i]:.2e}, {par['k_nh'][i]:.0f}, "
-                  f"{par['f_oh'][i]:.2e}, {par['k_oh'][i]:.0f}, {par['dw_oh'][i]:.2f} | {fit_rms[i]:.4f}, {pred_rms[i]:.4f}, "
-                  f"{same_rms[i]:.4f} | {dz_meas[i, k43]:+.4f} / {dz_sim[i, k43]:+.4f}")
+            print(
+                f"  {i + 1}: {par['t1'][i]:.3f} / {par['t2'][i]:.3f}, {par['f_nh'][i]:.2e}, {par['k_nh'][i]:.0f}, "
+                f"{par['f_oh'][i]:.2e}, {par['k_oh'][i]:.0f}, {par['dw_oh'][i]:.2f} | {fit_rms[i]:.4f}, {pred_rms[i]:.4f}, "
+                f"{same_rms[i]:.4f} | {dz_meas[i, k43]:+.4f} / {dz_sim[i, k43]:+.4f}"
+            )
         corr = np.corrcoef(dz_meas.ravel(), dz_sim.ravel())[0, 1]
-        print(f"median rms: fit {np.median(fit_rms):.4f}, prediction {np.median(pred_rms):.4f}, no-change {np.median(same_rms):.4f}; "
-              f"correlation of the 4 - 1.5 s change over all tubes and offsets {corr:.3f}")
+        print(
+            f"median rms: fit {np.median(fit_rms):.4f}, prediction {np.median(pred_rms):.4f}, no-change {np.median(same_rms):.4f}; "
+            f"correlation of the 4 - 1.5 s change over all tubes and offsets {corr:.3f}"
+        )
         fig, ax = plt.subplots(2, 4, figsize=(18, 7))
         for i, a in enumerate(ax.ravel()):
             a.plot(w, z[1.5][i], "b.", ms=3, label="measured 1.5 s")
@@ -396,7 +436,12 @@ def main(argv):
             a.set_title(f"tube {i + 1}: rms fit {fit_rms[i]:.3f}, prediction {pred_rms[i]:.3f}", fontsize=9)
         ax[0, 0].legend(fontsize=7)
         plt.tight_layout()
-        plt.savefig(Path(__file__).with_name("iohexol_prediction.png" if what == "predict" else "iohexol_prediction_t1irll.png"), dpi=60)
+        plt.savefig(
+            Path(__file__).with_name(
+                "iohexol_prediction.png" if what == "predict" else "iohexol_prediction_t1irll.png"
+            ),
+            dpi=60,
+        )
     if what in ("recon", "tubes"):
         w = offsets_ppm()[1:]
         mags = {t: np.load(DATA / f"ref_tsat{t}.npy") for t in RAW}
@@ -407,9 +452,13 @@ def main(argv):
             line = []
             for t, mag in mags.items():
                 z = mag[1:, 1][:, r] / mag[0, 1][r]
-                line.append(f"Tsat {t}: water dip {np.median(water_shift(z, w)):+.3f} ppm, Z(4.2) {np.median(z[np.argmin(abs(w - 4.2))]):.3f}")
-            print(f"tube {i + 1} centre {np.argwhere(r).mean(0).round()} ({r.sum()} px): WASABI dB0 {np.median(b0[r]):+.3f} ppm, "
-                  f"B1 {np.median(b1[r]):.3f}; " + "; ".join(line))
+                line.append(
+                    f"Tsat {t}: water dip {np.median(water_shift(z, w)):+.3f} ppm, Z(4.2) {np.median(z[np.argmin(abs(w - 4.2))]):.3f}"
+                )
+            print(
+                f"tube {i + 1} centre {np.argwhere(r).mean(0).round()} ({r.sum()} px): WASABI dB0 {np.median(b0[r]):+.3f} ppm, "
+                f"B1 {np.median(b1[r]):.3f}; " + "; ".join(line)
+            )
 
 
 if __name__ == "__main__":

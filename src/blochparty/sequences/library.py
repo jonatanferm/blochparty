@@ -91,9 +91,28 @@ def gre_cartesian(
     if spoiling not in SPOILING:
         raise ValueError(f"spoiling must be one of {SPOILING}, not {spoiling!r}")
     if spoiling != "ideal" or slice_thickness is not None or ramps:
-        return _gre_blocks(shape, fov, flip_deg, tr, te, dwell, rf_duration, rf_phase, n_dummy, dtype,
-                           spoiling, slice_thickness, slice_offset, ramps, system or System(), spoiler_cycles,
-                           rf_spoil_increment, time_bw_product, apodization, rf_steps)
+        return _gre_blocks(
+            shape,
+            fov,
+            flip_deg,
+            tr,
+            te,
+            dwell,
+            rf_duration,
+            rf_phase,
+            n_dummy,
+            dtype,
+            spoiling,
+            slice_thickness,
+            slice_offset,
+            ramps,
+            system or System(),
+            spoiler_cycles,
+            rf_spoil_increment,
+            time_bw_product,
+            apodization,
+            rf_steps,
+        )
     rf_duration = 20e-6 if rf_duration is None else rf_duration
     *pe_shape, nx = shape
     dk = 1.0 / fov
@@ -166,18 +185,35 @@ class _Excitation(NamedTuple):
     post: float  # pulse centre -> block end
 
 
-def _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                sysm: System, dtype, rf_steps: int | None = None) -> _Excitation:
+def _excitation(
+    flip_deg,
+    rf_duration,
+    slice_thickness,
+    slice_offset,
+    time_bw_product,
+    apodization,
+    sysm: System,
+    dtype,
+    rf_steps: int | None = None,
+) -> _Excitation:
     """Hard pulse (in ``rf_steps`` segments, default <= ``MAX_RF_STEP`` each), or windowed sinc
     with slice select when ``slice_thickness`` is given."""
     if slice_thickness is None:
-        rf = block_pulse(flip_deg, 20e-6 if rf_duration is None else rf_duration, system=sysm, dtype=dtype,
-                         n_steps=rf_steps)
+        rf = block_pulse(
+            flip_deg, 20e-6 if rf_duration is None else rf_duration, system=sysm, dtype=dtype, n_steps=rf_steps
+        )
         grads, reph = (), torch.zeros(3, dtype=dtype)
     else:
-        rf, gz, reph = sinc_pulse(flip_deg, 2e-3 if rf_duration is None else rf_duration,
-                                  slice_thickness=slice_thickness, time_bw_product=time_bw_product,
-                                  apodization=apodization, slice_offset=slice_offset, system=sysm, dtype=dtype)
+        rf, gz, reph = sinc_pulse(
+            flip_deg,
+            2e-3 if rf_duration is None else rf_duration,
+            slice_thickness=slice_thickness,
+            time_bw_product=time_bw_product,
+            apodization=apodization,
+            slice_offset=slice_offset,
+            system=sysm,
+            dtype=dtype,
+        )
         grads = (gz,)
     dur = block_duration(*grads, rf=rf, system=sysm)
     centre = rf.delay + rf.center
@@ -256,14 +292,34 @@ def _pad(b: SequenceBuilder, t: float) -> None:
         b.delay(t)
 
 
-def _gre_blocks(shape, fov, flip_deg, tr, te, dwell, rf_duration, rf_phase, n_dummy, dtype, spoiling,
-                slice_thickness, slice_offset, ramps, sysm, spoiler_cycles, rf_spoil_increment,
-                time_bw_product, apodization, rf_steps=None) -> Sequence:
+def _gre_blocks(
+    shape,
+    fov,
+    flip_deg,
+    tr,
+    te,
+    dwell,
+    rf_duration,
+    rf_phase,
+    n_dummy,
+    dtype,
+    spoiling,
+    slice_thickness,
+    slice_offset,
+    ramps,
+    sysm,
+    spoiler_cycles,
+    rf_spoil_increment,
+    time_bw_product,
+    apodization,
+    rf_steps=None,
+) -> Sequence:
     """``gre_cartesian`` with realistic options."""
     *pe_shape, nx = shape
     dk = 1.0 / fov
-    exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype,
-                      rf_steps)
+    exc = _excitation(
+        flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps
+    )
     ro = _readout(nx, dwell, fov, ramps, sysm, dtype, centred=False)
     lines = []
     for idx in itertools.product(*(range(m) for m in pe_shape)):
@@ -306,9 +362,19 @@ def _gre_blocks(shape, fov, flip_deg, tr, te, dwell, rf_duration, rf_phase, n_du
         one_tr(j, 0.0, 0.0, acquire=False)
     for j, (ky, kz) in enumerate(lines):
         one_tr(n_dummy + j, ky, kz, acquire=True)
-    return b.build(kspace_shape=tuple(shape), fov=fov, te=exc.post + t_pre + ro.t_k0, tr=tr, dwell=dwell,
-                   spoiling=spoiling, slice_thickness=slice_thickness, slice_offset=slice_offset, ramps=ramps,
-                   rf_phases=rf_phases, system=sysm)
+    return b.build(
+        kspace_shape=tuple(shape),
+        fov=fov,
+        te=exc.post + t_pre + ro.t_k0,
+        tr=tr,
+        dwell=dwell,
+        spoiling=spoiling,
+        slice_thickness=slice_thickness,
+        slice_offset=slice_offset,
+        ramps=ramps,
+        rf_phases=rf_phases,
+        system=sysm,
+    )
 
 
 # --- spin echo / turbo spin echo -----------------------------------------------------------
@@ -460,16 +526,31 @@ def tse_2d(
     if slice_order is not None:
         other_sys = sysm if other_rf_raster is None else replace(sysm, rf_raster=other_rf_raster)
         for dz in slice_order:
-            cargs = (rf_duration, slice_thickness, slice_offset + dz, time_bw_product, apodization, other_sys, dtype,
-                     rf_steps)
+            cargs = (
+                rf_duration,
+                slice_thickness,
+                slice_offset + dz,
+                time_bw_product,
+                apodization,
+                other_sys,
+                dtype,
+                rf_steps,
+            )
             pulses[dz] = (_excitation(excite_flip_deg, *cargs), [_excitation(f, *cargs) for f in flips])
-            if abs(pulses[dz][0].duration - exc.duration) > _T_TOL or abs(pulses[dz][1][0].duration - ref.duration) > _T_TOL:
-                raise ValueError("other_rf_raster changes the pulse blocks' durations; choose a divisor of the RF timing")
+            if (
+                abs(pulses[dz][0].duration - exc.duration) > _T_TOL
+                or abs(pulses[dz][1][0].duration - ref.duration) > _T_TOL
+            ):
+                raise ValueError(
+                    "other_rf_raster changes the pulse blocks' durations; choose a divisor of the RF timing"
+                )
             g = float(pulses[dz][0].grads[0].amplitude[2])
             near = bound_only_beyond is None or abs(dz) < bound_only_beyond
             if near and abs(g * (slice_offset + dz)) * other_sys.rf_raster >= 0.5:
-                raise ValueError(f"other_rf_raster cannot resolve the {g * (slice_offset + dz):.0f} Hz ramp of the slice "
-                                 f"at {dz * 1e3:+.1f} mm; refine it or set bound_only_beyond")
+                raise ValueError(
+                    f"other_rf_raster cannot resolve the {g * (slice_offset + dz):.0f} Hz ramp of the slice "
+                    f"at {dz * 1e3:+.1f} mm; refine it or set bound_only_beyond"
+                )
         spoiler = _lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype)
         t_spoil = block_duration(spoiler, system=sysm)
 
@@ -533,7 +614,7 @@ def tse_2d(
                 kspace_index += range(line * n * os_, (line + 1) * n * os_)
         if spoiling == "gradient":
             b.block(_lobe((0.0, 0.0, spoiler_cycles * crush / crusher_cycles), None, ramps, sysm, dtype))
-        for dz in (slice_order or [0.0])[(slice_order or [0.0]).index(0.0) + 1:]:
+        for dz in (slice_order or [0.0])[(slice_order or [0.0]).index(0.0) + 1 :]:
             other_train(dz)
         t_fill = tr - (b.time - t_start)
         if t_fill < -_T_TOL:
@@ -546,11 +627,24 @@ def tse_2d(
         for e in range(etl):
             if lines[s][e] is not None:
                 line_echo[lines[s][e]] = e
-    seq = b.build(matrix=(n, n * os_), kspace_index=torch.tensor(kspace_index), fov=fov, dwell=dwell / os_, tr=tr,
-                  esp=esp, etl=etl, te=(line_echo[n // 2] + 1) * esp, echo_times=[(e + 1) * esp for e in range(etl)],
-                  line_echo=line_echo, ordering=ordering, slice_thickness=slice_thickness, ramps=ramps,
-                  system=sysm, **({} if slice_order is None else {"slice_order": slice_order}),
-                  **({} if os_ == 1 else {"readout_oversampling": os_}))
+    seq = b.build(
+        matrix=(n, n * os_),
+        kspace_index=torch.tensor(kspace_index),
+        fov=fov,
+        dwell=dwell / os_,
+        tr=tr,
+        esp=esp,
+        etl=etl,
+        te=(line_echo[n // 2] + 1) * esp,
+        echo_times=[(e + 1) * esp for e in range(etl)],
+        line_echo=line_echo,
+        ordering=ordering,
+        slice_thickness=slice_thickness,
+        ramps=ramps,
+        system=sysm,
+        **({} if slice_order is None else {"slice_order": slice_order}),
+        **({} if os_ == 1 else {"readout_oversampling": os_}),
+    )
     if ghosts:  # the far slices' pulses: the bound pool alone, at G (z_j - z)
         from ..exchange import rf_frequency
 
@@ -598,8 +692,9 @@ def bssfp_2d(
     ``meta["kspace_shape"]`` is set (one line per TR, ky ascending)."""
     sysm = system or System()
     dk = 1.0 / fov
-    exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                      sysm, dtype, rf_steps)
+    exc = _excitation(
+        flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps
+    )
     ro = _readout(n, dwell, fov, ramps, sysm, dtype, centred=True)
     reph_z = exc.rephase[2]  # the pulse is symmetric: equal slice-select moments before / after its centre
     t_p = _min_duration(max(ro.area_k0, n // 2 * dk, abs(float(reph_z))), sysm)
@@ -633,8 +728,18 @@ def bssfp_2d(
         b.block(ro.grad, adc=ADC(n, dwell, ro.adc_delay, psi) if acquire else None, duration=ro.duration)
         _pad(b, tr / 2 - h2)
         b.block(_lobe((-ro.area_k0, -ky, reph_z), t_p, ramps, sysm, dtype))
-    return b.build(kspace_shape=(n, n), fov=fov, te=tr / 2, tr=tr, dwell=dwell, phase_cycle_deg=phase_cycle_deg,
-                   rf_phases=rf_phases, slice_thickness=slice_thickness, ramps=ramps, system=sysm)
+    return b.build(
+        kspace_shape=(n, n),
+        fov=fov,
+        te=tr / 2,
+        tr=tr,
+        dwell=dwell,
+        phase_cycle_deg=phase_cycle_deg,
+        rf_phases=rf_phases,
+        slice_thickness=slice_thickness,
+        ramps=ramps,
+        system=sysm,
+    )
 
 
 # --- EPI ----------------------------------------------------------------------------------------
@@ -671,8 +776,9 @@ def epi_2d(
     """
     sysm = system or System()
     dk = 1.0 / fov
-    exc = _excitation(flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization,
-                      sysm, dtype, rf_steps)
+    exc = _excitation(
+        flip_deg, rf_duration, slice_thickness, slice_offset, time_bw_product, apodization, sysm, dtype, rf_steps
+    )
     ro = _readout(n, dwell, fov, ramps, sysm, dtype, centred=False)
     r, flat = ro.grad.rise, ro.grad.flat
     if ramps:
@@ -704,6 +810,15 @@ def epi_2d(
     _pad(b, te - te_min)
     b.block(*grads, adc=adcs)
     index = [j * n + (i if j % 2 == 0 else n - 1 - i) for j in range(n) for i in range(n)]
-    return b.build(matrix=(n, n), kspace_index=torch.tensor(index), fov=fov, te=te, dwell=dwell, esp=esp,
-                   bandwidth_per_pixel_pe=1.0 / (n * esp), slice_thickness=slice_thickness, ramps=ramps,
-                   system=sysm)
+    return b.build(
+        matrix=(n, n),
+        kspace_index=torch.tensor(index),
+        fov=fov,
+        te=te,
+        dwell=dwell,
+        esp=esp,
+        bandwidth_per_pixel_pe=1.0 / (n * esp),
+        slice_thickness=slice_thickness,
+        ramps=ramps,
+        system=sysm,
+    )

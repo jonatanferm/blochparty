@@ -23,21 +23,39 @@ def realistic_maps(n, ndim=2):
     grid = bp.grid_positions(m["pd"].shape, 0.22).reshape(-1, 3)
     shape = m["pd"].shape
     db0 = (b0_shim(grid, z=30.0, y=-60.0, z2=400.0) + b0_sphere(grid, (0.02, 0.03, 0.0), 0.012, 9.4e-6)).reshape(shape)
-    return dict(pd=m["pd"], t1=m["t1"], t2=m["t2"], db0=db0,
-                t2prime=torch.full(shape, 0.04, dtype=torch.float64),
-                fat_fraction=0.1 + 0.8 * (m["label"] == bp.phantom.LABELS.index("fat")).double(),
-                b1=birdcage_b1(grid, 0.4, radius=0.1).reshape(shape))
+    return dict(
+        pd=m["pd"],
+        t1=m["t1"],
+        t2=m["t2"],
+        db0=db0,
+        t2prime=torch.full(shape, 0.04, dtype=torch.float64),
+        fat_fraction=0.1 + 0.8 * (m["label"] == bp.phantom.LABELS.index("fat")).double(),
+        b1=birdcage_b1(grid, 0.4, radius=0.1).reshape(shape),
+    )
 
 
 def realistic(n, ndim=2, spv=4, **maps):
     m = realistic_maps(n, ndim) | maps
-    return bp.phantom_from_maps(m["pd"], m["t1"], m["t2"], 0.22, m["db0"], spins_per_voxel=spv, jitter="stratified",
-                                t2prime=m["t2prime"], fat_fraction=m["fat_fraction"], b1=m["b1"], seed=1)
+    return bp.phantom_from_maps(
+        m["pd"],
+        m["t1"],
+        m["t2"],
+        0.22,
+        m["db0"],
+        spins_per_voxel=spv,
+        jitter="stratified",
+        t2prime=m["t2prime"],
+        fat_fraction=m["fat_fraction"],
+        b1=m["b1"],
+        seed=1,
+    )
 
 
 def cases():
-    return [(realistic(16), bp.gre_2d(16, flip_deg=20.0, rf_phase=0.3, n_dummy=30)),
-            (realistic(8, ndim=3, spv=8), bp.gre_3d(8, flip_deg=20.0, n_dummy=10))]
+    return [
+        (realistic(16), bp.gre_2d(16, flip_deg=20.0, rf_phase=0.3, n_dummy=30)),
+        (realistic(8, ndim=3, spv=8), bp.gre_3d(8, flip_deg=20.0, n_dummy=10)),
+    ]
 
 
 def check_forward(sim, tol):
@@ -94,8 +112,19 @@ def test_gradients_reach_the_maps(gpu):
         leaves = {k: base[k].clone().requires_grad_() for k in names}
         fat_t2 = torch.tensor(0.09, dtype=torch.float64, requires_grad=True)
         m = base | leaves
-        ph = bp.phantom_from_maps(m["pd"], m["t1"], m["t2"], 0.22, m["db0"], spins_per_voxel=4, jitter="stratified",
-                                  t2prime=m["t2prime"], fat_fraction=m["fat_fraction"], b1=m["b1"], fat_t2=fat_t2)
+        ph = bp.phantom_from_maps(
+            m["pd"],
+            m["t1"],
+            m["t2"],
+            0.22,
+            m["db0"],
+            spins_per_voxel=4,
+            jitter="stratified",
+            t2prime=m["t2prime"],
+            fat_fraction=m["fat_fraction"],
+            b1=m["b1"],
+            fat_t2=fat_t2,
+        )
         r = sim(ph, seq, bp.birdcage_sensitivities(ph.pos, n_coils=2))
         out = torch.autograd.grad((r.signal.abs() ** 2).sum().double(), [*leaves.values(), fat_t2])
         return dict(zip([*names, "fat_t2"], out))

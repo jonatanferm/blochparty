@@ -1,5 +1,6 @@
 """AHEAD loader on synthetic files with the real files' layout (RPS storage, mm, 0.5 mm): world
 positions survive the reorientation exactly, units and the R1/PD mask apply, checksums guard."""
+
 import json
 
 import numpy as np
@@ -18,13 +19,16 @@ def fixture(root, shape=(6, 8, 5)):
     """Stored x/y/z = (R, P, S): affine diag (0.5, -0.5, 0.5) mm as the real templates. Voxel
     (i, j, k) of every map holds a value that encodes its world position."""
     i, j, k = np.meshgrid(*(np.arange(n) for n in shape), indexing="ij")
-    affine = np.diag([.5, -.5, .5, 1.])
+    affine = np.diag([0.5, -0.5, 0.5, 1.0])
     affine[:3, 3] = [-1.0, 2.0, -1.5]
     world = np.stack([i, j, k, np.ones_like(i)], -1) @ affine.T  # mm
     inside = (i > 0) & (j > 0) & (k > 0)
-    maps = {"chi": np.where(inside, world[..., 0] / 100, 0.0),  # ppm
-            "R1": np.where(inside, 0.8 + world[..., 1] / 100, 0.0), "R2star": np.where(inside, 30 + world[..., 2], 0.0),
-            "relative_PD": np.where(inside, 0.9, 0.0)}
+    maps = {
+        "chi": np.where(inside, world[..., 0] / 100, 0.0),  # ppm
+        "R1": np.where(inside, 0.8 + world[..., 1] / 100, 0.0),
+        "R2star": np.where(inside, 30 + world[..., 2], 0.0),
+        "relative_PD": np.where(inside, 0.9, 0.0),
+    }
     manifest = {"schema": 1, "doi": "10.21942/uva.19646364.v3", "files": {}}
     for key, name in FILES.items():
         img = nib.Nifti1Image(maps[key].astype(np.float32), affine)
@@ -40,7 +44,11 @@ def test_ahead_orientation_units_and_mask(tmp_path):
     assert a.voxel == (5e-4,) * 3 and a.map_field_T == 7.0 and a.chi_background == 0.0
     nz, ny, nx = a.shape
     zz, yy, xx = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) for n in a.shape), indexing="ij")
-    x, y, z = (xx * a.voxel[2] + a.origin[0]) * 1e3, (yy * a.voxel[1] + a.origin[1]) * 1e3, (zz * a.voxel[0] + a.origin[2]) * 1e3
+    x, y, z = (
+        (xx * a.voxel[2] + a.origin[0]) * 1e3,
+        (yy * a.voxel[1] + a.origin[1]) * 1e3,
+        (zz * a.voxel[0] + a.origin[2]) * 1e3,
+    )
     m = a.maps["brain_mask"] > 0
     assert int(m.sum()) == 5 * 7 * 4
     assert torch.allclose(a.chi[m], x[m] / 100 * 1e-6)  # ppm -> SI, at its own world x

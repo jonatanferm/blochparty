@@ -137,8 +137,17 @@ def tr_starts(seq: bp.Sequence) -> list[int]:
 def last_trs(seq: bp.Sequence, n_tr: int) -> bp.Sequence:
     """The last ``n_tr`` TRs (counting dummies); earlier TRs only set up the steady state."""
     a = tr_starts(seq)[N_TR_ALL - n_tr]
-    return replace(seq, dt=seq.dt[a:], rf=seq.rf[a:], grad=seq.grad[a:], adc_phase=seq.adc_phase[a:],
-                   is_rf=seq.is_rf[a:], adc=seq.adc[a:], spoil=seq.spoil[a:], meta={})
+    return replace(
+        seq,
+        dt=seq.dt[a:],
+        rf=seq.rf[a:],
+        grad=seq.grad[a:],
+        adc_phase=seq.adc_phase[a:],
+        is_rf=seq.is_rf[a:],
+        adc=seq.adc[a:],
+        spoil=seq.spoil[a:],
+        meta={},
+    )
 
 
 def sim_complex_images(signal: torch.Tensor) -> np.ndarray:
@@ -147,8 +156,22 @@ def sim_complex_images(signal: torch.Tensor) -> np.ndarray:
     return np.stack([recon_complex(s[:, :, q, :].permute(2, 0, 1).cpu().numpy()) for q in range(N_ECHO)])
 
 
-def monte_carlo(real, rois, radii, x0, seq, *, seeds=4, n=256, fill_margin=8, dense=3, sparse=0.25, wall=1e-3,
-                water=(WATER_T1 * 1e3, WATER_T2 * 1e3), real_img=None):
+def monte_carlo(
+    real,
+    rois,
+    radii,
+    x0,
+    seq,
+    *,
+    seeds=4,
+    n=256,
+    fill_margin=8,
+    dense=3,
+    sparse=0.25,
+    wall=1e-3,
+    water=(WATER_T1 * 1e3, WATER_T2 * 1e3),
+    real_img=None,
+):
     """Independent Sobol seeds of spheres (+ water fill), each simulated once: shape errors of the
     power-debiased magnitude with jackknife SEs over seeds (``nist.MCErrors``), and the seed images
     (seeds, n_echo, N, N) for paired comparisons."""
@@ -158,11 +181,27 @@ def monte_carlo(real, rois, radii, x0, seq, *, seeds=4, n=256, fill_margin=8, de
         phs = [phantom_qmc(rois, radii, T1_REF, T2_REF, x0, n=n, seed=k)]
         if fill_margin > 0:
             mask = fill_mask(real_img, rois, radii[0] + wall)
-            phs.append(fill_phantom_qmc(rois, mask, radii[0], wall, x0, margin=fill_margin * PIXEL, t1_ms=water[0],
-                                        t2_ms=water[1], n=n, dense=dense * PIXEL, sparse=sparse, seed=k))
+            phs.append(
+                fill_phantom_qmc(
+                    rois,
+                    mask,
+                    radii[0],
+                    wall,
+                    x0,
+                    margin=fill_margin * PIXEL,
+                    t1_ms=water[0],
+                    t2_ms=water[1],
+                    n=n,
+                    dense=dense * PIXEL,
+                    sparse=sparse,
+                    seed=k,
+                )
+            )
         total = sum(engine(ph, seq).signal for ph in phs)
         imgs.append(sim_complex_images(total))
-        print(f"  seed {k}: {' + '.join(str(len(ph)) for ph in phs)} spins, {time.perf_counter() - t0:.0f} s", flush=True)
+        print(
+            f"  seed {k}: {' + '.join(str(len(ph)) for ph in phs)} spins, {time.perf_counter() - t0:.0f} s", flush=True
+        )
     imgs = np.array(imgs)
     return mc_errors(imgs, rois, real), imgs
 
@@ -213,10 +252,20 @@ def main(argv=None):
     p.add_argument("--rf-merge", type=int, default=4, help="merge this many 1 us RF samples (1: exact)")
     p.add_argument("--warmup", type=int, default=8, help="TRs simulated before the 128 imaging TRs")
     p.add_argument("--b1-grid", type=float, nargs="*", default=[], help="global B1+ scales to fit over")
-    p.add_argument("--fill-margin", type=float, default=5, help="water simulated within this many pixels of a sphere wall (0: none)")
+    p.add_argument(
+        "--fill-margin",
+        type=float,
+        default=5,
+        help="water simulated within this many pixels of a sphere wall (0: none)",
+    )
     p.add_argument("--wall", type=float, default=1.0, help="sphere wall thickness [mm]")
     p.add_argument("--water", type=float, nargs=2, default=[WATER_T1 * 1e3, WATER_T2 * 1e3], help="water T1 T2 [ms]")
-    p.add_argument("--mc", type=int, default=0, help="Monte Carlo mode: this many Sobol seeds (power-debiased magnitude, error bars; >= 3)")
+    p.add_argument(
+        "--mc",
+        type=int,
+        default=0,
+        help="Monte Carlo mode: this many Sobol seeds (power-debiased magnitude, error bars; >= 3)",
+    )
     p.add_argument("--n", type=int, default=256, help="--mc: Sobol spins per pixel (a power of two)")
     p.add_argument("--save", type=Path, help="--mc: save every row's seed images (.npz) for later paired comparisons")
     p.add_argument("--figure", action="store_true", help="write nist_tse_curves.png (the figure RESULTS.md shows)")
@@ -232,10 +281,21 @@ def main(argv=None):
     if args.mc:
         plain = [("mono-exponential, reference T2", shape_error(mono_exponential(), real))]
         rows = []
-        for margin in ([0, args.fill_margin] if args.fill_margin > 0 else [0]):
+        for margin in [0, args.fill_margin] if args.fill_margin > 0 else [0]:
             print(f"Monte Carlo: {args.mc} Sobol seeds x {args.n} spins/pixel, water margin {margin} px", flush=True)
-            res, imgs = monte_carlo(real, rois, radii, x0, seq, seeds=args.mc, n=args.n, fill_margin=margin,
-                                    wall=args.wall * 1e-3, water=args.water, real_img=real_img)
+            res, imgs = monte_carlo(
+                real,
+                rois,
+                radii,
+                x0,
+                seq,
+                seeds=args.mc,
+                n=args.n,
+                fill_margin=margin,
+                wall=args.wall * 1e-3,
+                water=args.water,
+                real_img=real_img,
+            )
             rows.append((f"Bloch MC{' + water fill' if margin else ''}", res, imgs))
         print_mc_table(rows, rois, real, plain)
         if args.save:
@@ -245,11 +305,26 @@ def main(argv=None):
     phantoms = [ph]
     if args.fill_margin > 0:
         mask = fill_mask(real_img, rois, radii[0] + args.wall * 1e-3)
-        phantoms.append(fill_phantom(rois, mask, radii[0], args.wall * 1e-3, x0, margin=args.fill_margin * PIXEL,
-                                     t1_ms=args.water[0], t2_ms=args.water[1], n_slice=args.n_slice, sub=args.sub,
-                                     sub_read=args.sub_read))
-    print(f"slice x0 = {x0 * 1e3:.2f} mm, sphere radius {radii[0] * 1e3:.2f} mm, wall {args.wall} mm, "
-          f"{' + '.join(str(len(q)) for q in phantoms)} spins, {len(seq)} segments ({n_tr} TRs)", flush=True)
+        phantoms.append(
+            fill_phantom(
+                rois,
+                mask,
+                radii[0],
+                args.wall * 1e-3,
+                x0,
+                margin=args.fill_margin * PIXEL,
+                t1_ms=args.water[0],
+                t2_ms=args.water[1],
+                n_slice=args.n_slice,
+                sub=args.sub,
+                sub_read=args.sub_read,
+            )
+        )
+    print(
+        f"slice x0 = {x0 * 1e3:.2f} mm, sphere radius {radii[0] * 1e3:.2f} mm, wall {args.wall} mm, "
+        f"{' + '.join(str(len(q)) for q in phantoms)} spins, {len(seq)} segments ({n_tr} TRs)",
+        flush=True,
+    )
 
     rows = [("mono-exponential, reference T2", shape_error(mono_exponential(), real), mono_exponential())]
     t0 = time.perf_counter()
@@ -271,8 +346,10 @@ def main(argv=None):
 
     print("\n| model | spheres 1–10 | odd 1–9 | per sphere 1..14 [%] |\n|---|---|---|---|")
     for name, err, _ in rows:
-        print(f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err[[0, 2, 4, 6, 8]].mean():.2f} % | "
-              f"{' '.join(f'{v:.1f}' for v in 100 * err)} |")
+        print(
+            f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err[[0, 2, 4, 6, 8]].mean():.2f} % | "
+            f"{' '.join(f'{v:.1f}' for v in 100 * err)} |"
+        )
     if args.figure:
         plot_curves(real, rows, Path(__file__).with_name("nist_tse_curves.png"))
     return rows, real

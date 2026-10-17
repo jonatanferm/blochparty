@@ -71,8 +71,15 @@ def trapezoid_seq(amp=8e5, tail=3e-3):
     # cut the tail on the raster too, so the response is sampled finely there
     reps = torch.clamp(torch.round(seq.dt / RASTER), min=1).long()
     rep = lambda t: t.repeat_interleave(reps, dim=0)
-    return Sequence(rep(seq.dt / reps), rep(seq.rf), rep(seq.grad), rep(seq.adc_phase),
-                    [False] * int(reps.sum()), [False] * int(reps.sum()), [False] * int(reps.sum()))
+    return Sequence(
+        rep(seq.dt / reps),
+        rep(seq.rf),
+        rep(seq.grad),
+        rep(seq.adc_phase),
+        [False] * int(reps.sum()),
+        [False] * int(reps.sum()),
+        [False] * int(reps.sum()),
+    )
 
 
 def ramp_response(t, t1, t2, slope, tau):
@@ -97,14 +104,21 @@ def test_exponential_eddy_on_trapezoid():
     ts = tb[:-1]
     t0, t1, dt = tb[:-1, None], tb[1:, None], seq.dt.numpy()[:, None]
     on = ts[None, :] < t1 - 1e-15
-    avg = -a * steps[None, :] * tau / dt * (np.exp(-np.clip(t0 - ts[None, :], 0, None) / tau)
-                                            - np.exp(-(t1 - ts[None, :]) / tau))
+    avg = (
+        -a
+        * steps[None, :]
+        * tau
+        / dt
+        * (np.exp(-np.clip(t0 - ts[None, :], 0, None) / tau) - np.exp(-(t1 - ts[None, :]) / tau))
+    )
     stair = np.where(on, avg, 0.0).sum(1)
     assert np.abs(eddy - stair).max() < 1e-9 * amp
     # the true trapezoid (linear ramps), at segment midpoints: O((raster / tau)^2) apart
     mid = 0.5 * (tb[:-1] + tb[1:])
-    true = -a * (ramp_response(mid, 0.0, rise, amp / rise, tau) + ramp_response(mid, rise + flat, 2 * rise + flat,
-                                                                                 -amp / rise, tau))
+    true = -a * (
+        ramp_response(mid, 0.0, rise, amp / rise, tau)
+        + ramp_response(mid, rise + flat, 2 * rise + flat, -amp / rise, tau)
+    )
     assert np.abs(eddy - true).max() < 2e-3 * a * amp
     assert np.abs(eddy).max() > 0.5 * a * amp
     # moment lost by the end of the plateau: int_0^T e dt = -a (amp / rise) tau
@@ -126,8 +140,15 @@ def test_convolution_and_transfer_function_agree():
     n_taps, S = 40, 300
     taps = torch.randn(4, 3, n_taps, dtype=torch.float64, generator=gen) * torch.exp(-torch.arange(n_taps) / 8.0)
     g = torch.randn(S, 3, dtype=torch.float64, generator=gen) * 1e5
-    seq = Sequence(torch.full((S,), RASTER, dtype=torch.float64), torch.zeros(S, 2, dtype=torch.float64), g,
-                   torch.zeros(S, dtype=torch.float64), [False] * S, [False] * S, [False] * S)
+    seq = Sequence(
+        torch.full((S,), RASTER, dtype=torch.float64),
+        torch.zeros(S, 2, dtype=torch.float64),
+        g,
+        torch.zeros(S, dtype=torch.float64),
+        [False] * S,
+        [False] * S,
+        [False] * S,
+    )
     played = apply_girf(seq, GIRF(taps, RASTER))
     n = 1024
     H = torch.fft.rfft(taps, n=n)  # (4, 3, F)
@@ -146,9 +167,15 @@ def test_chunked_response_is_bit_identical(monkeypatch):
     gen = torch.Generator().manual_seed(2)
     taps = torch.randn(4, 3, 40, dtype=torch.float64, generator=gen)
     S = 300
-    seq = Sequence(torch.rand(S, dtype=torch.float64, generator=gen) * 2 * RASTER, torch.zeros(S, 2, dtype=torch.float64),
-                   torch.randn(S, 3, dtype=torch.float64, generator=gen) * 1e5, torch.zeros(S, dtype=torch.float64),
-                   [False] * S, [False] * S, [False] * S)
+    seq = Sequence(
+        torch.rand(S, dtype=torch.float64, generator=gen) * 2 * RASTER,
+        torch.zeros(S, 2, dtype=torch.float64),
+        torch.randn(S, 3, dtype=torch.float64, generator=gen) * 1e5,
+        torch.zeros(S, dtype=torch.float64),
+        [False] * S,
+        [False] * S,
+        [False] * S,
+    )
     model = GIRF(taps, RASTER, delay=3e-6)
     whole = apply_girf(seq, model)
     monkeypatch.setattr(girf, "_GIRF_BLOCK", 7 * 40)  # 7 boundaries per block, 43 blocks
@@ -195,11 +222,13 @@ def eddy_loss(sim, amp, tau, b0amp, b0tau, delay, **kw):
 
 
 def test_eddy_parameter_gradients():
-    params = [torch.tensor([[0.02, 0.01], [0.03, 0.0], [0.015, 0.02]], dtype=torch.float64),
-              torch.tensor([[0.3e-3, 2e-3], [0.5e-3, 1e-3], [0.2e-3, 4e-3]], dtype=torch.float64),
-              torch.tensor([[1e-5], [-2e-5], [3e-5]], dtype=torch.float64),
-              torch.tensor([[1e-3], [0.5e-3], [2e-3]], dtype=torch.float64),
-              torch.tensor([2e-6, -3e-6, 4e-6], dtype=torch.float64)]
+    params = [
+        torch.tensor([[0.02, 0.01], [0.03, 0.0], [0.015, 0.02]], dtype=torch.float64),
+        torch.tensor([[0.3e-3, 2e-3], [0.5e-3, 1e-3], [0.2e-3, 4e-3]], dtype=torch.float64),
+        torch.tensor([[1e-5], [-2e-5], [3e-5]], dtype=torch.float64),
+        torch.tensor([[1e-3], [0.5e-3], [2e-3]], dtype=torch.float64),
+        torch.tensor([2e-6, -3e-6, 4e-6], dtype=torch.float64),
+    ]
     leaves = [p.clone().requires_grad_() for p in params]
     grads = torch.autograd.grad(eddy_loss("core", *leaves), leaves)
     for i, idx in [(0, (0, 0)), (0, (1, 1)), (1, (2, 1)), (2, (1, 0)), (3, (0, 0)), (4, (2,))]:

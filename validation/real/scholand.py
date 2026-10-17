@@ -60,8 +60,15 @@ def hypsec(raster: float = 10e-6) -> np.ndarray:
     return np.stack([a * np.cos(ph), a * np.sin(ph)], -1)
 
 
-def sequence(*, n_tr: int = N_TR, inversion: str = "hypsec", slice_select: bool = True, gap: float = 0.0,
-             fa: float = FA, system: bp.System = SKYRA) -> bp.Sequence:
+def sequence(
+    *,
+    n_tr: int = N_TR,
+    inversion: str = "hypsec",
+    slice_select: bool = True,
+    gap: float = 0.0,
+    fa: float = FA,
+    system: bp.System = SKYRA,
+) -> bp.Sequence:
     """The IR-bSSFP as blochparty segments with one ADC sample per TR, at the echo (the time
     of the k-space centre). Gradients only along z (the in-plane readout is balanced and does
     not change the magnetization at the echo). ``inversion``: "hypsec", "perfect" (an
@@ -76,8 +83,9 @@ def sequence(*, n_tr: int = N_TR, inversion: str = "hypsec", slice_select: bool 
         sb.delay(gap)
 
     def make(flip, phase):
-        rf, gz, reph = bp.sinc_pulse(flip, T_RF, slice_thickness=SLICE, time_bw_product=BWTP,
-                                              apodization=0.46, phase=phase, system=system)
+        rf, gz, reph = bp.sinc_pulse(
+            flip, T_RF, slice_thickness=SLICE, time_bw_product=BWTP, apodization=0.46, phase=phase, system=system
+        )
         return (rf, gz, reph) if slice_select else (rf, None, None)
 
     def play(rf, gz):
@@ -120,8 +128,12 @@ def slice_spins(n: int = 201, extent: float = 4 * SLICE) -> torch.Tensor:
 
 CACHE = DATA / "cache"
 RF_RASTER = 10e-6  # piecewise-constant RF on 10 us: 3e-4 from the 1 us raster over all 1000 TRs
-MODELS = {"full": {}, "perfect_inv": {"inversion": "perfect"}, "no_slice": {"slice_select": False},
-          "simple": {"inversion": "perfect", "slice_select": False}}
+MODELS = {
+    "full": {},
+    "perfect_inv": {"inversion": "perfect"},
+    "no_slice": {"slice_select": False},
+    "simple": {"inversion": "perfect", "slice_select": False},
+}
 
 
 def _seq(**kw) -> bp.Sequence:
@@ -143,11 +155,12 @@ def signals(t1, t2, b1, df=None, *, n_z: int = 101, batch: int = 64, **model) ->
     out = []
     for a in range(0, len(t1), batch):
         m = min(batch, len(t1) - a)
-        rep = lambda v: torch.as_tensor(np.repeat(v[a:a + m], nz), dtype=torch.float64)
+        rep = lambda v: torch.as_tensor(np.repeat(v[a : a + m], nz), dtype=torch.float64)
         pos = torch.zeros(m * nz, 3, dtype=torch.float64)
         pos[:, 2] = z.repeat(m)
-        ph = bp.Phantom(pos=pos, pd=torch.ones(m * nz, dtype=torch.float64), t1=rep(t1), t2=rep(t2), db0=rep(df),
-                        b1=rep(b1))
+        ph = bp.Phantom(
+            pos=pos, pd=torch.ones(m * nz, dtype=torch.float64), t1=rep(t1), t2=rep(t2), db0=rep(df), b1=rep(b1)
+        )
         coils = torch.zeros(m * nz, m, dtype=torch.complex64)
         coils[torch.arange(m * nz), torch.arange(m * nz) // nz] = 1.0 / nz
         out.append(run(ph, seq, coils=coils).signal.numpy())
@@ -159,11 +172,25 @@ def basis(n_keep: int = 24) -> np.ndarray:
     does not favour the model under test: non-selective pulses with relative flips 0.15-1.3
     (covering the slice profile's flips) and |df| <= 40 Hz; and the slice-selective sequence with
     both inversion models, B1 0.8-1.2, |df| <= 20 Hz. T1 0.05-4 s, T2 4 ms-2 s (T2 <= T1)."""
-    g1 = np.array(np.meshgrid(np.geomspace(0.05, 4, 20), np.geomspace(0.004, 2, 20), np.linspace(0.15, 1.3, 10),
-                              np.linspace(-40, 40, 5), indexing="ij")).reshape(4, -1)
+    g1 = np.array(
+        np.meshgrid(
+            np.geomspace(0.05, 4, 20),
+            np.geomspace(0.004, 2, 20),
+            np.linspace(0.15, 1.3, 10),
+            np.linspace(-40, 40, 5),
+            indexing="ij",
+        )
+    ).reshape(4, -1)
     g1 = g1[:, g1[1] <= g1[0]]
-    g2 = np.array(np.meshgrid(np.geomspace(0.05, 4, 20), np.geomspace(0.004, 2, 20), np.linspace(0.8, 1.2, 5),
-                              np.linspace(-20, 20, 5), indexing="ij")).reshape(4, -1)
+    g2 = np.array(
+        np.meshgrid(
+            np.geomspace(0.05, 4, 20),
+            np.geomspace(0.004, 2, 20),
+            np.linspace(0.8, 1.2, 5),
+            np.linspace(-20, 20, 5),
+            indexing="ij",
+        )
+    ).reshape(4, -1)
     g2 = g2[:, g2[1] <= g2[0]]
     d = [signals(*g1, slice_select=False, batch=128)]
     d += [signals(*g2, inversion=inv) for inv in ("hypsec", "perfect")]
@@ -185,7 +212,9 @@ def fit(curves: np.ndarray, t1_ref, t2_centre, b1, model: str = "full", t0: int 
             G = np.array(np.meshgrid(T1s, T2s, indexing="ij")).reshape(2, -1)
             S = signals(G[0], G[1], np.full(G.shape[1], b1[j]), **MODELS[model])[:, t0:]
             a = (S.conj() @ m[t0:]) / np.einsum("ij,ij->i", S.conj(), S).real
-            r = (np.linalg.norm(m[t0:][None] - a[:, None] * S, axis=1) / np.linalg.norm(m[t0:])).reshape(len(T1s), len(T2s))
+            r = (np.linalg.norm(m[t0:][None] - a[:, None] * S, axis=1) / np.linalg.norm(m[t0:])).reshape(
+                len(T1s), len(T2s)
+            )
             i, k = np.unravel_index(np.argmin(r), r.shape)
             on_edge |= i in (0, len(T1s) - 1) or k in (0, len(T2s) - 1)
             best = (T1s[i], T2s[k], r[i, k])

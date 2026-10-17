@@ -28,8 +28,10 @@ def test_shim_terms():
     for name, expected in terms.items():
         assert torch.allclose(b0_shim(pos, **{name: 7.0}), 7 * expected, atol=1e-13), name
         # every term solves Laplace's equation, as a static field in a source-free region must
-        lap = sum(torch.autograd.functional.hessian(lambda p: b0_shim(p[None], **{name: 7.0})[0], pos[i]).trace()
-                  for i in range(3))
+        lap = sum(
+            torch.autograd.functional.hessian(lambda p: b0_shim(p[None], **{name: 7.0})[0], pos[i]).trace()
+            for i in range(3)
+        )
         assert abs(lap) < 1e-12, name
     # coefficients can be optimised
     c = torch.tensor(2.0, dtype=torch.float64, requires_grad=True)
@@ -58,8 +60,9 @@ def test_sphere_vs_fourier_dipole():
         assert (out - ref)[m].abs().max() < 0.01 * scale, (lo, hi)
     # the dipole pattern itself: +2 at the poles, -1 at the equator (x scale/2), zero inside
     pts = torch.tensor([[0, 0, 1.0], [1.0, 0, 0], [0, 0.3, 0.2]], dtype=torch.float64) * a * 1.0000001
-    assert torch.allclose(b0_sphere(pts, centre, a, DCHI, B0)[:2], torch.tensor([scale, -scale / 2],
-                                                                                 dtype=torch.float64), rtol=1e-6)
+    assert torch.allclose(
+        b0_sphere(pts, centre, a, DCHI, B0)[:2], torch.tensor([scale, -scale / 2], dtype=torch.float64), rtol=1e-6
+    )
     assert b0_sphere(pts, centre, a, DCHI, B0)[2] == 0
 
 
@@ -68,8 +71,7 @@ def test_cylinder_vs_fourier_dipole(theta_deg):
     # an infinite cylinder's field is 2D: convolve in the plane perpendicular to its axis, where
     # k.z = k_u sin(theta) with u along B0's projection on that plane
     th = math.radians(theta_deg)
-    axis = torch.tensor([math.sin(th) * math.cos(0.4), math.sin(th) * math.sin(0.4), math.cos(th)],
-                        dtype=torch.float64)
+    axis = torch.tensor([math.sin(th) * math.cos(0.4), math.sin(th) * math.sin(0.4), math.cos(th)], dtype=torch.float64)
     zhat = torch.tensor([0.0, 0.0, 1.0], dtype=torch.float64)
     zp = zhat - axis[2] * axis
     u = zp / zp.norm() if zp.norm() > 1e-9 else torch.tensor([1.0, 0, 0], dtype=torch.float64)

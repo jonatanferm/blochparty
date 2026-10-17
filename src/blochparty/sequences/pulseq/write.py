@@ -34,7 +34,9 @@ def _events_from_record(rec: dict, sysm) -> dict:
         sig = rf.signal.detach().to(torch.float64).cpu().numpy()
         steps = rf.raster / sysm.rf_raster
         if abs(steps - round(steps)) > 1e-6 or round(steps) < 1:
-            raise ValueError(f"RF steps of {rf.raster:.9g} s are not a multiple of the RF raster {sysm.rf_raster:.9g} s")
+            raise ValueError(
+                f"RF steps of {rf.raster:.9g} s are not a multiple of the RF raster {sysm.rf_raster:.9g} s"
+            )
         sig = np.repeat(sig[:, 0] - 1j * sig[:, 1], round(steps))  # Pulseq signal = conj(field)
         out["rf"] = {"signal": sig, "delay": float(rf.delay), "center": float(rf.center)}
     for axis in range(3):
@@ -43,13 +45,23 @@ def _events_from_record(rec: dict, sysm) -> dict:
             continue
         if len(parts) == 1 and isinstance(parts[0], Trapezoid):
             g = parts[0]
-            out["grads"][axis] = {"type": "trap", "amplitude": float(g.amplitude[axis]), "rise": g.rise, "flat": g.flat,
-                                  "fall": g.fall, "delay": g.delay}
+            out["grads"][axis] = {
+                "type": "trap",
+                "amplitude": float(g.amplitude[axis]),
+                "rise": g.rise,
+                "flat": g.flat,
+                "fall": g.fall,
+                "delay": g.delay,
+            }
             continue
         times = np.unique(np.concatenate([g.corners()[0] for g in parts]))
         times = times[np.concatenate([[True], np.diff(times) > _T_TOL])]
-        vals = sum(np.interp(times, g.corners()[0], g.corners()[1][:, axis].detach().double().cpu().numpy(),
-                             left=0.0, right=0.0) for g in parts)
+        vals = sum(
+            np.interp(
+                times, g.corners()[0], g.corners()[1][:, axis].detach().double().cpu().numpy(), left=0.0, right=0.0
+            )
+            for g in parts
+        )
         out["grads"][axis] = {"type": "ext", "times": times, "values": vals}
     return out
 
@@ -93,12 +105,19 @@ def _split_adcs(ev: dict, sysm) -> list[dict]:
 def _adc_event(a) -> dict:
     """A builder ``ADC`` as Pulseq fields. read_pulseq's physical reading gives the receiver phase
     psi = -(Pulseq phase offset), so the offset is -psi."""
-    ph = (a.phase.detach() if isinstance(a.phase, torch.Tensor) else torch.tensor(a.phase, dtype=torch.float64))
+    ph = a.phase.detach() if isinstance(a.phase, torch.Tensor) else torch.tensor(a.phase, dtype=torch.float64)
     ph = ph.double().reshape(-1)  # not torch.as_tensor(float): that is float32
     if not bool((ph == ph[0]).all()):
         raise NotImplementedError("an ADC event with a varying receiver phase")
-    return {"num": int(a.n), "dwell": float(a.dwell), "delay": float(a.delay), "freq": 0.0, "phase": -float(ph[0]),
-            "freq_ppm": 0.0, "phase_ppm": 0.0}
+    return {
+        "num": int(a.n),
+        "dwell": float(a.dwell),
+        "delay": float(a.delay),
+        "freq": 0.0,
+        "phase": -float(ph[0]),
+        "freq_ppm": 0.0,
+        "phase_ppm": 0.0,
+    }
 
 
 def _scaled(x: float, unit: float) -> float:
@@ -158,10 +177,19 @@ class _Writer:
             else:
                 t_id = 0
             use = ev["rf"].get("use") or _rf_use(sig, sysm.rf_raster)
-            key = (amp, self._shape(mag), self._shape(pha), t_id, _scaled(ev["rf"]["center"], 1e-6),
-                   _scaled(ev["rf"]["delay"], 1e-6),
-                   ev["rf"].get("freq_ppm", 0.0), ev["rf"].get("phase_ppm", 0.0), ev["rf"].get("freq", 0.0),
-                   ev["rf"].get("phase", 0.0), use)
+            key = (
+                amp,
+                self._shape(mag),
+                self._shape(pha),
+                t_id,
+                _scaled(ev["rf"]["center"], 1e-6),
+                _scaled(ev["rf"]["delay"], 1e-6),
+                ev["rf"].get("freq_ppm", 0.0),
+                ev["rf"].get("phase_ppm", 0.0),
+                ev["rf"].get("freq", 0.0),
+                ev["rf"].get("phase", 0.0),
+                use,
+            )
             rf_id = self._lib(self.rf, key)
         g_ids = [0, 0, 0]
         for axis, g in ev["grads"].items():
@@ -177,21 +205,43 @@ class _Writer:
                 delay = float(t[0])
                 amp = float(np.abs(v).max())
                 shape = v / amp if amp > 0 else v
-                key = ("ext", amp, float(v[0]), float(v[-1]), self._shape(shape),
-                       self._shape([_scaled(float(x) - delay, sysm.grad_raster) for x in t]), _scaled(delay, 1e-6))
+                key = (
+                    "ext",
+                    amp,
+                    float(v[0]),
+                    float(v[-1]),
+                    self._shape(shape),
+                    self._shape([_scaled(float(x) - delay, sysm.grad_raster) for x in t]),
+                    _scaled(delay, 1e-6),
+                )
                 g_ids[axis] = self._lib(self.grad, key)
             else:  # arbitrary on the default raster, from an imported file: waveform at cell centres
                 v = np.asarray(g["waveform"], dtype=float)
                 amp = float(np.abs(v).max())
-                key = ("arb", amp, float(g["first"]), float(g["last"]), self._shape(v / amp if amp > 0 else v), 0,
-                       _scaled(float(g["delay"]), 1e-6))
+                key = (
+                    "arb",
+                    amp,
+                    float(g["first"]),
+                    float(g["last"]),
+                    self._shape(v / amp if amp > 0 else v),
+                    0,
+                    _scaled(float(g["delay"]), 1e-6),
+                )
                 g_ids[axis] = self._lib(self.grad, key)
         adc_id = 0
         if ev["adc"]:
             (a,) = ev["adc"]
             self._on(a["dwell"], sysm.adc_raster, "ADC dwell")
-            key = (a["num"], _scaled(a["dwell"], 1e-9), _scaled(a["delay"], 1e-6), a["freq_ppm"], a["phase_ppm"], a["freq"],
-                   a["phase"], 0)
+            key = (
+                a["num"],
+                _scaled(a["dwell"], 1e-9),
+                _scaled(a["delay"], 1e-6),
+                a["freq_ppm"],
+                a["phase_ppm"],
+                a["freq"],
+                a["phase"],
+                0,
+            )
             adc_id = self._lib(self.adc, key)
         dur = round(ev["duration"] / sysm.grad_raster)
         self.blocks.append((dur, rf_id, *g_ids, adc_id))
@@ -199,32 +249,56 @@ class _Writer:
     def text(self, name: str | None) -> str:
         sysm = self.sys
         f = lambda x: repr(float(x))
-        out = ["# Pulseq sequence file", "# Created by blochparty (full precision)", "", "[VERSION]", "major 1", "minor 5",
-               "revision 0", "", "[DEFINITIONS]", f"AdcRasterTime {f(sysm.adc_raster)}",
-               f"BlockDurationRaster {f(sysm.grad_raster)}", f"GradientRasterTime {f(sysm.grad_raster)}",
-               f"RadiofrequencyRasterTime {f(sysm.rf_raster)}"]
+        out = [
+            "# Pulseq sequence file",
+            "# Created by blochparty (full precision)",
+            "",
+            "[VERSION]",
+            "major 1",
+            "minor 5",
+            "revision 0",
+            "",
+            "[DEFINITIONS]",
+            f"AdcRasterTime {f(sysm.adc_raster)}",
+            f"BlockDurationRaster {f(sysm.grad_raster)}",
+            f"GradientRasterTime {f(sysm.grad_raster)}",
+            f"RadiofrequencyRasterTime {f(sysm.rf_raster)}",
+        ]
         if name:
             out.append(f"Name {name}")
         out += ["", "# Format of blocks:", "# NUM DUR RF  GX  GY  GZ  ADC  EXT", "[BLOCKS]"]
         out += [f"{i + 1} {b[0]} {b[1]} {b[2]} {b[3]} {b[4]} {b[5]} 0" for i, b in enumerate(self.blocks)]
         if self.rf:
-            out += ["", "# Format of RF events:",
-                    "# id ampl. mag_id phase_id time_shape_id center delay freqPPM phasePPM freq phase use", "[RF]"]
-            out += [f"{i} {f(k[0])} {k[1]} {k[2]} {k[3]} {f(k[4])} {f(k[5])} {f(k[6])} {f(k[7])} {f(k[8])} {f(k[9])} {k[10]}"
-                    for k, i in self.rf.items()]
+            out += [
+                "",
+                "# Format of RF events:",
+                "# id ampl. mag_id phase_id time_shape_id center delay freqPPM phasePPM freq phase use",
+                "[RF]",
+            ]
+            out += [
+                f"{i} {f(k[0])} {k[1]} {k[2]} {k[3]} {f(k[4])} {f(k[5])} {f(k[6])} {f(k[7])} {f(k[8])} {f(k[9])} {k[10]}"
+                for k, i in self.rf.items()
+            ]
         # [GRADIENTS] and [TRAP] share one id space (the block table does not say which section)
         arb = [(k, i) for k, i in self.grad.items() if k[0] != "trap"]
         trap = [(k, i) for k, i in self.grad.items() if k[0] == "trap"]
         if arb:
-            out += ["", "# Format of arbitrary gradients:", "# id amplitude first last amp_shape_id time_shape_id delay",
-                    "[GRADIENTS]"]
+            out += [
+                "",
+                "# Format of arbitrary gradients:",
+                "# id amplitude first last amp_shape_id time_shape_id delay",
+                "[GRADIENTS]",
+            ]
             out += [f"{i} {f(k[1])} {f(k[2])} {f(k[3])} {k[4]} {k[5]} {f(k[6])}" for k, i in arb]
         if trap:
             out += ["", "# Format of trapezoid gradients:", "# id amplitude rise flat fall delay", "[TRAP]"]
             out += [f"{i} {f(k[1])} {f(k[2])} {f(k[3])} {f(k[4])} {f(k[5])}" for k, i in trap]
         if self.adc:
             out += ["", "# Format of ADC events:", "# id num dwell delay freqPPM phasePPM freq phase phase_id", "[ADC]"]
-            out += [f"{i} {k[0]} {f(k[1])} {f(k[2])} {f(k[3])} {f(k[4])} {f(k[5])} {f(k[6])} {k[7]}" for k, i in self.adc.items()]
+            out += [
+                f"{i} {k[0]} {f(k[1])} {f(k[2])} {f(k[3])} {f(k[4])} {f(k[5])} {f(k[6])} {k[7]}"
+                for k, i in self.adc.items()
+            ]
         if self.shapes:
             out += ["", "# Sequence Shapes", "[SHAPES]"]
             for vals, i in self.shapes.items():
@@ -234,8 +308,10 @@ class _Writer:
         body = "\n".join(out) + "\n"
         import hashlib
 
-        return body + "\n[SIGNATURE]\n# md5 of this file up to the newline before [SIGNATURE]\nType md5\n" \
+        return (
+            body + "\n[SIGNATURE]\n# md5 of this file up to the newline before [SIGNATURE]\nType md5\n"
             f"Hash {hashlib.md5(body.encode()).hexdigest()}\n"
+        )
 
 
 def _replay(blocks: list[dict], sysm, dtype) -> Sequence:
@@ -249,8 +325,14 @@ def _replay(blocks: list[dict], sysm, dtype) -> Sequence:
         elif kind == "delay":
             b.delay(rec["duration"], grad=rec["grad"])
         elif kind == "rf":
-            b.rf(rec["duration"], flip_deg=rec["flip_deg"], amplitude=rec["amplitude"], phase=rec["phase"],
-                 grad=rec["grad"], n_steps=rec["n_steps"])
+            b.rf(
+                rec["duration"],
+                flip_deg=rec["flip_deg"],
+                amplitude=rec["amplitude"],
+                phase=rec["phase"],
+                grad=rec["grad"],
+                n_steps=rec["n_steps"],
+            )
         elif kind == "rf_waveform":
             b.rf_waveform(rec["samples"], rec["dt"], grad=rec["grad"])
         elif kind == "readout":
@@ -282,11 +364,15 @@ def write_pulseq(seq: Sequence, path, *, system=None, spoil: str = "raise", name
     if spoil not in ("raise", "drop"):
         raise ValueError(f"spoil must be 'raise' or 'drop', not {spoil!r}")
     if seq.bound_only is not None and any(seq.bound_only):
-        raise ValueError("bound-pool-only RF segments (Sequence.bound_only) model other slices' pulses, not a scanner "
-                         "sequence; write the sequence without them")
+        raise ValueError(
+            "bound-pool-only RF segments (Sequence.bound_only) model other slices' pulses, not a scanner "
+            "sequence; write the sequence without them"
+        )
     if any(seq.spoil) and spoil == "raise":
-        raise ValueError("ideal spoilers (Sequence.spoil) cannot be written to Pulseq; use crusher gradients, or "
-                         "spoil='drop' to write the sequence without them")
+        raise ValueError(
+            "ideal spoilers (Sequence.spoil) cannot be written to Pulseq; use crusher gradients, or "
+            "spoil='drop' to write the sequence without them"
+        )
     if "pulseq_source" in seq.meta:
         _write_imported(seq, path, name)
         return
@@ -295,25 +381,37 @@ def write_pulseq(seq: Sequence, path, *, system=None, spoil: str = "raise", name
         raise NotImplementedError("write_pulseq needs block provenance (a SequenceBuilder sequence or read_pulseq)")
     sysm = system or seq.meta.get("system") or System()
     replayed = _replay(blocks, sysm, seq.dt.dtype)
-    same = (len(replayed) == len(seq) and replayed.is_rf == list(seq.is_rf) and replayed.adc == list(seq.adc)
-            and all(torch.equal(getattr(replayed, k).detach(), getattr(seq, k).detach())
-                    for k in ("dt", "rf", "grad", "adc_phase")))
+    same = (
+        len(replayed) == len(seq)
+        and replayed.is_rf == list(seq.is_rf)
+        and replayed.adc == list(seq.adc)
+        and all(
+            torch.equal(getattr(replayed, k).detach(), getattr(seq, k).detach())
+            for k in ("dt", "rf", "grad", "adc_phase")
+        )
+    )
     if not same:
-        raise ValueError("the sequence differs from what its block records build (changed after building?); "
-                         "write the sequence as built")
+        raise ValueError(
+            "the sequence differs from what its block records build (changed after building?); "
+            "write the sequence as built"
+        )
     w = _Writer(sysm)
     for rec in blocks:
         kind = rec["kind"]
         if kind == "delay":
             if rec["grad"] is not None and bool((torch.as_tensor(rec["grad"]) != 0).any()):
-                raise NotImplementedError("a delay with a gradient is an instantaneous step: use a block with a trapezoid")
+                raise NotImplementedError(
+                    "a delay with a gradient is an instantaneous step: use a block with a trapezoid"
+                )
             w.add({"duration": float(rec["duration"]), "rf": None, "grads": {}, "adc": []})
         elif kind == "block":
             for ev in _split_adcs(_events_from_record(rec, sysm), sysm):
                 w.add(ev)
         else:
-            raise NotImplementedError(f"SequenceBuilder.{kind} makes ideal segments (no RF dead time, instantaneous "
-                                      "gradients); build with SequenceBuilder.block to write Pulseq")
+            raise NotImplementedError(
+                f"SequenceBuilder.{kind} makes ideal segments (no RF dead time, instantaneous "
+                "gradients); build with SequenceBuilder.block to write Pulseq"
+            )
     Path(path).write_text(w.text(name))
 
 
@@ -351,10 +449,16 @@ def _write_imported(seq: Sequence, path, name: str | None) -> None:
                 from pypulseq import calc_rf_center
 
                 center = calc_rf_center(rf)[0]
-            ev["rf"] = {"signal": np.asarray(rf.signal, dtype=complex), "delay": float(rf.delay), "center": float(center),
-                        "freq": float(rf.freq_offset), "phase": float(rf.phase_offset),
-                        "freq_ppm": float(getattr(rf, "freq_ppm", 0.0)), "phase_ppm": float(getattr(rf, "phase_ppm", 0.0)),
-                        "use": (getattr(rf, "use", "") or "u")[0]}
+            ev["rf"] = {
+                "signal": np.asarray(rf.signal, dtype=complex),
+                "delay": float(rf.delay),
+                "center": float(center),
+                "freq": float(rf.freq_offset),
+                "phase": float(rf.phase_offset),
+                "freq_ppm": float(getattr(rf, "freq_ppm", 0.0)),
+                "phase_ppm": float(getattr(rf, "phase_ppm", 0.0)),
+                "use": (getattr(rf, "use", "") or "u")[0],
+            }
             if not on_raster:
                 ev["rf"]["times"] = t
         for axis, ch in enumerate(("gx", "gy", "gz")):
@@ -362,21 +466,43 @@ def _write_imported(seq: Sequence, path, name: str | None) -> None:
             if g is None:
                 continue
             if g.type == "trap":
-                ev["grads"][axis] = {"type": "trap", "amplitude": float(g.amplitude), "rise": float(g.rise_time),
-                                     "flat": float(g.flat_time), "fall": float(g.fall_time), "delay": float(g.delay)}
+                ev["grads"][axis] = {
+                    "type": "trap",
+                    "amplitude": float(g.amplitude),
+                    "rise": float(g.rise_time),
+                    "flat": float(g.flat_time),
+                    "fall": float(g.fall_time),
+                    "delay": float(g.delay),
+                }
             elif g.time_id in (0, -1):
-                ev["grads"][axis] = {"type": "arb", "waveform": np.asarray(g.waveform, dtype=float),
-                                     "first": float(g.first), "last": float(g.last), "delay": float(g.delay)}
+                ev["grads"][axis] = {
+                    "type": "arb",
+                    "waveform": np.asarray(g.waveform, dtype=float),
+                    "first": float(g.first),
+                    "last": float(g.last),
+                    "delay": float(g.delay),
+                }
             else:
-                ev["grads"][axis] = {"type": "ext", "times": float(g.delay) + np.asarray(g.tt, dtype=float),
-                                     "values": np.asarray(g.waveform, dtype=float)}
+                ev["grads"][axis] = {
+                    "type": "ext",
+                    "times": float(g.delay) + np.asarray(g.tt, dtype=float),
+                    "values": np.asarray(g.waveform, dtype=float),
+                }
         a = block.adc
         if a is not None:
             mod = getattr(a, "phase_modulation", None)
             if mod is not None and len(mod) and np.any(np.asarray(mod) != 0):
                 raise NotImplementedError("ADC phase modulation")
-            ev["adc"] = [{"num": int(a.num_samples), "dwell": float(a.dwell), "delay": float(a.delay),
-                          "freq": float(a.freq_offset), "phase": float(a.phase_offset),
-                          "freq_ppm": float(getattr(a, "freq_ppm", 0.0)), "phase_ppm": float(getattr(a, "phase_ppm", 0.0))}]
+            ev["adc"] = [
+                {
+                    "num": int(a.num_samples),
+                    "dwell": float(a.dwell),
+                    "delay": float(a.delay),
+                    "freq": float(a.freq_offset),
+                    "phase": float(a.phase_offset),
+                    "freq_ppm": float(getattr(a, "freq_ppm", 0.0)),
+                    "phase_ppm": float(getattr(a, "phase_ppm", 0.0)),
+                }
+            ]
         w.add(ev)
     Path(path).write_text(w.text(name))

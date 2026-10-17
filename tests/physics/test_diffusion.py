@@ -18,8 +18,14 @@ f64 = torch.float64
 
 
 def water(n, diffusion, t2=1e6):
-    return bp.Phantom(pos=torch.zeros(n, 3, dtype=f64), pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
-                      t2=torch.full((n,), t2, dtype=f64), db0=torch.zeros(n, dtype=f64), diffusion=diffusion)
+    return bp.Phantom(
+        pos=torch.zeros(n, 3, dtype=f64),
+        pd=torch.ones(n, dtype=f64),
+        t1=torch.full((n,), 1e6, dtype=f64),
+        t2=torch.full((n,), t2, dtype=f64),
+        db0=torch.zeros(n, dtype=f64),
+        diffusion=diffusion,
+    )
 
 
 def b_value(gnorm):
@@ -34,7 +40,11 @@ def test_philox_known_answers():
     # Random123 kat_vectors for philox4x32-10
     assert tuple(int(x) for x in philox(0, 0, 0, 0, 0, 0)) == (0x6627E8D5, 0xE169C58D, 0xBC57AC4C, 0x9B00DBD8)
     assert tuple(int(x) for x in philox(0x243F6A88, 0x85A308D3, 0x13198A2E, 0x03707344, 0xA4093822, 0x299F31D0)) == (
-        0xD16CFE09, 0x94FDCCEB, 0x5001E420, 0x24126EA1)
+        0xD16CFE09,
+        0x94FDCCEB,
+        0x5001E420,
+        0x24126EA1,
+    )
     z = normals(5, np.arange(100000), 7)
     assert np.abs(z.mean(0)).max() < 0.02 and np.abs(z.std(0) - 1).max() < 0.02
 
@@ -67,8 +77,14 @@ def test_anisotropic_tensor():
 def test_deterministic_and_merge_independent():
     n = 2000
     ph = water(n, torch.full((n,), 2e-9, dtype=f64), t2=0.08)
-    ph = bp.Phantom((torch.rand(n, 3, generator=torch.Generator().manual_seed(0), dtype=f64) - 0.5) * 0.02, ph.pd, ph.t1,
-                    ph.t2, ph.db0, diffusion=ph.diffusion)
+    ph = bp.Phantom(
+        (torch.rand(n, 3, generator=torch.Generator().manual_seed(0), dtype=f64) - 0.5) * 0.02,
+        ph.pd,
+        ph.t1,
+        ph.t2,
+        ph.db0,
+        diffusion=ph.diffusion,
+    )
     seq = pgse((1.2e6, 3e5, -2e5), readout=32)
     a = bp.simulate(ph, seq, seed=4)
     b = bp.simulate(ph, seq, seed=4)
@@ -93,9 +109,11 @@ def epg_cpmg_diffusion(alpha, n_echo, esp, d, dk):
         nonlocal fp, fm, z
         c2, s2, sa = math.cos(a / 2) ** 2, math.sin(a / 2) ** 2, math.sin(a)
         e = np.exp(1j * phi)
-        fp, fm, z = (c2 * fp + e**2 * s2 * fm - 1j * e * sa * z,
-                     np.conj(e) ** 2 * s2 * fp + c2 * fm + 1j * np.conj(e) * sa * z,
-                     -0.5j * np.conj(e) * sa * fp + 0.5j * e * sa * fm + math.cos(a) * z)
+        fp, fm, z = (
+            c2 * fp + e**2 * s2 * fm - 1j * e * sa * z,
+            np.conj(e) ** 2 * s2 * fp + c2 * fm + 1j * np.conj(e) * sa * z,
+            -0.5j * np.conj(e) * sa * fp + 0.5j * e * sa * fm + math.cos(a) * z,
+        )
 
     def interval(tau):
         nonlocal fp, fm, z
@@ -126,9 +144,14 @@ def test_cpmg_stimulated_echoes_match_epg_with_diffusion(gpu):
     dk = 2 * math.pi * g * esp / 2
     wavelength = 1 / (g * esp / 2)
     x = (torch.arange(n, dtype=f64) + 0.5) / n * 50 * wavelength
-    ph = bp.Phantom(pos=torch.stack([x, torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64)], -1),
-                    pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64), t2=torch.full((n,), 1e6, dtype=f64),
-                    db0=torch.zeros(n, dtype=f64), diffusion=torch.full((n,), d, dtype=f64))
+    ph = bp.Phantom(
+        pos=torch.stack([x, torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64)], -1),
+        pd=torch.ones(n, dtype=f64),
+        t1=torch.full((n,), 1e6, dtype=f64),
+        t2=torch.full((n,), 1e6, dtype=f64),
+        db0=torch.zeros(n, dtype=f64),
+        diffusion=torch.full((n,), d, dtype=f64),
+    )
     b = bp.SequenceBuilder().rf(1e-6, flip_deg=90.0)
     for _ in range(n_echo):
         b.delay(esp / 2 - 1e-6, grad=(g * esp / 2 / (esp / 2 - 1e-6), 0, 0))

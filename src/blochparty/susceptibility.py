@@ -94,11 +94,9 @@ def susceptibility_to_b0(
     direction = direction / direction.norm()
     shape = tuple(math.ceil(n * p) for n, p in zip(chi.shape, factors))
     before = tuple((m - n) // 2 for m, n in zip(shape, chi.shape))
-    pads = tuple(v for n, m, start in reversed(list(zip(chi.shape, shape, before)))
-                 for v in (start, m - n - start))
+    pads = tuple(v for n, m, start in reversed(list(zip(chi.shape, shape, before))) for v in (start, m - n - start))
     source = F.pad(chi - background, pads)
-    freq = [torch.fft.fftfreq(n, d=h, dtype=chi.dtype, device=chi.device)
-            for n, h in zip(shape, voxel)]
+    freq = [torch.fft.fftfreq(n, d=h, dtype=chi.dtype, device=chi.device) for n, h in zip(shape, voxel)]
     kz, ky, kx = freq[0][:, None, None], freq[1][None, :, None], freq[2][None, None, :]
     k2 = kx.square() + ky.square() + kz.square()
     # At an even grid's Nyquist bin, +k and -k denote the same samples.
@@ -109,11 +107,14 @@ def susceptibility_to_b0(
     for n, k in zip(shape, cross_freq):
         if n % 2 == 0:
             k[n // 2] = 0
-    cz, cy, cx = (cross_freq[0][:, None, None], cross_freq[1][None, :, None],
-                  cross_freq[2][None, None, :])
+    cz, cy, cx = (cross_freq[0][:, None, None], cross_freq[1][None, :, None], cross_freq[2][None, None, :])
     bx, by, bz = direction.unbind()
-    kb2 = ((bx*kx).square() + (by*ky).square() + (bz*kz).square()
-           + 2 * (bx*by*cx*cy + bx*bz*cx*cz + by*bz*cy*cz))
+    kb2 = (
+        (bx * kx).square()
+        + (by * ky).square()
+        + (bz * kz).square()
+        + 2 * (bx * by * cx * cy + bx * bz * cx * cz + by * bz * cy * cz)
+    )
     kernel = 1 / 3 - kb2 / torch.where(k2 > 0, k2, 1.0)
     kernel[0, 0, 0] = 0
     field = torch.fft.ifftn(torch.fft.fftn(source) * kernel).real
@@ -129,8 +130,7 @@ def _basis(x: Tensor, y: Tensor, z: Tensor, order: int) -> list[Tensor]:
     if order >= 1:
         terms += [x, y, z]
     if order == 2:
-        terms += [z.square() - (x.square() + y.square()) / 2,
-                  z * x, z * y, x.square() - y.square(), x * y]
+        terms += [z.square() - (x.square() + y.square()) / 2, z * x, z * y, x.square() - y.square(), x * y]
     return terms
 
 
@@ -175,8 +175,9 @@ def shim(
         # whose accumulation loses precision for million-voxel float32 maps.
         offset = df[mask].mean()
         return df - offset, {"offset": offset}
-    axes = [torch.arange(n, dtype=df.dtype, device=df.device) * h + o
-            for n, h, o in zip(df.shape, voxel, reversed(origin))]
+    axes = [
+        torch.arange(n, dtype=df.dtype, device=df.device) * h + o for n, h, o in zip(df.shape, voxel, reversed(origin))
+    ]
     z, y, x = torch.meshgrid(*axes, indexing="ij")
     fit = torch.stack(_basis(x[mask], y[mask], z[mask], order), dim=-1)
     if fit.shape[0] < fit.shape[1]:

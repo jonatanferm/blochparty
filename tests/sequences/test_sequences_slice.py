@@ -116,7 +116,7 @@ def test_slice_offset_moves_the_slice_to_plus_z0():
     for z0 in (4e-3, -7e-3):
         shifted, *_ = excite(90.0, z, z0)
         s = round(z0 / dz)
-        assert np.abs(shifted[200 + s:601 + s] - centred[200:601]).max() < 5e-4
+        assert np.abs(shifted[200 + s : 601 + s] - centred[200:601]).max() < 5e-4
         a = np.abs(shifted)
         centre = (z.numpy() * a).sum() / a.sum()
         assert abs(centre - z0) < 0.01 * THK

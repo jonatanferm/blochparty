@@ -24,8 +24,16 @@ SIMS = {"core": simulate}
 
 
 def voxel(k, t2prime, t1=1e9, t2=1e9, sampling="quantile", seed=0):
-    return bp.phantom_from_maps(one(1.0), one(t1), one(t2), 1e-3, spins_per_voxel=(1, k), t2prime=one(t2prime),
-                                t2prime_sampling=sampling, seed=seed)
+    return bp.phantom_from_maps(
+        one(1.0),
+        one(t1),
+        one(t2),
+        1e-3,
+        spins_per_voxel=(1, k),
+        t2prime=one(t2prime),
+        t2prime_sampling=sampling,
+        seed=seed,
+    )
 
 
 def fid(phantom, n, dwell, sim=simulate):
@@ -87,6 +95,7 @@ def test_fid_window_scales_with_k():
         s, t = fid(voxel(k, t2p), 400, k * t2p / 4 / 400)
         err = float((s - 1j * torch.exp(-t / t2p)).abs().max())
         assert err <= 2 / math.sqrt(k), (k, err)
+
     # the deterministic quantiles beat random draws of the same size (3 T2' window)
     def err(phantom):
         s, t = fid(phantom, 100, 3 * t2p / 100)
@@ -103,8 +112,15 @@ def test_spin_echo_refocuses_t2prime(sim):
     ph = voxel(k, t2p, t1=1.0, t2=t2)
     for te in (10e-3, 20e-3, 40e-3):
         # 90x at 5 ns, 180y centred at te/2, sample at te (pulses short against the largest offsets, ~3 kHz)
-        seq = (SequenceBuilder().rf(10e-9, flip_deg=90.0).delay(te / 2 - 20e-9)
-               .rf(20e-9, flip_deg=180.0, phase=math.pi / 2).delay(te / 2 - 15e-9 - 0.5e-9).readout(1, 1e-9).build())
+        seq = (
+            SequenceBuilder()
+            .rf(10e-9, flip_deg=90.0)
+            .delay(te / 2 - 20e-9)
+            .rf(20e-9, flip_deg=180.0, phase=math.pi / 2)
+            .delay(te / 2 - 15e-9 - 0.5e-9)
+            .readout(1, 1e-9)
+            .build()
+        )
         echo = SIMS[sim](ph, seq).signal[0, 0] / ph.pd.sum()
         assert abs(abs(echo) - math.exp(-te / t2)) < 2e-5, (te, abs(echo))
         # the FID at the same time has decayed with T2* (to the 1 / sqrt(K) floor)

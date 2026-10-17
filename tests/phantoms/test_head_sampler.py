@@ -2,6 +2,7 @@
 deformation (exact shifts, partition of unity, Jacobian > 0), tissue draws (means and SDs of the
 table over 100 subjects) and sample_head's determinism on BrainWeb subject 04 (skipped without
 the data)."""
+
 import json
 import math
 from dataclasses import fields
@@ -27,13 +28,26 @@ from blochparty.anatomy import (
 DATA = Path(__file__).parents[2] / "validation" / "anatomy" / "data"
 
 
-@pytest.mark.parametrize("options", [{}, dict(mt=True, diffusion=True, chi_to_b0=False, t2star="off"),
-                                     dict(variability={"t1": .1, "length": .002, "seed": 3}, seed=5)])
+@pytest.mark.parametrize(
+    "options",
+    [
+        {},
+        dict(mt=True, diffusion=True, chi_to_b0=False, t2star="off"),
+        dict(variability={"t1": 0.1, "length": 0.002, "seed": 3}, seed=5),
+    ],
+)
 def test_digital_phantom_round_trip_is_bit_identical(options):
-    a = Anatomy({"wm": torch.full((6, 6, 6), .5, dtype=torch.float64), "gm": torch.full((6, 6, 6), .3, dtype=torch.float64),
-                 "fat": torch.full((6, 6, 6), .1, dtype=torch.float64)}, (.002,) * 3, (0, 0, 0))
-    ours = DigitalPhantom(a, DEFAULT_TISSUES[3.], 3., options).to_phantom()
-    ref = to_phantom(a, DEFAULT_TISSUES, 3., **options)
+    a = Anatomy(
+        {
+            "wm": torch.full((6, 6, 6), 0.5, dtype=torch.float64),
+            "gm": torch.full((6, 6, 6), 0.3, dtype=torch.float64),
+            "fat": torch.full((6, 6, 6), 0.1, dtype=torch.float64),
+        },
+        (0.002,) * 3,
+        (0, 0, 0),
+    )
+    ours = DigitalPhantom(a, DEFAULT_TISSUES[3.0], 3.0, options).to_phantom()
+    ref = to_phantom(a, DEFAULT_TISSUES, 3.0, **options)
     for key in ("pos", "pd", "t1", "t2", "db0", "diffusion"):
         x, y = getattr(ours, key), getattr(ref, key)
         assert (x is None and y is None) or torch.equal(x, y), key
@@ -62,17 +76,21 @@ def test_bspline_partition_of_unity_and_jacobian():
     for seed in range(20):
         d, control = random_deformation(shape, voxel, torch.Generator().manual_seed(seed))
         jac = deformation_jacobian(d, voxel)
-        assert jac.min() > .5 and jac.max() < 1.5, seed
+        assert jac.min() > 0.5 and jac.max() < 1.5, seed
     # an affine displacement d = A x has the Jacobian det(I + A) everywhere
-    A = torch.tensor([[.1, .02, 0], [0, -.05, .03], [.01, 0, .07]], dtype=torch.float64)
+    A = torch.tensor([[0.1, 0.02, 0], [0, -0.05, 0.03], [0.01, 0, 0.07]], dtype=torch.float64)
     axes = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h for n, h in zip(shape, voxel)), indexing="ij")
     d = torch.einsum("kl,lzyx->kzyx", A, torch.stack(axes))
-    torch.testing.assert_close(deformation_jacobian(d, voxel), torch.linalg.det(torch.eye(3, dtype=A.dtype) + A)
-                               .expand(shape), rtol=1e-12, atol=0)
+    torch.testing.assert_close(
+        deformation_jacobian(d, voxel),
+        torch.linalg.det(torch.eye(3, dtype=A.dtype) + A).expand(shape),
+        rtol=1e-12,
+        atol=0,
+    )
 
 
 def test_draws_match_the_table_over_100_subjects():
-    table = DEFAULT_TISSUES[3.]
+    table = DEFAULT_TISSUES[3.0]
     draws = [draw_tissues(table, torch.Generator().manual_seed(s))[1] for s in range(100)]
     assert draws[7] == draw_tissues(table, torch.Generator().manual_seed(7))[1]
     z = []
@@ -83,12 +101,12 @@ def test_draws_match_the_table_over_100_subjects():
                 assert all(f.name not in x[name] for x in draws)
                 continue
             values = torch.tensor([x[name][f.name] for x in draws], dtype=torch.float64)
-            assert abs(float(values.mean()) / d.mean - 1) < .05, (name, f.name)
+            assert abs(float(values.mean()) / d.mean - 1) < 0.05, (name, f.name)
             if f.name not in ("t2star",):  # clipped at T2
                 z.append((values - d.mean) / d.sd)
     z = torch.cat(z)
     print(f"{len(z)} standardised draws: mean {float(z.mean()):+.3f}, SD {float(z.std()):.3f}")
-    assert abs(float(z.mean())) < .05 and abs(float(z.std()) - 1) < .05
+    assert abs(float(z.mean())) < 0.05 and abs(float(z.std()) - 1) < 0.05
     tissues, _ = draw_tissues(table, torch.Generator().manual_seed(0))
     assert all(p.t2star is None or p.t2star.mean <= p.t2.mean for p in tissues.values())
     assert tissues["csf"].t1 == table["csf"].t1  # no SD: the mean, untouched
@@ -103,7 +121,7 @@ def test_sample_head_is_deterministic_and_recorded():
     c = sample_head(12, subject=4, root=DATA, voxel=(4e-3,) * 3)
     assert all(torch.equal(a.anatomy.fractions[k], b.anatomy.fractions[k]) for k in a.anatomy.fractions)
     assert json.dumps(a.meta) == json.dumps(b.meta) != json.dumps(c.meta)
-    assert a.meta["deformation"]["jacobian"][0] > .2 and a.meta["subject"] == 4
+    assert a.meta["deformation"]["jacobian"][0] > 0.2 and a.meta["subject"] == 4
     assert a.meta["draws"]["wm"]["t1"] == a.tissues["wm"].t1.mean
     ph = a.to_phantom(spins_per_voxel=1, sampling="categorical", t2star="off")
     assert len(ph) > 0 and math.isfinite(float(ph.db0.abs().max()))
@@ -133,21 +151,25 @@ def test_realistic_head_options():
     assert 0.9e-3 < kept_brain < brain  # the shell takes its share of the size
     skull = lambda h: float((h.anatomy.fractions["skull"] + h.anatomy.fractions["marrow"]).sum())
     assert skull(kept) > 1.03 * skull(sized)  # the vault thicker; the base, beyond reach, scales
-    turned = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", yaw_sd=10.)
+    turned = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", yaw_sd=10.0)
     assert turned.meta["size"] == sized.meta["size"] and abs(turned.meta["pose"]["yaw_deg"]) > 0
     for k in ("gm", "wm", "csf"):
-        assert float(turned.anatomy.fractions[k].sum()) == pytest.approx(float(sized.anatomy.fractions[k].sum()), rel=0.02)
-    old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70., sulci="measured")
-    mean, sd = sulcal_width(70.)
+        assert float(turned.anatomy.fractions[k].sum()) == pytest.approx(
+            float(sized.anatomy.fractions[k].sum()), rel=0.02
+        )
+    old = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.0, sulci="measured")
+    mean, sd = sulcal_width(70.0)
     assert abs(old.meta["age"]["sulcal_width"] - mean) < 4 * sd and 50e-6 < old.meta["age"]["sulcal_csf"] < 250e-6
     assert float(old.anatomy.fractions["csf"].sum()) > float(sized.anatomy.fractions["csf"].sum())
     assert float(old.anatomy.fractions["gm"].sum()) < float(sized.anatomy.fractions["gm"].sum())
     # conserved: the cortex's diffuse CSF gathered into the sheets, the CSF volume kept at 25 y, more at 70 y
     csf = lambda h: float(h.anatomy.fractions["csf"].sum())
-    young = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=25.)
+    young = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=25.0)
     assert young.meta["age"]["sulci"] == "conserved" and young.meta["age"]["gathered_csf"] > 5e-6
-    assert csf(young) == pytest.approx(csf(sized), rel=2e-3) and young.meta["age"]["sulcal_csf"] == pytest.approx(0, abs=1e-7)
-    aged = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.)
+    assert csf(young) == pytest.approx(csf(sized), rel=2e-3) and young.meta["age"]["sulcal_csf"] == pytest.approx(
+        0, abs=1e-7
+    )
+    aged = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, size="anthropometric", age=70.0)
     assert csf(aged) > csf(young) * 1.05
 
 
@@ -160,7 +182,7 @@ def test_deep_grey_nuclei():
     from blochparty import tissuedb
     from blochparty.anatomy import DEEP_GREY
 
-    table = {3.: tissuedb.tissue_table(3.)}
+    table = {3.0: tissuedb.tissue_table(3.0)}
     with pytest.raises(ValueError, match="deep_grey"):
         sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, deep_grey=True)
     plain = sample_head(1, subject=4, root=DATA, voxel=(2e-3,) * 3, table=table)
@@ -182,25 +204,26 @@ def test_shell_resize_keeps_the_skull_thickness():
     from blochparty.anatomy import _sample_field, _shell_translation
 
     h, n = 1e-3, 141
-    r = torch.linalg.norm(torch.stack(torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h - .07,) * 3,
-                                                     indexing="ij")), dim=0)
-    brain = (r < .05).double()
-    skull = ((r >= .05) & (r < .057)).double()
-    an = Anatomy({"background": 1 - brain - skull, "wm": brain, "skull": skull}, (h,) * 3, (0., 0., 0.))
-    c, s = (.07,) * 3, (.8,) * 3
+    r = torch.linalg.norm(
+        torch.stack(torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h - 0.07,) * 3, indexing="ij")), dim=0
+    )
+    brain = (r < 0.05).double()
+    skull = ((r >= 0.05) & (r < 0.057)).double()
+    an = Anatomy({"background": 1 - brain - skull, "wm": brain, "skull": skull}, (h,) * 3, (0.0, 0.0, 0.0))
+    c, s = (0.07,) * 3, (0.8,) * 3
     shell = _shell_translation(an, s, c)
     grid = torch.stack(torch.meshgrid(*(torch.arange(n, dtype=torch.float64) * h,) * 3, indexing="ij"))
     cc = torch.tensor(c, dtype=torch.float64).view(3, 1, 1, 1)
     v = grid - cc
-    u = v / .8
+    u = v / 0.8
     for _ in range(6):
         u = v - _sample_field(shell, cc + u, an.voxel).double()
     out = deform(an, cc + u - grid)
-    plain = deform(an, cc + v / .8 - grid)
+    plain = deform(an, cc + v / 0.8 - grid)
     line = lambda a, k: float(a.fractions[k][70, 70, 70:].sum()) * h  # along +x from the centre
     assert line(out, "wm") == pytest.approx(line(plain, "wm"), abs=5e-4)  # scaled like plain resizing
     assert line(out, "skull") == pytest.approx(line(an, "skull"), abs=5e-4)  # kept
-    assert line(plain, "skull") == pytest.approx(.8 * line(an, "skull"), abs=6e-4)  # scaled
+    assert line(plain, "skull") == pytest.approx(0.8 * line(an, "skull"), abs=6e-4)  # scaled
 
 
 @pytest.mark.skipif(not (DATA / "subject04.json").exists(), reason="BrainWeb subject 04 not fetched")
@@ -212,18 +235,24 @@ def test_ventricles_grow_with_age():
 
     an = load_brainweb(4, DATA, voxel=(2e-3,) * 3)
     assert 4e-6 < float((an.fractions["csf"] * torch.from_numpy(ventricle_mask(an))).sum()) * 8e-9 < 20e-6
-    assert ventricle_factor(30.) == 1. and ventricle_factor(50.) == pytest.approx(19.4 / 17.3)
-    assert ventricle_factor(70.) == ventricle_factor(85.) == pytest.approx(33.4 / 17.3)
-    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.)
-    young, old = sample_head(1, ventricle_age=25., **kw), sample_head(1, ventricle_age=70., **kw)
+    assert ventricle_factor(30.0) == 1.0 and ventricle_factor(50.0) == pytest.approx(19.4 / 17.3)
+    assert ventricle_factor(70.0) == ventricle_factor(85.0) == pytest.approx(33.4 / 17.3)
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.0)
+    young, old = sample_head(1, ventricle_age=25.0, **kw), sample_head(1, ventricle_age=70.0, **kw)
     plain = sample_head(1, **kw)
-    assert young.meta["ventricles"]["factor"] == 1. and torch.equal(young.anatomy.fractions["csf"], plain.anatomy.fractions["csf"])
+    assert young.meta["ventricles"]["factor"] == 1.0 and torch.equal(
+        young.anatomy.fractions["csf"], plain.anatomy.fractions["csf"]
+    )
     csf = lambda h: float(h.anatomy.fractions["csf"].sum()) * 8e-9
     brain = lambda h: float((h.anatomy.fractions["gm"] + h.anatomy.fractions["wm"]).sum()) * 8e-9
     gain = csf(old) - csf(plain)
-    assert 0.6 * 0.93 * old.meta["ventricles"]["source_volume"] < gain < 1.4 * 0.93 * old.meta["ventricles"]["source_volume"]
-    assert brain(plain) - brain(old) == pytest.approx(gain, rel=.5)
-    one = sample_head(1, age=(20., 80.), ventricle_age="age", **kw)  # the head's own age for both
+    assert (
+        0.6 * 0.93 * old.meta["ventricles"]["source_volume"]
+        < gain
+        < 1.4 * 0.93 * old.meta["ventricles"]["source_volume"]
+    )
+    assert brain(plain) - brain(old) == pytest.approx(gain, rel=0.5)
+    one = sample_head(1, age=(20.0, 80.0), ventricle_age="age", **kw)  # the head's own age for both
     assert one.meta["ventricles"]["years"] == one.meta["age"]["years"]
     with pytest.raises(ValueError):
         sample_head(1, ventricle_age="age", **kw)
@@ -237,35 +266,60 @@ def test_pitch_tips_the_face_down_and_keeps_volumes():
 
     from blochparty.anatomy import _head_mask
 
-    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0., size="anthropometric")
-    flat, down = sample_head(1, **kw), sample_head(1, pitch=(20., 0.), **kw)
-    assert "pitch_deg" not in flat.meta["pose"] and down.meta["pose"]["pitch_deg"] == pytest.approx(20.)
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.0, size="anthropometric")
+    flat, down = sample_head(1, **kw), sample_head(1, pitch=(20.0, 0.0), **kw)
+    assert "pitch_deg" not in flat.meta["pose"] and down.meta["pose"]["pitch_deg"] == pytest.approx(20.0)
     front = lambda h: (lambda z, y: (z[y >= y.max() - 1].mean(), y.max()))(*np.nonzero(_head_mask(h.anatomy))[:2])
     (z0, y0), (z1, y1) = front(flat), front(down)
     assert z1 > z0 and y1 < y0
     for k in ("gm", "wm", "csf"):
-        assert float(down.anatomy.fractions[k].sum()) == pytest.approx(float(flat.anatomy.fractions[k].sum()), rel=.02)
+        assert float(down.anatomy.fractions[k].sum()) == pytest.approx(float(flat.anatomy.fractions[k].sum()), rel=0.02)
 
 
 def _fake_ixi(root, ixi_id=7, scale=0.9):
     """A prepared IXI head on a small grid: nested spheres of BrainWeb's classes, as prepare_ixi.py writes."""
     import numpy as np
 
-    classes = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
+    classes = (
+        "background",
+        "csf",
+        "gm",
+        "wm",
+        "fat",
+        "muscle",
+        "skin",
+        "skull",
+        "vessels",
+        "connective",
+        "dura",
+        "marrow",
+    )
     n, h = 40, 4e-3
-    z, y, x = np.meshgrid(*(np.arange(n) - n / 2 + .5,) * 3, indexing="ij")
-    r = np.sqrt(z ** 2 + y ** 2 + x ** 2)
+    z, y, x = np.meshgrid(*(np.arange(n) - n / 2 + 0.5,) * 3, indexing="ij")
+    r = np.sqrt(z**2 + y**2 + x**2)
     frac = np.zeros((len(classes), n, n, n), np.float32)
     for name, (lo, hi) in {"wm": (0, 8), "gm": (8, 11), "csf": (11, 13), "skull": (13, 15), "skin": (15, 18)}.items():
         frac[classes.index(name)][(r >= lo) & (r < hi)] = 1
     frac[0][r >= 18] = 1
     origin = (-n / 2 * h,) * 3
-    meta = {"ixi_id": ixi_id, "age": 55.0, "sex": "f", "classes": classes,
-            "affine_mm": [[scale, 0, 0, 0], [0, scale, 0, 0], [0, 0, scale, 0], [0, 0, 0, 1]],
-            "lncc": 0.2, "volumes_ml": {}, "origin": list(origin), "voxel": [h] * 3, "shape": [n] * 3}
+    meta = {
+        "ixi_id": ixi_id,
+        "age": 55.0,
+        "sex": "f",
+        "classes": classes,
+        "affine_mm": [[scale, 0, 0, 0], [0, scale, 0, 0], [0, 0, scale, 0], [0, 0, 0, 1]],
+        "lncc": 0.2,
+        "volumes_ml": {},
+        "origin": list(origin),
+        "voxel": [h] * 3,
+        "shape": [n] * 3,
+    }
     (root / "ixi" / "prepared").mkdir(parents=True)
-    np.savez_compressed(root / "ixi" / "prepared" / f"IXI{ixi_id:03d}.npz", fractions=np.round(frac * 255).astype(np.uint8),
-                        meta=json.dumps(meta))
+    np.savez_compressed(
+        root / "ixi" / "prepared" / f"IXI{ixi_id:03d}.npz",
+        fractions=np.round(frac * 255).astype(np.uint8),
+        meta=json.dumps(meta),
+    )
 
 
 def test_ixi_heads(tmp_path):
@@ -279,15 +333,15 @@ def test_ixi_heads(tmp_path):
     an, meta = load_ixi(7, tmp_path / "ixi")
     total = sum(an.fractions.values())
     assert meta["age"] == 55.0 and float((total - 1).abs().max()) < 1e-5
-    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0.)
+    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0.0)
     head = sample_head(3, source="ixi", **kw)
     assert head.meta["source"] == "ixi" and head.meta["ixi"]["ixi_id"] == 7 and head.meta["subject"] == 7
     native = sample_head(3, source="ixi", size="native", **kw)
     assert native.meta["size"]["factors"] == pytest.approx([0.9] * 3)
     brain = lambda h: float((h.anatomy.fractions["gm"] + h.anatomy.fractions["wm"]).sum())
-    assert brain(native) / brain(head) == pytest.approx(0.9 ** 3, rel=0.1)
+    assert brain(native) / brain(head) == pytest.approx(0.9**3, rel=0.1)
     with pytest.raises(ValueError):
-        sample_head(3, source="ixi", age=50., **kw)
+        sample_head(3, source="ixi", age=50.0, **kw)
     with pytest.raises(ValueError):
         sample_head(3, size="native", root=tmp_path, voxel=(4e-3,) * 3)
 
@@ -298,8 +352,12 @@ def test_layered_drawn_scalp():
     between-subject SDs; its own stream) and recorded; more fat than BrainWeb's lumped skin, other draws unchanged."""
     from blochparty.anatomy import SCALP_LAYERS
 
-    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.)
-    plain, a, b = sample_head(1, **kw), sample_head(1, scalp="layered_drawn", **kw), sample_head(2, scalp="layered_drawn", **kw)
+    kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0.0)
+    plain, a, b = (
+        sample_head(1, **kw),
+        sample_head(1, scalp="layered_drawn", **kw),
+        sample_head(2, scalp="layered_drawn", **kw),
+    )
     assert a.meta["scalp_layers"] != b.meta["scalp_layers"]
     for h in (a, b):
         assert all(0.25 * m <= v < m + 5e-3 for v, m in zip(h.meta["scalp_layers"], SCALP_LAYERS))
@@ -312,6 +370,7 @@ def test_generated_classes_leave_the_other_draws_unchanged(field):
     """Adding the generator's classes (dermis, eye) to a table does not change any other class's draw: they come
     from their own stream (at 1.5 T the vitreous T1 / T2 carry SDs and are drawn)."""
     from blochparty.anatomy import GENERATED
+
     if not (DATA / "subject04.json").exists():
         pytest.skip("BrainWeb subject 04 not fetched")
     tab = {field: DEFAULT_TISSUES[field]}
@@ -329,8 +388,8 @@ def test_lesions_in_sampled_heads(tmp_path):
     from blochparty.anatomy import GENERATED
 
     _fake_ixi(tmp_path)
-    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0., source="ixi")
-    spec = {"count": 2, "size_mm": [8., 12.], "region": "any", "spacing_mm": 8.}
+    kw = dict(root=tmp_path, voxel=(4e-3,) * 3, magnitude=0.0, source="ixi")
+    spec = {"count": 2, "size_mm": [8.0, 12.0], "region": "any", "spacing_mm": 8.0}
     head = sample_head(5, lesions=spec, **kw)
     plain = sample_head(5, **kw)
     assert "lesion" in head.anatomy.fractions and "lesion" not in plain.anatomy.fractions
@@ -338,8 +397,8 @@ def test_lesions_in_sampled_heads(tmp_path):
     assert head.meta["lesions"]["spec"] == spec and len(placed) == 2 and all(r["volume_ml"] > 0 for r in placed)
     total = sum(head.anatomy.fractions.values())
     assert float((total - 1).abs().max()) < 1e-4
-    wm_lost = float(plain.anatomy.fractions["wm"].sum() - head.anatomy.fractions["wm"].sum()) * 4e-3 ** 3 * 1e6
-    assert wm_lost == pytest.approx(float(head.anatomy.fractions["lesion"].sum()) * 4e-3 ** 3 * 1e6, rel=1e-3)
+    wm_lost = float(plain.anatomy.fractions["wm"].sum() - head.anatomy.fractions["wm"].sum()) * 4e-3**3 * 1e6
+    assert wm_lost == pytest.approx(float(head.anatomy.fractions["lesion"].sum()) * 4e-3**3 * 1e6, rel=1e-3)
     for k in ("wm", "gm", "csf"):  # the other classes' tissue draws do not move
         assert head.tissues[k] == plain.tissues[k]
     assert "lesion" in GENERATED and head.tissues["lesion"].t2.mean > head.tissues["wm"].t2.mean

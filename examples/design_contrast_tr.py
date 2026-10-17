@@ -16,9 +16,11 @@ def main():
         budget = (N_DUMMY + N) * tr_budget
         res = optimize(budget)
         print(f"budget {budget:.3f} s (TR <= {tr_budget * 1e3:g} ms):")
-        print(f"  gradient descent (core):  flip {res['flip']:.3f} deg, TR {res['tr'] * 1e3:.4f} ms, "
-              f"scan time {res['duration']:.4f} s, contrast {res['contrast']:.5f} "
-              f"({res['n_evals']} evaluations, {res['seconds']:.1f} s)")
+        print(
+            f"  gradient descent (core):  flip {res['flip']:.3f} deg, TR {res['tr'] * 1e3:.4f} ms, "
+            f"scan time {res['duration']:.4f} s, contrast {res['contrast']:.5f} "
+            f"({res['n_evals']} evaluations, {res['seconds']:.1f} s)"
+        )
         flip, tr, c = grid_optimum(budget)
         print(f"  closed-form grid:         flip {flip:.3f} deg, TR {tr * 1e3:.4f} ms, contrast {c:.5f}")
         assert abs(res["flip"] - flip) < 0.01 and abs(res["tr"] - tr) < 1e-6

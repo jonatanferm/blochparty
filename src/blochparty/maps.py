@@ -61,7 +61,10 @@ def sample(grid: Tensor, origin: Tensor, spacing: Tensor, pos: Tensor) -> Tensor
                 ix = i1[..., 0] if dx else i0[..., 0]
                 iy = i1[..., 1] if dy else i0[..., 1]
                 iz = i1[..., 2] if dz else i0[..., 2]
-                wt = (w[..., 0] if dx else 1 - w[..., 0]) * (w[..., 1] if dy else 1 - w[..., 1]) * \
-                     (w[..., 2] if dz else 1 - w[..., 2])
+                wt = (
+                    (w[..., 0] if dx else 1 - w[..., 0])
+                    * (w[..., 1] if dy else 1 - w[..., 1])
+                    * (w[..., 2] if dz else 1 - w[..., 2])
+                )
                 out = out + wt[..., None] * grid[:, iz, iy, ix].movedim(0, -1)
     return out

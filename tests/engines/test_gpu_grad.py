@@ -76,8 +76,12 @@ def test_scanner_field_model(gpu, concomitant):
 
 
 def test_static_field_maps(gpu):
-    zz, yy, xx = torch.meshgrid(torch.linspace(-0.1, 0.1, 4, dtype=f64), torch.linspace(-0.3, 0.3, 9, dtype=f64),
-                                torch.linspace(-0.3, 0.3, 9, dtype=f64), indexing="ij")
+    zz, yy, xx = torch.meshgrid(
+        torch.linspace(-0.1, 0.1, 4, dtype=f64),
+        torch.linspace(-0.3, 0.3, 9, dtype=f64),
+        torch.linspace(-0.3, 0.3, 9, dtype=f64),
+        indexing="ij",
+    )
     out = {}
     for name, sim in (("core", bp.simulate), ("metal", gpu.simulate)):
         b0 = (40 * xx**2 - 20 * yy).requires_grad_()
@@ -103,8 +107,13 @@ def test_ernst_angle_by_gradient_descent(gpu):
     import math
 
     t1, t2, tr, te = 0.1, 0.05, 5e-3, 2e-3
-    spin = bp.Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=torch.ones(1, dtype=f64), t1=torch.full((1,), t1, dtype=f64),
-                      t2=torch.full((1,), t2, dtype=f64), db0=torch.zeros(1, dtype=f64))
+    spin = bp.Phantom(
+        pos=torch.zeros(1, 3, dtype=f64),
+        pd=torch.ones(1, dtype=f64),
+        t1=torch.full((1,), t1, dtype=f64),
+        t2=torch.full((1,), t2, dtype=f64),
+        db0=torch.zeros(1, dtype=f64),
+    )
     flip = torch.tensor(60.0, dtype=f64, requires_grad=True)
 
     def closure():
@@ -126,10 +135,12 @@ def test_unsupported_inputs_raise(gpu):
     ph, seq = random_case(0)
     pd = ph.pd.clone().requires_grad_()
     n = len(ph)
-    for extra in ({"diffusion": torch.full((n,), 2e-9, dtype=f64)},
-                  {"motion": bp.Motion(velocity=torch.zeros(n, 3, dtype=f64))},
-                  {"pools": (bp.ExchangePool(f=0.01, k=100.0, t1=1.0, t2=0.01, dw=100.0),)},
-                  {"bound": bp.BoundPool(f=0.1, k=30.0, t1=1.0, t2=12e-6, model="generalized")}):
+    for extra in (
+        {"diffusion": torch.full((n,), 2e-9, dtype=f64)},
+        {"motion": bp.Motion(velocity=torch.zeros(n, 3, dtype=f64))},
+        {"pools": (bp.ExchangePool(f=0.01, k=100.0, t1=1.0, t2=0.01, dw=100.0),)},
+        {"bound": bp.BoundPool(f=0.1, k=30.0, t1=1.0, t2=12e-6, model="generalized")},
+    ):
         with pytest.raises(NotImplementedError):
             gpu.simulate(replace(ph, pd=pd, **extra), seq)
     with pytest.raises(ValueError, match="multiple of 64"):

@@ -13,6 +13,7 @@ Everything at the realism resolution (128 x 128 on 220 mm) where the real k-spac
 the simulated set's noisy k-space is ``/truth/kspace``, transposed into the display orientation before the mask so the
 phase axis is the same image axis on both sides.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,8 +45,14 @@ def pair(k: np.ndarray, accel: int, centre: float, rng, orient) -> tuple[np.ndar
 class UNet(nn.Module):
     def __init__(self, ch=(16, 32, 64, 128)):
         super().__init__()
-        block = lambda i, o: nn.Sequential(nn.Conv2d(i, o, 3, padding=1), nn.BatchNorm2d(o), nn.ReLU(),
-                                           nn.Conv2d(o, o, 3, padding=1), nn.BatchNorm2d(o), nn.ReLU())
+        block = lambda i, o: nn.Sequential(
+            nn.Conv2d(i, o, 3, padding=1),
+            nn.BatchNorm2d(o),
+            nn.ReLU(),
+            nn.Conv2d(o, o, 3, padding=1),
+            nn.BatchNorm2d(o),
+            nn.ReLU(),
+        )
         self.down = nn.ModuleList([block(1, ch[0])] + [block(ch[i], ch[i + 1]) for i in range(len(ch) - 1)])
         self.up = nn.ModuleList([block(ch[i + 1] + ch[i], ch[i]) for i in reversed(range(len(ch) - 1))])
         self.out = nn.Conv2d(ch[0], 1, 1)
@@ -72,24 +79,27 @@ def train(net, X, Y, epochs, device, lr=1e-3, seed=0, batch=16):
         net.train()
         perm = torch.randperm(len(Xt), generator=gen)
         for i in range(0, len(perm), batch):
-            idx = perm[i:i + batch]
+            idx = perm[i : i + batch]
             xb, yb = Xt[idx].to(device), Yt[idx].to(device)
-            if torch.rand(1, generator=gen) < .5:
+            if torch.rand(1, generator=gen) < 0.5:
                 xb, yb = xb.flip(-1), yb.flip(-1)
             loss = nn.functional.l1_loss(net(xb), yb)
-            opt.zero_grad(); loss.backward(); opt.step()
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
     return net
 
 
-def ssim(a, b, k1=.01, k2=.03, win=7):
+def ssim(a, b, k1=0.01, k2=0.03, win=7):
     """SSIM of two (n, n) images (data range 1), Gaussian-free uniform window, as a plain mean."""
     from scipy import ndimage
+
     mu_a, mu_b = ndimage.uniform_filter(a, win), ndimage.uniform_filter(b, win)
-    s_aa = ndimage.uniform_filter(a * a, win) - mu_a ** 2
-    s_bb = ndimage.uniform_filter(b * b, win) - mu_b ** 2
+    s_aa = ndimage.uniform_filter(a * a, win) - mu_a**2
+    s_bb = ndimage.uniform_filter(b * b, win) - mu_b**2
     s_ab = ndimage.uniform_filter(a * b, win) - mu_a * mu_b
-    c1, c2 = k1 ** 2, k2 ** 2
-    m = ((2 * mu_a * mu_b + c1) * (2 * s_ab + c2)) / ((mu_a ** 2 + mu_b ** 2 + c1) * (s_aa + s_bb + c2))
+    c1, c2 = k1**2, k2**2
+    m = ((2 * mu_a * mu_b + c1) * (2 * s_ab + c2)) / ((mu_a**2 + mu_b**2 + c1) * (s_aa + s_bb + c2))
     return float(m.mean())
 
 
@@ -99,6 +109,7 @@ def load_sim(folder, accel, centre, rng):
     both sides; 2026-10-14: masking the simulated k-space's last axis and then transposing the image trained the net
     on streaks along the other axis), /truth/lesion as stored (already the display grid)."""
     import h5py
+
     Xs, Ys, Ls, skipped = [], [], [], []
     for f in sorted(Path(folder).glob("sample_*.h5")):
         try:
@@ -106,13 +117,18 @@ def load_sim(folder, accel, centre, rng):
                 k = h["truth"]["kspace"][()].astype(np.complex128)
                 les = h["truth"]["lesion"][()] if "lesion" in h["truth"] else np.zeros(k.shape[-2:], np.float32)
         except Exception as e:  # a file cut short
-            skipped.append((f.name, type(e).__name__)); continue
+            skipped.append((f.name, type(e).__name__))
+            continue
         if not np.isfinite(k).all() or np.abs(k).max() == 0:
-            skipped.append((f.name, "non-finite or empty")); continue
+            skipped.append((f.name, "non-finite or empty"))
+            continue
         x, y = pair(k.transpose(0, 2, 1), accel, centre, rng, lambda i: i)
         if not (np.isfinite(x).all() and np.isfinite(y).all()):
-            skipped.append((f.name, "non-finite image")); continue
-        Xs.append(x); Ys.append(y); Ls.append(les.astype(np.float32))
+            skipped.append((f.name, "non-finite image"))
+            continue
+        Xs.append(x)
+        Ys.append(y)
+        Ls.append(les.astype(np.float32))
     if skipped:
         print(f"skipped {len(skipped)} simulated samples in {folder}: {skipped[:5]}", flush=True)
     return np.stack(Xs), np.stack(Ys), np.stack(Ls), len(skipped)
@@ -121,19 +137,25 @@ def load_sim(folder, accel, centre, rng):
 def lesion_scores(nets, X, Y, L, device):
     """Per net: NMSE over lesion pixels (mask > 0.5) and over the rest of the brain (target > 0.15), pooled over the
     samples that carry lesion pixels; None if none do."""
-    has = [i for i in range(len(X)) if (L[i] > .5).sum() >= 4]
+    has = [i for i in range(len(X)) if (L[i] > 0.5).sum() >= 4]
     if not has:
         return None
-    out = {"n_samples": len(has), "lesion_px": int(sum((L[i] > .5).sum() for i in has))}
+    out = {"n_samples": len(has), "lesion_px": int(sum((L[i] > 0.5).sum() for i in has))}
     with torch.no_grad():
         for name, net in nets.items():
-            P = X[has] if isinstance(net, nn.Identity) else net(torch.tensor(X[has][:, None]).to(device)).cpu().numpy()[:, 0]
+            P = (
+                X[has]
+                if isinstance(net, nn.Identity)
+                else net(torch.tensor(X[has][:, None]).to(device)).cpu().numpy()[:, 0]
+            )
             e2 = (P - Y[has]) ** 2
-            inl = L[has] > .5
-            brain = (Y[has] > .15) & ~inl
-            out[name] = {"lesion_nmse": float(e2[inl].sum() / (Y[has][inl] ** 2).sum()),
-                         "brain_nmse": float(e2[brain].sum() / (Y[has][brain] ** 2).sum()),
-                         "lesion_mean_ratio": float(P[inl].mean() / Y[has][inl].mean())}
+            inl = L[has] > 0.5
+            brain = (Y[has] > 0.15) & ~inl
+            out[name] = {
+                "lesion_nmse": float(e2[inl].sum() / (Y[has][inl] ** 2).sum()),
+                "brain_nmse": float(e2[brain].sum() / (Y[has][brain] ** 2).sum()),
+                "lesion_mean_ratio": float(P[inl].mean() / Y[has][inl].mean()),
+            }
     return out
 
 
@@ -152,17 +174,26 @@ def evaluate(net, X, Y, device):
     net.eval()
     with torch.no_grad():
         P = net(torch.tensor(X[:, None]).to(device)).cpu().numpy()[:, 0]
-    nmse = float(np.mean([np.sum((p - y) ** 2) / np.sum(y ** 2) for p, y in zip(P, Y)]))
+    nmse = float(np.mean([np.sum((p - y) ** 2) / np.sum(y**2) for p, y in zip(P, Y)]))
     return {"nmse": nmse, "ssim": float(np.mean([ssim(np.clip(p, 0, 2), y) for p, y in zip(P, Y)]))}, P
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", type=Path, required=True, help="generate.py output directory")
-    ap.add_argument("--sim2", type=Path, default=None, help="a second synthetic set for an ablation (trained and scored as synthetic2)")
-    ap.add_argument("--lesion-eval", type=Path, default=None,
-                    help="an evaluation-only synthetic set with many large lesions (never trained on) for the lesion test; "
-                         "without it the held-out tenth of --sim is used, which rarely holds enough lesion pixels")
+    ap.add_argument(
+        "--sim2",
+        type=Path,
+        default=None,
+        help="a second synthetic set for an ablation (trained and scored as synthetic2)",
+    )
+    ap.add_argument(
+        "--lesion-eval",
+        type=Path,
+        default=None,
+        help="an evaluation-only synthetic set with many large lesions (never trained on) for the lesion test; "
+        "without it the held-out tenth of --sim is used, which rarely holds enough lesion pixels",
+    )
     ap.add_argument("--fastmri", type=Path, default=R.FASTMRI)
     ap.add_argument("--cache", type=Path, default=Path.home() / "data" / "realism_cache")
     ap.add_argument("--out", type=Path, required=True)
@@ -192,14 +223,21 @@ def main():
     for p, s, k in real:
         x, y = pair(k, args.accel, args.centre, rng, orient)
         (Xr_te if p in test_people else Xr_tr)[0:0] = []
-        (Xr_te if p in test_people else Xr_tr).append(x); (Yr_te if p in test_people else Yr_tr).append(y)
+        (Xr_te if p in test_people else Xr_tr).append(x)
+        (Yr_te if p in test_people else Yr_tr).append(y)
     Xr_tr, Yr_tr, Xr_te, Yr_te = (np.stack(v) for v in (Xr_tr, Yr_tr, Xr_te, Yr_te))
     # simulated: /truth/kspace (noisy) and /truth/lesion, both into the display orientation
     Xs, Ys, Ls, n_skipped = load_sim(args.sim, args.accel, args.centre, rng)
     hold = max(len(Xs) // 10, 1)  # the last tenth of each synthetic set (the highest seeds) is held out of training
-    print(f"real: {len(Xr_tr)} train / {len(Xr_te)} test slices ({len(people) - len(test_people)} / {len(test_people)} people); "
-          f"simulated: {len(Xs)} slices ({hold} held out)", flush=True)
-    results = {"n": {"real_train": len(Xr_tr), "real_test": len(Xr_te), "sim": len(Xs), "sim_skipped": n_skipped}, "accel": args.accel}
+    print(
+        f"real: {len(Xr_tr)} train / {len(Xr_te)} test slices ({len(people) - len(test_people)} / {len(test_people)} people); "
+        f"simulated: {len(Xs)} slices ({hold} held out)",
+        flush=True,
+    )
+    results = {
+        "n": {"real_train": len(Xr_tr), "real_test": len(Xr_te), "sim": len(Xs), "sim_skipped": n_skipped},
+        "accel": args.accel,
+    }
     results["zero_fill"], _ = evaluate(nn.Identity(), Xr_te, Yr_te, device)
     sr, ss_ = spectra(Yr_te), spectra(Ys)
     results["target_power_sim_over_real"] = [round(b / a, 3) for a, b in zip(sr, ss_)]  # six bands of Nyquist
@@ -218,7 +256,10 @@ def main():
     net_r = train(UNet().to(device), Xr_tr, Yr_tr, args.epochs, device, seed=args.seed)
     results["real"], P_r = evaluate(net_r, Xr_te, Yr_te, device)
     import copy
-    net_f = train(copy.deepcopy(net_s), Xr_tr, Yr_tr, args.finetune_epochs, device, lr=3e-4, seed=args.seed)  # a copy: until
+
+    net_f = train(
+        copy.deepcopy(net_s), Xr_tr, Yr_tr, args.finetune_epochs, device, lr=3e-4, seed=args.seed
+    )  # a copy: until
     # 2026-10-16 this fine-tuned net_s in place, so every later use of "synthetic" (its in-domain score, the lesion test,
     # the saved net) was the fine-tuned net; the synthetic-on-real number above was taken before and is unaffected
     results["synthetic_then_real"], P_f = evaluate(net_f, Xr_te, Yr_te, device)
@@ -240,20 +281,31 @@ def main():
     for name, net in nets.items():  # 2 MB each: the nets are kept so a later evaluation set needs no retraining
         if not isinstance(net, nn.Identity):
             torch.save(net.state_dict(), args.out / f"net_{name}.pt")
-    np.savez_compressed(args.out / "examples.npz", X=Xr_te[:8], Y=Yr_te[:8], synthetic=P_s[:8], real=P_r[:8], finetuned=P_f[:8])
+    np.savez_compressed(
+        args.out / "examples.npz", X=Xr_te[:8], Y=Yr_te[:8], synthetic=P_s[:8], real=P_r[:8], finetuned=P_f[:8]
+    )
     if lesion:
-        idx = [i for i in range(len(Xl)) if (Ll[i] > .5).sum() >= 4][:6]
+        idx = [i for i in range(len(Xl)) if (Ll[i] > 0.5).sum() >= 4][:6]
         with torch.no_grad():
-            P = {k: v(torch.tensor(Xl[idx][:, None]).to(device)).cpu().numpy()[:, 0] for k, v in nets.items() if k != "zero_fill"}
+            P = {
+                k: v(torch.tensor(Xl[idx][:, None]).to(device)).cpu().numpy()[:, 0]
+                for k, v in nets.items()
+                if k != "zero_fill"
+            }
         np.savez_compressed(args.out / "lesion_examples.npz", X=Xl[idx], Y=Yl[idx], L=Ll[idx], **P)
     for k, v in results.items():
         if isinstance(v, dict) and "nmse" in v:
             print(f"{k:22s} NMSE {v['nmse']:.4f}  SSIM {v['ssim']:.3f}")
     print("target power, synthetic / real, by sixth of Nyquist:", results["target_power_sim_over_real"])
     if lesion:
-        print(f"lesion test on {lesion['n_samples']} held-out synthetic samples ({lesion['lesion_px']} lesion px): "
-              + "; ".join(f"{k} lesion {v['lesion_nmse']:.3f} / brain {v['brain_nmse']:.3f} (level {v['lesion_mean_ratio']:.2f})"
-                          for k, v in lesion.items() if isinstance(v, dict)))
+        print(
+            f"lesion test on {lesion['n_samples']} held-out synthetic samples ({lesion['lesion_px']} lesion px): "
+            + "; ".join(
+                f"{k} lesion {v['lesion_nmse']:.3f} / brain {v['brain_nmse']:.3f} (level {v['lesion_mean_ratio']:.2f})"
+                for k, v in lesion.items()
+                if isinstance(v, dict)
+            )
+        )
 
 
 if __name__ == "__main__":

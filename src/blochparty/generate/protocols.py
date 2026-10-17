@@ -24,10 +24,18 @@ REAL_ETL = 21
 
 def real_protocols(manifest: Path) -> list[dict]:
     m = json.loads(manifest.read_text())
-    return [{"file": k, "TR": v["TR_ms"] * 1e-3, "TE": v["TE_ms"] * 1e-3, "coils": v["kspace_shape"][1],
-             "refocus_deg": v.get("flip_deg") or 180.,
-             "esp": None if v.get("echo_spacing_ms") is None else v["echo_spacing_ms"] * 1e-3}
-            for k, v in sorted(m.items()) if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2]
+    return [
+        {
+            "file": k,
+            "TR": v["TR_ms"] * 1e-3,
+            "TE": v["TE_ms"] * 1e-3,
+            "coils": v["kspace_shape"][1],
+            "refocus_deg": v.get("flip_deg") or 180.0,
+            "esp": None if v.get("echo_spacing_ms") is None else v["echo_spacing_ms"] * 1e-3,
+        }
+        for k, v in sorted(m.items())
+        if v["contrast"] == "AXT2" and (v.get("field_T") or 0) > 2
+    ]
 
 
 def interleaved(count=SLICES) -> list[int]:
@@ -47,8 +55,19 @@ QUALITY = {  # spins per voxel (z, y, x), sampling, slab half-width [voxels], RF
 }
 
 
-def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spacing=None, readout_os=1,
-             refocus_deg=180., ordering="linear", etl=16, esp=None) -> bp.Sequence:
+def sequence(
+    n: int,
+    tr: float,
+    te: float,
+    slice_order=None,
+    rf_raster=1e-4,
+    spacing=None,
+    readout_os=1,
+    refocus_deg=180.0,
+    ordering="linear",
+    etl=16,
+    esp=None,
+) -> bp.Sequence:
     """The paired protocol. With ``slice_order``: the neighbours as their real pulses, the rest on
     the bound pool only (0.71 % against every pulse exact, ``tse_2d``). ``readout_os``: readout
     oversampling (the real scans: 2). ``refocus_deg``: the refocusing flip angle (the headers'
@@ -63,6 +82,20 @@ def sequence(n: int, tr: float, te: float, slice_order=None, rf_raster=1e-4, spa
     if esp is None:
         esp = round(te / (16 if ordering == "reverse_centric" else 9), 5)
     full = dict(acquired_lines=ACQUIRED_LINES) if ordering == "linear_full" else {}
-    return bp.tse_2d(n, FOV, etl=etl, esp=esp, ordering="linear" if full else ordering, tr=tr, n_dummy=1, slice_thickness=THICKNESS,
-                     refocus_flip_deg=refocus_deg, spoiling="gradient", ramps=True, system=System(rf_raster=rf_raster), slice_order=slice_order,
-                     **multi, **full)
+    return bp.tse_2d(
+        n,
+        FOV,
+        etl=etl,
+        esp=esp,
+        ordering="linear" if full else ordering,
+        tr=tr,
+        n_dummy=1,
+        slice_thickness=THICKNESS,
+        refocus_flip_deg=refocus_deg,
+        spoiling="gradient",
+        ramps=True,
+        system=System(rf_raster=rf_raster),
+        slice_order=slice_order,
+        **multi,
+        **full,
+    )

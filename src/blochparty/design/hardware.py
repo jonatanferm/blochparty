@@ -80,12 +80,12 @@ def step_durations(seq: Sequence, raster: float = 10e-6) -> Tensor:
 
 def b1_uT(seq: Sequence) -> Tensor:
     """(S,) RF amplitude per segment [µT]."""
-    return torch.sqrt((seq.rf ** 2).sum(-1) + 1e-30) / GAMMA_BAR * 1e6
+    return torch.sqrt((seq.rf**2).sum(-1) + 1e-30) / GAMMA_BAR * 1e6
 
 
 def rf_energy(seq: Sequence) -> Tensor:
     """Sum of |B1|^2 dt over the sequence [µT^2 s], the quantity SAR is proportional to."""
-    b1sq = (seq.rf ** 2).sum(-1) * (1e6 / GAMMA_BAR) ** 2
+    b1sq = (seq.rf**2).sum(-1) * (1e6 / GAMMA_BAR) ** 2
     return (b1sq * seq.dt).sum()
 
 
@@ -93,7 +93,7 @@ def rf_power(seq: Sequence, window: float | None = None) -> Tensor:
     """Mean |B1|^2 [µT^2]: over the whole sequence (``window=None``, a scalar), or (S,)
     over windows of ``window`` seconds starting at every segment (windows reaching past
     the end are averaged over what remains, but never over less than ``window``)."""
-    b1sq = (seq.rf ** 2).sum(-1) * (1e6 / GAMMA_BAR) ** 2
+    b1sq = (seq.rf**2).sum(-1) * (1e6 / GAMMA_BAR) ** 2
     if window is None:
         return (b1sq * seq.dt).sum() / seq.dt.sum()
     t = boundary_times(seq)
@@ -110,8 +110,9 @@ def sar_proxy(seq: Sequence, scale: float = 1.0, window: float | None = None) ->
     return scale * rf_power(seq, window)
 
 
-def pns(seq: Sequence, rheobase: float = 100.0, chronaxie: float = 360e-6, raster: float = 10e-6,
-        window: float = 20e-3) -> tuple[Tensor, Tensor]:
+def pns(
+    seq: Sequence, rheobase: float = 100.0, chronaxie: float = 360e-6, raster: float = 10e-6, window: float = 20e-3
+) -> tuple[Tensor, Tensor]:
     """Approximate peripheral-nerve-stimulation estimate, as a fraction of the threshold.
 
     A chronaxie-filtered dG/dt model: per axis the nerve response is
@@ -158,7 +159,7 @@ def pns(seq: Sequence, rheobase: float = 100.0, chronaxie: float = 360e-6, raste
         out.append(w @ slope[j0:j1])
         k0 = k1
     r = torch.cat(out) / rheobase  # (J, 3)
-    return torch.sqrt((r ** 2).sum(-1) + 1e-30), idx
+    return torch.sqrt((r**2).sum(-1) + 1e-30), idx
 
 
 # --- constraint checks, penalties and violation reports ------------------------------------
@@ -185,8 +186,7 @@ def check_hardware(seq: Sequence, hw: Hardware | None = None) -> list[Check]:
     bounds = torch.arange(s + 1)
     g, slew = grad_mT_m(seq).abs(), slew_rate(seq, hw.grad_raster).abs()
     checks = [Check(f"gradient {a}", g[:, i], segs, hw.max_grad, "mT/m") for i, a in enumerate(AXES)]
-    checks += [Check(f"slew {a}", slew[:, i], bounds, hw.max_slew, "T/m/s", "boundaries")
-               for i, a in enumerate(AXES)]
+    checks += [Check(f"slew {a}", slew[:, i], bounds, hw.max_slew, "T/m/s", "boundaries") for i, a in enumerate(AXES)]
     rf_segs = torch.tensor([i for i in range(s) if seq.is_rf[i]], dtype=torch.long)
     checks.append(Check("peak B1", b1_uT(seq)[rf_segs], rf_segs, hw.max_b1, "µT"))
     power = rf_power(seq, hw.sar_window)
@@ -199,8 +199,9 @@ def check_hardware(seq: Sequence, hw: Hardware | None = None) -> list[Check]:
     checks.append(Check("SAR proxy", hw.sar_scale * power, win, hw.max_sar, hw.sar_unit, where))
     r, at = pns(seq, hw.pns_rheobase, hw.pns_chronaxie, hw.grad_raster)
     checks.append(Check("PNS", r, at, hw.max_pns, "× threshold", "boundaries"))
-    checks.append(Check("scan time", seq.duration.reshape(1), torch.zeros(1, dtype=torch.long),
-                        hw.max_duration, "s", "sequence"))
+    checks.append(
+        Check("scan time", seq.duration.reshape(1), torch.zeros(1, dtype=torch.long), hw.max_duration, "s", "sequence")
+    )
     return checks
 
 
@@ -209,8 +210,7 @@ def hinge2(values: Tensor, limit: float) -> Tensor:
     return (torch.relu(values / limit - 1.0) ** 2).sum()
 
 
-def penalties(seq: Sequence, hw: Hardware | None = None, only: tuple[str, ...] | None = None
-              ) -> dict[str, Tensor]:
+def penalties(seq: Sequence, hw: Hardware | None = None, only: tuple[str, ...] | None = None) -> dict[str, Tensor]:
     """``hinge2`` penalty per limited constraint (names as in ``check_hardware``; ``only``
     keeps those whose name starts with one of the given prefixes)."""
     out = {}
@@ -255,15 +255,30 @@ def violations(check: Check, seq: Sequence, max_items: int = 10) -> list[dict]:
             times = [1e3 * float(t[a]), 1e3 * float(t[end])]
             one, many = ("segment", "segments") if check.where == "segments" else ("boundary", "boundaries")
             span = f" at {one} {a}" if a == b else f" in {many} {a}–{b}"
-            span += (f" (t = {times[0]:.3f} ms)" if times[0] == times[1]
-                     else f" (t = {times[0]:.3f}–{times[1]:.3f} ms)")
-        items.append({
-            "constraint": check.name, "segments": [a, b], "index": check.where, "time_ms": times, "value": worst,
-            "limit": check.limit, "unit": check.unit, "excess_pct": excess,
-            "message": f"{check.name} exceeded{span} by {excess:.3g} % "
-                       f"({worst:.4g} {check.unit} > {check.limit:.4g} {check.unit})",
-        })
+            span += f" (t = {times[0]:.3f} ms)" if times[0] == times[1] else f" (t = {times[0]:.3f}–{times[1]:.3f} ms)"
+        items.append(
+            {
+                "constraint": check.name,
+                "segments": [a, b],
+                "index": check.where,
+                "time_ms": times,
+                "value": worst,
+                "limit": check.limit,
+                "unit": check.unit,
+                "excess_pct": excess,
+                "message": f"{check.name} exceeded{span} by {excess:.3g} % "
+                f"({worst:.4g} {check.unit} > {check.limit:.4g} {check.unit})",
+            }
+        )
     items.sort(key=lambda d: -d["excess_pct"])
-    return items[:max_items] + ([{"constraint": check.name, "message":
-                                   f"{check.name}: {len(items) - max_items} more violating ranges not listed",
-                                   "n_more": len(items) - max_items}] if len(items) > max_items else [])
+    return items[:max_items] + (
+        [
+            {
+                "constraint": check.name,
+                "message": f"{check.name}: {len(items) - max_items} more violating ranges not listed",
+                "n_more": len(items) - max_items,
+            }
+        ]
+        if len(items) > max_items
+        else []
+    )

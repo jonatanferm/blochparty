@@ -73,9 +73,14 @@ def optimize(budget, start=(40.0, 6e-3), simulate=None):
     t0 = time.perf_counter()
     info = minimize([flip, u], objective, constraints)
     seq = sequence(flip.detach(), tr_of(u.detach()))
-    return {"flip": abs(flip.item()), "tr": tr_of(u).item(), "duration": float(seq.duration),
-            "contrast": float(image_contrast(seq, simulate)), "n_evals": info["n_evals"],
-            "seconds": time.perf_counter() - t0}
+    return {
+        "flip": abs(flip.item()),
+        "tr": tr_of(u).item(),
+        "duration": float(seq.duration),
+        "contrast": float(image_contrast(seq, simulate)),
+        "n_evals": info["n_evals"],
+        "seconds": time.perf_counter() - t0,
+    }
 
 
 def grid_optimum(budget):
@@ -83,8 +88,10 @@ def grid_optimum(budget):
     flip on a 0.01 deg grid, then 0.001 deg around the best."""
     tr_max = budget / (N_DUMMY + N)
     props = {name: (maps["pd"][m][0], maps["t1"][m][0], maps["t2"][m][0]) for name, m in (("wm", wm), ("gm", gm))}
-    c = lambda tr, a: (spoiled_gre_signal(*props["wm"], tr, TE, torch.deg2rad(a))
-                       - spoiled_gre_signal(*props["gm"], tr, TE, torch.deg2rad(a)))
+    c = lambda tr, a: (
+        spoiled_gre_signal(*props["wm"], tr, TE, torch.deg2rad(a))
+        - spoiled_gre_signal(*props["gm"], tr, TE, torch.deg2rad(a))
+    )
     trs = torch.arange(TR_MIN, tr_max + 1e-12, 1e-5, dtype=torch.float64)
     trs = torch.cat([trs, torch.tensor([tr_max], dtype=torch.float64)])  # the boundary itself
     angles = torch.arange(1, 9001, dtype=torch.float64) * 0.01

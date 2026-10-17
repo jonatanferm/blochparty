@@ -80,8 +80,9 @@ class GIRF:
         return cls(taps, 10e-6, d)
 
     @classmethod
-    def from_transfer_function(cls, h: Tensor, raster: float, n: int | None = None,
-                               delay: Tensor | float = 0.0) -> GIRF:
+    def from_transfer_function(
+        cls, h: Tensor, raster: float, n: int | None = None, delay: Tensor | float = 0.0
+    ) -> GIRF:
         """From transfer functions H(f) (4, 3, F) complex on the real-FFT grid f_k = k / (n raster),
         k = 0 .. F - 1 (n = 2 (F - 1) unless given): taps = irfft(H). Exact for a response
         that is a delta train on the raster; otherwise the band-limited approximation."""
@@ -112,8 +113,9 @@ class EddyCurrents:
             raise ValueError("output, input, amplitude and time_constant need one entry per term")
 
     @classmethod
-    def per_axis(cls, amplitude, time_constant, b0_amplitude=None, b0_time_constant=None,
-                 dtype=torch.float64) -> EddyCurrents:
+    def per_axis(
+        cls, amplitude, time_constant, b0_amplitude=None, b0_time_constant=None, dtype=torch.float64
+    ) -> EddyCurrents:
         """Each axis on itself: (3, K) amplitudes and time constants (K terms per axis), and
         optionally (3, K') B0 terms of each axis [Hz per Hz/m]. Tensors keep their graph."""
         amp = torch.as_tensor(amplitude, dtype=dtype).reshape(3, -1)
@@ -215,7 +217,7 @@ def _girf_response(seq: Sequence, m: GIRF) -> Tensor:
                 continue
             parts = []
             for a in range(0, len(tb), rows):
-                t = tb[a:a + rows, None] - lags[o, j][None, :]  # (rows, n)
+                t = tb[a : a + rows, None] - lags[o, j][None, :]  # (rows, n)
                 gm = _moment_at(t, tb, g, moment)[..., j]  # G_j at the shifted boundaries
                 parts.append((gm * taps[o, j]).sum(-1))
             y = y + torch.cat(parts)

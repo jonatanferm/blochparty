@@ -36,8 +36,7 @@ CENTRE = 63.5  # pixel index of position 0 in the authors' reconstruction (measu
 
 T1_NICL2 = {  # [ms]
     "v1": [1989, 1454, 984.1, 706, 496, 351.5, 247.13, 175.3, 125.9, 89.0, 62.7, 44.53, 30.84, 21.719],
-    "v2": [1883.97, 1330.16, 987.27, 690.08, 484.97, 341.58, 240.86, 174.95, 121.08, 85.75, 60.21, 42.89,
-           30.40, 21.44],
+    "v2": [1883.97, 1330.16, 987.27, 690.08, 484.97, 341.58, 240.86, 174.95, 121.08, 85.75, 60.21, 42.89, 30.40, 21.44],
 }
 T2_MNCL2 = [581.0, 379.5, 267.3, 175.1, 143.0, 88.9, 63.4, 44.2, 29.9, 19.4, 14.7, 10.5, 7.3, 5.3]  # [ms]
 T2_MNCL2_SOURCE = ["Jiang 2016"] + ["manual"] * 3 + ["Jiang 2016"] + ["manual"] * 9
@@ -118,8 +117,9 @@ def slice_position(seq_file) -> float:
     return xs[0]
 
 
-def phantom(rois, radii, t1_ms, t2_ms, x0, *, n_slice=48, sub=2, sub_read=None, seed=0,
-            dtype=torch.float32) -> tuple[bp.Phantom, torch.Tensor]:
+def phantom(
+    rois, radii, t1_ms, t2_ms, x0, *, n_slice=48, sub=2, sub_read=None, seed=0, dtype=torch.float32
+) -> tuple[bp.Phantom, torch.Tensor]:
     """Spheres as 3D balls centred on the slice at x0. In-plane spins at ``sub_read`` (readout,
     y; default ``sub``) x ``sub`` (phase, z) per pixel with stratified jitter; slice positions
     stratified over 1.5 slice thicknesses either side of x0 (the slice axis is x for both .seq
@@ -127,8 +127,9 @@ def phantom(rois, radii, t1_ms, t2_ms, x0, *, n_slice=48, sub=2, sub_read=None, 
     sub_read = sub if sub_read is None else sub_read
     g = torch.Generator().manual_seed(seed)
     half = 1.5 * SLICE
-    xs = (torch.arange(n_slice, dtype=torch.float64) + torch.rand(n_slice, generator=g, dtype=torch.float64)) \
-        / n_slice * 2 * half - half
+    xs = (
+        torch.arange(n_slice, dtype=torch.float64) + torch.rand(n_slice, generator=g, dtype=torch.float64)
+    ) / n_slice * 2 * half - half
     pos, sph, t1, t2 = [], [], [], []
     for k, (roi, rad) in enumerate(zip(rois, radii)):
         r0, c0 = ndimage.center_of_mass(roi)
@@ -144,8 +145,11 @@ def phantom(rois, radii, t1_ms, t2_ms, x0, *, n_slice=48, sub=2, sub_read=None, 
             n = int(inside.sum())
             if n == 0:
                 continue
-            pos.append(torch.stack([torch.full((n,), x0 + float(x), dtype=torch.float64), gy[inside] + y0,
-                                    gz[inside] + z0], -1))
+            pos.append(
+                torch.stack(
+                    [torch.full((n,), x0 + float(x), dtype=torch.float64), gy[inside] + y0, gz[inside] + z0], -1
+                )
+            )
             sph.append(torch.full((n,), k))
             t1.append(torch.full((n,), t1_ms[k] * 1e-3, dtype=torch.float64))
             t2.append(torch.full((n,), t2_ms[k] * 1e-3, dtype=torch.float64))
@@ -173,8 +177,9 @@ def fill_mask(images: np.ndarray, rois, r_out: float) -> np.ndarray:
     return inside & bright
 
 
-def fill_phantom(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48, sub=2, sub_read=None, seed=1,
-                 dtype=torch.float32) -> bp.Phantom:
+def fill_phantom(
+    rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48, sub=2, sub_read=None, seed=1, dtype=torch.float32
+) -> bp.Phantom:
     """Water around the spheres: spins on the same slice sampling and sub-pixel grid as
     ``phantom``, in ``mask`` pixels, outside each sphere's ball of radius r_in + wall (r_in: one
     value or one per sphere; the wall gives no signal), and within ``margin`` [m] of a sphere's
@@ -183,11 +188,14 @@ def fill_phantom(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48
     sub_read = sub if sub_read is None else sub_read
     g = torch.Generator().manual_seed(seed)
     half = 1.5 * SLICE
-    xs = (torch.arange(n_slice, dtype=torch.float64) + torch.rand(n_slice, generator=g, dtype=torch.float64)) \
-        / n_slice * 2 * half - half
+    xs = (
+        torch.arange(n_slice, dtype=torch.float64) + torch.rand(n_slice, generator=g, dtype=torch.float64)
+    ) / n_slice * 2 * half - half
     r_out = torch.as_tensor(r_in, dtype=torch.float64).expand(len(rois)) + wall  # (14,)
-    centres = torch.tensor([[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL]
-                            for r, c in (ndimage.center_of_mass(m) for m in rois)], dtype=torch.float64)
+    centres = torch.tensor(
+        [[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL] for r, c in (ndimage.center_of_mass(m) for m in rois)],
+        dtype=torch.float64,
+    )
     rr, cc = np.nonzero(mask)
     py = torch.as_tensor((rr - CENTRE) * PIXEL, dtype=torch.float64)
     pz = torch.as_tensor((cc - CENTRE) * PIXEL, dtype=torch.float64)
@@ -210,8 +218,13 @@ def fill_phantom(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48
     pos = torch.cat(pos)
     n = len(pos)
     pd = torch.full((n,), PIXEL**2 / (sub * sub_read) * (2 * half / n_slice) / (PIXEL**2 * SLICE), dtype=torch.float64)
-    return bp.Phantom(pos=pos, pd=pd, t1=torch.full((n,), t1_ms * 1e-3, dtype=torch.float64),
-                      t2=torch.full((n,), t2_ms * 1e-3, dtype=torch.float64), db0=torch.zeros(n, dtype=torch.float64)).to(dtype=dtype)
+    return bp.Phantom(
+        pos=pos,
+        pd=pd,
+        t1=torch.full((n,), t1_ms * 1e-3, dtype=torch.float64),
+        t2=torch.full((n,), t2_ms * 1e-3, dtype=torch.float64),
+        db0=torch.zeros(n, dtype=torch.float64),
+    ).to(dtype=dtype)
 
 
 # --- Monte Carlo sampling and estimation ---------------------------------------------------
@@ -224,7 +237,9 @@ def fill_phantom(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n_slice=48
 
 
 def _sphere_centres(rois) -> np.ndarray:
-    return np.array([[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL] for r, c in (ndimage.center_of_mass(m) for m in rois)])
+    return np.array(
+        [[(r - CENTRE) * PIXEL, (c - CENTRE) * PIXEL] for r, c in (ndimage.center_of_mass(m) for m in rois)]
+    )
 
 
 def phantom_qmc(rois, radii, t1_ms, t2_ms, x0, *, n=256, seed=0, dtype=torch.float32) -> bp.Phantom:
@@ -238,8 +253,14 @@ def phantom_qmc(rois, radii, t1_ms, t2_ms, x0, *, n=256, seed=0, dtype=torch.flo
         gy, gz = np.meshgrid(cy + PIXEL * np.arange(-m, m + 1), cz + PIXEL * np.arange(-m, m + 1), indexing="ij")
         pix = np.stack([gy.ravel(), gz.ravel()], -1)
         u = _sobol_points(n, len(pix), seed * 1000 + k)
-        p = np.stack([x0 + (2 * u[..., 0] - 1) * half, pix[:, None, 0] + (u[..., 1] - 0.5) * PIXEL,
-                      pix[:, None, 1] + (u[..., 2] - 0.5) * PIXEL], -1).reshape(-1, 3)
+        p = np.stack(
+            [
+                x0 + (2 * u[..., 0] - 1) * half,
+                pix[:, None, 0] + (u[..., 1] - 0.5) * PIXEL,
+                pix[:, None, 1] + (u[..., 2] - 0.5) * PIXEL,
+            ],
+            -1,
+        ).reshape(-1, 3)
         inside = (p[:, 0] - x0) ** 2 + (p[:, 1] - c[0]) ** 2 + (p[:, 2] - c[1]) ** 2 <= rad**2
         pos.append(p[inside])
         t1.append(np.full(inside.sum(), t1_ms[k] * 1e-3))
@@ -249,8 +270,9 @@ def phantom_qmc(rois, radii, t1_ms, t2_ms, x0, *, n=256, seed=0, dtype=torch.flo
     return bp.Phantom(pos=pos, pd=pd, t1=t1, t2=t2, db0=torch.zeros_like(t1)).to(dtype=dtype)
 
 
-def fill_phantom_qmc(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256, dense=None, sparse=0.25, seed=0,
-                     dtype=torch.float32) -> bp.Phantom:
+def fill_phantom_qmc(
+    rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256, dense=None, sparse=0.25, seed=0, dtype=torch.float32
+) -> bp.Phantom:
     """Water around the spheres (see ``fill_phantom``), n Sobol spins per pixel. Importance
     sampling: pixels more than ``dense`` [m] from every sphere wall get ``sparse`` * n spins (a
     power-of-two fraction keeps the Sobol prefix balanced) with weights scaled up to match, so the
@@ -271,8 +293,14 @@ def fill_phantom_qmc(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256,
         if not sel.any():
             continue
         u = _sobol_points(n_pix, int(sel.sum()), seed * 1000 + 999)  # = the n_pix prefix of the n-point set
-        p = np.stack([x0 + (2 * u[..., 0] - 1) * half, pix[sel][:, None, 0] + (u[..., 1] - 0.5) * PIXEL,
-                      pix[sel][:, None, 1] + (u[..., 2] - 0.5) * PIXEL], -1).reshape(-1, 3)
+        p = np.stack(
+            [
+                x0 + (2 * u[..., 0] - 1) * half,
+                pix[sel][:, None, 0] + (u[..., 1] - 0.5) * PIXEL,
+                pix[sel][:, None, 1] + (u[..., 2] - 0.5) * PIXEL,
+            ],
+            -1,
+        ).reshape(-1, 3)
         d = np.linalg.norm(p[:, None, 1:] - centres[None], axis=-1)  # (spins, 14)
         excl = np.sqrt(np.clip(r_out[None] ** 2 - (p[:, :1] - x0) ** 2, 0, None))
         ok = (d > excl).all(1) & ((d - r_out[None]).min(1) <= margin)
@@ -280,9 +308,13 @@ def fill_phantom_qmc(rois, mask, r_in, wall, x0, *, margin, t1_ms, t2_ms, n=256,
         w.append(np.full(ok.sum(), (2 * half / SLICE) / n_pix))
     pos, pd = (torch.as_tensor(np.concatenate(v), dtype=torch.float64) for v in (pos, w))
     k = len(pos)
-    return bp.Phantom(pos=pos, pd=pd, t1=torch.full((k,), t1_ms * 1e-3, dtype=torch.float64),
-                      t2=torch.full((k,), t2_ms * 1e-3, dtype=torch.float64),
-                      db0=torch.zeros(k, dtype=torch.float64)).to(dtype=dtype)
+    return bp.Phantom(
+        pos=pos,
+        pd=pd,
+        t1=torch.full((k,), t1_ms * 1e-3, dtype=torch.float64),
+        t2=torch.full((k,), t2_ms * 1e-3, dtype=torch.float64),
+        db0=torch.zeros(k, dtype=torch.float64),
+    ).to(dtype=dtype)
 
 
 def recon_complex(data: np.ndarray) -> np.ndarray:
@@ -307,6 +339,7 @@ def _mean10(imgs, rois, real, idx=None) -> float:
 def mc_errors(imgs: np.ndarray, rois, real: np.ndarray, idx=None) -> MCErrors:
     """Shape errors of K >= 3 seeds' complex images (K, n_images, N, N) against the scanner's
     ROI means, with jackknife SEs over seeds, per sphere and for the spheres-1-10 mean."""
+
     def curves(x):
         return roi_means(mc_magnitude(x)[0], rois)
 
@@ -323,8 +356,9 @@ def mc_paired_difference(imgs_a: np.ndarray, imgs_b: np.ndarray, rois, real: np.
     covariance then cancels most of the MC noise of the difference. Returns (difference, se)."""
     if imgs_a.shape != imgs_b.shape:
         raise ValueError(f"paired runs need the same seeds and images, got {imgs_a.shape} and {imgs_b.shape}")
-    d, se = jackknife(lambda x: _mean10(x[:, 1], rois, real, idx) - _mean10(x[:, 0], rois, real, idx),
-                      np.stack([imgs_a, imgs_b], 1))
+    d, se = jackknife(
+        lambda x: _mean10(x[:, 1], rois, real, idx) - _mean10(x[:, 0], rois, real, idx), np.stack([imgs_a, imgs_b], 1)
+    )
     return float(d), float(se)
 
 
@@ -335,15 +369,17 @@ def print_mc_table(rows, rois, real: np.ndarray, plain_rows=()):
     for name, err in plain_rows:
         print(f"| {name} | {100 * err[:10].mean():.2f} % | | {' '.join(f'{100 * e:.1f}' for e in err)} |")
     for name, r, _ in rows:
-        print(f"| {name} | {100 * r.mean10:.2f} ± {100 * r.mean10_se:.2f} % | {100 * r.mean10_bc:.2f} % | "
-              f"{' '.join(f'{100 * e:.1f}±{100 * d:.1f}' for e, d in zip(r.err, r.se))} |")
+        print(
+            f"| {name} | {100 * r.mean10:.2f} ± {100 * r.mean10_se:.2f} % | {100 * r.mean10_bc:.2f} % | "
+            f"{' '.join(f'{100 * e:.1f}±{100 * d:.1f}' for e, d in zip(r.err, r.se))} |"
+        )
     print("\nPixels with negative debiased power (clipped to 0), % of each ROI over all images:")
     for name, r, _ in rows:
         print(f"  {name}: {' '.join(f'{100 * c:.1f}' for c in r.clipped)}")
     if len(rows) > 1:
         print("\nPaired differences of the spheres-1–10 mean (same seeds; ± paired jackknife SE):")
         for i, (name_a, _, imgs_a) in enumerate(rows):
-            for name_b, _, imgs_b in rows[i + 1:]:
+            for name_b, _, imgs_b in rows[i + 1 :]:
                 if imgs_a.shape == imgs_b.shape:
                     d, se = mc_paired_difference(imgs_a, imgs_b, rois, real)
                     print(f"  {name_b} − {name_a}: {100 * d:+.2f} ± {100 * se:.2f} %")
@@ -366,11 +402,21 @@ def coarsen_rf(seq: bp.Sequence, k: int) -> bp.Sequence:
         s = e
     seg = torch.repeat_interleave(torch.arange(len(groups)), torch.tensor([b - a for a, b in groups]))
     dt = torch.zeros(len(groups), dtype=seq.dt.dtype).index_add_(0, seg, seq.dt)
-    avg = lambda v: torch.zeros(len(groups), v.shape[1], dtype=v.dtype).index_add_(0, seg, v * seq.dt[:, None]) / dt[:, None]
+    avg = lambda v: (
+        torch.zeros(len(groups), v.shape[1], dtype=v.dtype).index_add_(0, seg, v * seq.dt[:, None]) / dt[:, None]
+    )
     last = torch.tensor([b - 1 for _, b in groups])
-    return replace(seq, dt=dt, rf=avg(seq.rf), grad=avg(seq.grad), adc_phase=seq.adc_phase[last],
-                   is_rf=[seq.is_rf[a] for a, _ in groups], adc=[seq.adc[b - 1] for _, b in groups],
-                   spoil=[seq.spoil[b - 1] for _, b in groups], meta=dict(seq.meta))
+    return replace(
+        seq,
+        dt=dt,
+        rf=avg(seq.rf),
+        grad=avg(seq.grad),
+        adc_phase=seq.adc_phase[last],
+        is_rf=[seq.is_rf[a] for a, _ in groups],
+        adc=[seq.adc[b - 1] for _, b in groups],
+        spoil=[seq.spoil[b - 1] for _, b in groups],
+        meta=dict(seq.meta),
+    )
 
 
 def roi_means(images: np.ndarray, rois) -> np.ndarray:

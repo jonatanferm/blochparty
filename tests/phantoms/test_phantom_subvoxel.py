@@ -32,8 +32,9 @@ def test_default_is_one_spin_per_voxel_centre():
     assert a.b1 is None
 
 
-@pytest.mark.parametrize("ndim, spv, counts", [(2, 9, (3, 3)), (2, (2, 5), (2, 5)), (3, 8, (2, 2, 2)),
-                                               (3, (1, 1, 4), (1, 1, 4))])
+@pytest.mark.parametrize(
+    "ndim, spv, counts", [(2, 9, (3, 3)), (2, (2, 5), (2, 5)), (3, 8, (2, 2, 2)), (3, (1, 1, 4), (1, 1, 4))]
+)
 @pytest.mark.parametrize("jitter", [None, "stratified"])
 def test_layout_and_pd(ndim, spv, counts, jitter):
     n, fov = 6, 0.12
@@ -90,8 +91,11 @@ def test_kspace_matches_signal_equation():
     # relax) is exactly the signal equation's instantaneous rotation at the pulse centre
     assert err < 1e-12, err
     # and it is not the one-spin-per-voxel k-space: the sub-voxel spins change the signal
-    centre = signal_equation(bp.phantom_from_maps(pd, t1, t2, fov), seq,
-                             bp.birdcage_sensitivities(bp.phantom_from_maps(pd, t1, t2, fov).pos, n_coils=4))
+    centre = signal_equation(
+        bp.phantom_from_maps(pd, t1, t2, fov),
+        seq,
+        bp.birdcage_sensitivities(bp.phantom_from_maps(pd, t1, t2, fov).pos, n_coils=4),
+    )
     assert float((centre - ref).abs().max() / ref.abs().max()) > 1e-2
 
 

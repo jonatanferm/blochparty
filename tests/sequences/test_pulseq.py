@@ -17,11 +17,17 @@ from blochparty.pulseq import read_pulseq  # noqa: E402
 
 # No dead times: events start exactly where the test puts them. Generous gradient limits,
 # since simulation is not bound by hardware (short dwells need strong readouts).
-SYS = pp.Opts(rf_dead_time=0, rf_ringdown_time=0, adc_dead_time=0, max_grad=400, grad_unit="mT/m",
-              max_slew=2000, slew_unit="T/m/s")
+SYS = pp.Opts(
+    rf_dead_time=0,
+    rf_ringdown_time=0,
+    adc_dead_time=0,
+    max_grad=400,
+    grad_unit="mT/m",
+    max_slew=2000,
+    slew_unit="T/m/s",
+)
 # 0.1 us RF and block raster, for near-instantaneous hard pulses that can still be written to a file
-FINE = pp.Opts(rf_dead_time=0, rf_ringdown_time=0, adc_dead_time=0, rf_raster_time=1e-7,
-               block_duration_raster=1e-7)
+FINE = pp.Opts(rf_dead_time=0, rf_ringdown_time=0, adc_dead_time=0, rf_raster_time=1e-7, block_duration_raster=1e-7)
 
 
 def spins(z=None, n=1, t1=1e9, t2=1e9, db0=0.0, pd=1.0):
@@ -114,8 +120,10 @@ def test_ppm_offsets_and_adc_phase_modulation():
         return read_pulseq(seq)
 
     a = imported(dict(freq_ppm=-3.4, phase_ppm=0.08), dict(freq_ppm=1.2, phase_ppm=-0.3))
-    b = imported(dict(freq_offset=-3.4 * f0_mhz, phase_offset=0.08 * f0_mhz),
-                 dict(freq_offset=1.2 * f0_mhz, phase_offset=-0.3 * f0_mhz))
+    b = imported(
+        dict(freq_offset=-3.4 * f0_mhz, phase_offset=0.08 * f0_mhz),
+        dict(freq_offset=1.2 * f0_mhz, phase_offset=-0.3 * f0_mhz),
+    )
     assert torch.allclose(a.rf, b.rf, atol=1e-9) and torch.allclose(a.adc_phase, b.adc_phase, atol=1e-12)
     assert a.rf[:, 1].abs().max() > 1.0  # the offsets really are there
     mod = np.linspace(0, 1, 6)
@@ -127,8 +135,16 @@ def slice_profile(z0, convention="physical"):
     """|Mxy| and Mxy along z after a sinc pulse with freq_offset = Gz * z0 and the usual
     phase_offset = -2 pi f t_centre, plus the slice rephaser."""
     thk = 5e-3
-    rf, gz, gzr = pp.make_sinc_pulse(math.radians(30), duration=2e-3, slice_thickness=thk, apodization=0.5,
-                                     time_bw_product=4, system=SYS, return_gz=True, use="excitation")
+    rf, gz, gzr = pp.make_sinc_pulse(
+        math.radians(30),
+        duration=2e-3,
+        slice_thickness=thk,
+        apodization=0.5,
+        time_bw_product=4,
+        system=SYS,
+        return_gz=True,
+        use="excitation",
+    )
     rf.freq_offset = gz.amplitude * z0
     rf.phase_offset = -2 * math.pi * rf.freq_offset * pp.calc_rf_center(rf)[0]
     seq = pp.Sequence(SYS)
@@ -151,7 +167,7 @@ def test_rf_frequency_offset_selects_slice_at_plus_f_over_g():
     i0, i1 = int(torch.argmin((z - 0.0).abs())), int(torch.argmin((z - 0.01).abs()))
     span = 30  # +-7.5 mm around each centre
     # (to the error of stepping the frequency-offset phase ramp once per 1 us raster step)
-    assert (shifted[i1 - span: i1 + span + 1] - centred[i0 - span: i0 + span + 1]).abs().max() < 1e-4
+    assert (shifted[i1 - span : i1 + span + 1] - centred[i0 - span : i0 + span + 1]).abs().max() < 1e-4
     # slice centre: a 30 deg pulse, rephased, along +y
     assert abs(centred[i0] - 1j * math.sin(math.radians(30))) < 2e-3
     # read with MRzero's convention, the same file excites -z0
@@ -168,19 +184,26 @@ def test_conventions_are_mirror_images():
     g = np.random.default_rng(3)
     for i in range(6):
         ph = math.radians(117) * i * (i + 1) / 2
-        seq.add_block(pp.make_block_pulse(math.radians(40), duration=60e-6, phase_offset=ph,
-                                          freq_offset=300.0 * i, system=SYS))
-        seq.add_block(*[pp.make_trapezoid(ch, area=a, duration=0.4e-3, system=SYS)
-                        for ch, a in zip("xyz", g.uniform(-60, 60, 3))])
+        seq.add_block(
+            pp.make_block_pulse(math.radians(40), duration=60e-6, phase_offset=ph, freq_offset=300.0 * i, system=SYS)
+        )
+        seq.add_block(
+            *[pp.make_trapezoid(ch, area=a, duration=0.4e-3, system=SYS) for ch, a in zip("xyz", g.uniform(-60, 60, 3))]
+        )
         gx = pp.make_trapezoid("x", flat_area=50.0, flat_time=200e-6, system=SYS)
-        seq.add_block(gx, pp.make_adc(10, dwell=20e-6, delay=gx.rise_time, phase_offset=ph,
-                                      freq_offset=-150.0 * i, system=SYS))
+        seq.add_block(
+            gx, pp.make_adc(10, dwell=20e-6, delay=gx.rise_time, phase_offset=ph, freq_offset=-150.0 * i, system=SYS)
+        )
         seq.add_block(pp.make_delay(2e-3))
     r = torch.as_tensor(g.uniform(-0.05, 0.05, (40, 3)))
     db0 = torch.as_tensor(g.uniform(-80, 80, 40))
-    ph = lambda pos, off: bp.Phantom(pos=pos, pd=torch.ones(40, dtype=torch.float64),
-                                     t1=torch.full((40,), 0.8, dtype=torch.float64),
-                                     t2=torch.full((40,), 0.05, dtype=torch.float64), db0=off)
+    ph = lambda pos, off: bp.Phantom(
+        pos=pos,
+        pd=torch.ones(40, dtype=torch.float64),
+        t1=torch.full((40,), 0.8, dtype=torch.float64),
+        t2=torch.full((40,), 0.05, dtype=torch.float64),
+        db0=off,
+    )
     s_phys = bp.simulate(ph(r, db0), read_pulseq(seq)).signal
     s_mr0 = bp.simulate(ph(-r, -db0), read_pulseq(seq, convention="mrzero")).signal
     assert (s_phys + s_mr0.conj()).abs().max() < 1e-12 * s_phys.abs().max()
@@ -220,8 +243,15 @@ def gre_pulseq(n=16, fov=0.22, dwell=10e-6, tr=None, n_dummy=0, flip=15.0, selec
     dk = 1 / fov
     seq = pp.Sequence(SYS)
     if selective:
-        rf, gz, gzr = pp.make_sinc_pulse(math.radians(flip), duration=1e-3, slice_thickness=5e-3,
-                                         time_bw_product=4, system=SYS, return_gz=True, use="excitation")
+        rf, gz, gzr = pp.make_sinc_pulse(
+            math.radians(flip),
+            duration=1e-3,
+            slice_thickness=5e-3,
+            time_bw_product=4,
+            system=SYS,
+            return_gz=True,
+            use="excitation",
+        )
     else:
         rf, gz, gzr = pp.make_block_pulse(math.radians(flip), duration=20e-6, system=SYS, use="excitation"), None, None
     gx = pp.make_trapezoid("x", flat_area=n * dk, flat_time=n * dwell, system=SYS)
@@ -232,14 +262,22 @@ def gre_pulseq(n=16, fov=0.22, dwell=10e-6, tr=None, n_dummy=0, flip=15.0, selec
     blocks_rf = [rf] + ([gz] if gz else [])
     t_fill = 0.0
     if tr is not None:
-        t_used = (pp.calc_duration(*blocks_rf) + (pp.calc_duration(gzr) if gzr else 0) + 0.6e-3
-                  + pp.calc_duration(gx, adc) + (pp.calc_duration(gx_spoil) if spoil else 0))
+        t_used = (
+            pp.calc_duration(*blocks_rf)
+            + (pp.calc_duration(gzr) if gzr else 0)
+            + 0.6e-3
+            + pp.calc_duration(gx, adc)
+            + (pp.calc_duration(gx_spoil) if spoil else 0)
+        )
         t_fill = round((tr - t_used) / SYS.block_duration_raster) * SYS.block_duration_raster
         assert t_fill > 0
     for _ in range(n_dummy):
         seq.add_block(*blocks_rf)
-        seq.add_block(pp.make_delay(round((tr - pp.calc_duration(*blocks_rf)) / SYS.block_duration_raster)
-                                    * SYS.block_duration_raster))
+        seq.add_block(
+            pp.make_delay(
+                round((tr - pp.calc_duration(*blocks_rf)) / SYS.block_duration_raster) * SYS.block_duration_raster
+            )
+        )
     for i in range(n):
         gy_pre = pp.make_trapezoid("y", area=(i - n // 2) * dk, duration=0.6e-3, system=SYS)
         seq.add_block(*blocks_rf)
@@ -269,8 +307,10 @@ def epi_pulseq(n=16, fov=0.22, dwell=5e-6, ramp_sampling=False):
         adc = pp.make_adc(n, dwell=dwell, delay=gx.rise_time, system=SYS)
     blip = pp.make_trapezoid("y", area=dk, system=SYS)
     seq.add_block(rf)
-    seq.add_block(pp.make_trapezoid("x", area=-gx.area / 2, duration=0.5e-3, system=SYS),
-                  pp.make_trapezoid("y", area=-n / 2 * dk, duration=0.5e-3, system=SYS))
+    seq.add_block(
+        pp.make_trapezoid("x", area=-gx.area / 2, duration=0.5e-3, system=SYS),
+        pp.make_trapezoid("y", area=-n / 2 * dk, duration=0.5e-3, system=SYS),
+    )
     for i in range(n):
         seq.add_block(gx if i % 2 == 0 else pp.scale_grad(gx, -1), adc)
         if i < n - 1:
@@ -297,12 +337,18 @@ def test_arbitrary_and_extended_gradients_kspace():
     seq = pp.Sequence(SYS)
     seq.add_block(pp.make_block_pulse(math.radians(10), duration=40e-6, system=SYS, use="excitation"))
     wave = 2e5 * np.sin(np.linspace(0, 3 * math.pi, 57)) ** 2
-    seq.add_block(pp.make_arbitrary_grad("x", wave, first=0, last=wave[-1], delay=30e-6, system=SYS),
-                  pp.make_adc(40, dwell=13e-6, delay=17e-6, system=SYS))
-    ext = pp.make_extended_trapezoid("y", times=np.array([0, 1e-4, 3e-4, 3.5e-4]),
-                                     amplitudes=np.array([0, 3e5, -1e5, 0]), system=SYS)
-    seq.add_block(pp.make_arbitrary_grad("x", np.linspace(wave[-1], 0, 10), first=wave[-1], last=0, system=SYS),
-                  ext, pp.make_adc(25, dwell=14e-6, system=SYS))
+    seq.add_block(
+        pp.make_arbitrary_grad("x", wave, first=0, last=wave[-1], delay=30e-6, system=SYS),
+        pp.make_adc(40, dwell=13e-6, delay=17e-6, system=SYS),
+    )
+    ext = pp.make_extended_trapezoid(
+        "y", times=np.array([0, 1e-4, 3e-4, 3.5e-4]), amplitudes=np.array([0, 3e5, -1e5, 0]), system=SYS
+    )
+    seq.add_block(
+        pp.make_arbitrary_grad("x", np.linspace(wave[-1], 0, 10), first=wave[-1], last=0, system=SYS),
+        ext,
+        pp.make_adc(25, dwell=14e-6, system=SYS),
+    )
     check_kspace(seq)
 
 
@@ -317,7 +363,8 @@ def test_pulseq_gre_equals_builder_gre():
     pseq = pp.Sequence(SYS)
     b = bp.SequenceBuilder()
     const = lambda ch, amp, dur: pp.make_arbitrary_grad(
-        ch, np.full(round(dur / SYS.grad_raster_time), amp), first=amp, last=amp, system=SYS)
+        ch, np.full(round(dur / SYS.grad_raster_time), amp), first=amp, last=amp, system=SYS
+    )
     t_spoil, t_fill = 500e-6, tr - rf_dur - t_pre - n * dwell - 500e-6
     for i in range(n):
         phase = 0.5 * 2 * math.pi * i * (i + 1) / 2 / 3  # some RF/ADC phase cycling

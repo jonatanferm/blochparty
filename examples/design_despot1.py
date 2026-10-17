@@ -30,7 +30,9 @@ def main():
     import argparse
 
     p = argparse.ArgumentParser()
-    p.add_argument("--gpu", "--metal", action="store_true", help="through the GPU adjoint (float32) instead of the core")
+    p.add_argument(
+        "--gpu", "--metal", action="store_true", help="through the GPU adjoint (float32) instead of the core"
+    )
     args = p.parse_args()
     if args.gpu:  # float32: fourth-order differences with a step large against the signals' rounding
         gpu = functools.partial(bp.simulate, engine="gpu")
@@ -38,8 +40,10 @@ def main():
     else:
         res, engine = optimize(), "core"
     print(f"T1 {T1} s, TR {TR * 1e3:g} ms, Ernst angle {math.degrees(math.acos(math.exp(-TR / T1))):.3f} deg")
-    print(f"gradient descent ({engine}): flips {res['flips'][0]:.3f}, {res['flips'][1]:.3f} deg, "
-          f"CoV(T1)·SNR0 {res['cov']:.4f} ({res['n_evals']} evaluations, {res['seconds']:.1f} s)")
+    print(
+        f"gradient descent ({engine}): flips {res['flips'][0]:.3f}, {res['flips'][1]:.3f} deg, "
+        f"CoV(T1)·SNR0 {res['cov']:.4f} ({res['n_evals']} evaluations, {res['seconds']:.1f} s)"
+    )
     (g1, g2), gcov = grid_optimum()
     print(f"closed-form grid:                flips {g1:.3f}, {g2:.3f} deg, CoV(T1)·SNR0 {gcov:.4f}")
     excess = float(closed_form_cov(*torch.deg2rad(f64(res["flips"])))) / gcov - 1

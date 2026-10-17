@@ -61,7 +61,12 @@ def recon(dat, traj, phi, iters=80, lam=1e-3):
     mask = ndimage.binary_fill_holes(rss > 0.1 * rss.max())
     sens = img / (rss + 1e-12)
     nm = ndimage.gaussian_filter(mask * 1.0, 3) + 1e-6
-    sens = np.stack([(ndimage.gaussian_filter(c.real * mask, 3) + 1j * ndimage.gaussian_filter(c.imag * mask, 3)) / nm for c in sens])
+    sens = np.stack(
+        [
+            (ndimage.gaussian_filter(c.real * mask, 3) + 1j * ndimage.gaussian_filter(c.imag * mask, 3)) / nm
+            for c in sens
+        ]
+    )
     sens *= ndimage.binary_dilation(mask, iterations=4)
     sens /= np.sqrt((np.abs(sens) ** 2).sum(0)) + 1e-12
     k = phi.shape[0]
@@ -129,7 +134,9 @@ def main():
     s = 1
     X, rss, cg = recon(dat[:, :, s], traj, phi)
     o = register(rss, m0)
-    print(f"slice {s}: CG residual {cg:.3f}; orientation corr {o[0]:.3f} (transpose {o[1]}, flip y {o[2]}, flip x {o[3]})")
+    print(
+        f"slice {s}: CG residual {cg:.3f}; orientation corr {o[0]:.3f} (transpose {o[1]}, flip y {o[2]}, flip x {o[3]})"
+    )
     X = orient(X, o)
     out = {}
     for i, r in enumerate(rois):
@@ -142,12 +149,21 @@ def main():
         bl = float(np.median(b1[r]))
         r1 = r1s + math.log(math.cos(math.radians(FLIP * bl))) / TR
         deichmann = (bb / a - 1) / r1s  # T1 = T1* (B / A - 1), ideal inversion, no flip angle needed
-        out[i + 1] = dict(T1=1 / r1, T1_deichmann=deichmann, T1star=1 / r1s, inversion=bb / a - 1, B1=bl,
-                          rel_residual=float(np.sqrt(np.mean(fit.fun**2)) / abs(a)))
-        print(f"tube {i + 1}: T1* {1 / r1s:.3f} s; T1 from the flip angle {1 / r1:.3f} s (B1 {bl:.3f}), "
-              f"Deichmann {deichmann:.3f} s; fit residual {out[i + 1]['rel_residual']:.4f}")
-    (I.DATA / "t1_irll.json").write_text(json.dumps({"slice": int(s), "orientation": [bool(v) for v in o[1:]],
-                                                     "tubes": out}, indent=1))
+        out[i + 1] = dict(
+            T1=1 / r1,
+            T1_deichmann=deichmann,
+            T1star=1 / r1s,
+            inversion=bb / a - 1,
+            B1=bl,
+            rel_residual=float(np.sqrt(np.mean(fit.fun**2)) / abs(a)),
+        )
+        print(
+            f"tube {i + 1}: T1* {1 / r1s:.3f} s; T1 from the flip angle {1 / r1:.3f} s (B1 {bl:.3f}), "
+            f"Deichmann {deichmann:.3f} s; fit residual {out[i + 1]['rel_residual']:.4f}"
+        )
+    (I.DATA / "t1_irll.json").write_text(
+        json.dumps({"slice": int(s), "orientation": [bool(v) for v in o[1:]], "tubes": out}, indent=1)
+    )
 
 
 if __name__ == "__main__":

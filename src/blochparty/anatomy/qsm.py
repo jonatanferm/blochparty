@@ -14,17 +14,31 @@ from .grid import Anatomy
 
 # Label IDs published with the QSM Challenge 2.0 head model; independently
 # listed in qsm-forward/label.json, commit 92149383b0f43f47d9a351ceb4f525c0c4ee8299.
-QSM_LABELS = {1: "caudate", 2: "globus_pallidus", 3: "putamen", 4: "red_nucleus",
-              5: "dentate_nucleus", 6: "substantia_nigra", 7: "thalamus", 8: "wm",
-              9: "gm", 10: "csf", 11: "vessels", 12: "fat", 13: "skull",
-              14: "background", 15: "muscle", 16: "calcification"}
+QSM_LABELS = {
+    1: "caudate",
+    2: "globus_pallidus",
+    3: "putamen",
+    4: "red_nucleus",
+    5: "dentate_nucleus",
+    6: "substantia_nigra",
+    7: "thalamus",
+    8: "wm",
+    9: "gm",
+    10: "csf",
+    11: "vessels",
+    12: "fat",
+    13: "skull",
+    14: "background",
+    15: "muscle",
+    16: "calcification",
+}
 
 
 def _file_sha256(path):
     """Hash decompressed bytes so a gzip header change does not change identity."""
     digest = hashlib.sha256()
-    with (gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb")) as stream:
-        for block in iter(lambda: stream.read(1024*1024), b""):
+    with gzip.open(path, "rb") if path.suffix == ".gz" else path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
 
@@ -67,25 +81,27 @@ def load_qsm2(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     if dtype not in (torch.float32, torch.float64):
         raise ValueError("dtype must be float32 or float64")
     root = Path(root).resolve()
-    manifest = json.loads((root/"qsm2.json").read_text())
+    manifest = json.loads((root / "qsm2.json").read_text())
     if manifest.get("schema") != 1 or manifest.get("chi_unit") != "ppm":
         raise ValueError("unsupported QSM manifest schema or chi units")
     kind = manifest.get("kind", "full-head")
     if kind not in ("full-head", "challenge"):
         raise ValueError("unknown QSM package kind")
     unit = manifest.get("spatial_unit")
-    units = {"mm": .001, "meter": 1., "micron": 1e-6}
+    units = {"mm": 0.001, "meter": 1.0, "micron": 1e-6}
     if unit not in units:
         raise ValueError("manifest needs an explicit NIfTI spatial_unit")
     scale = units[unit]
-    background = float(manifest["chi_background_ppm"])*1e-6
+    background = float(manifest["chi_background_ppm"]) * 1e-6
     map_field = float(manifest["map_field_T"]) if kind == "full-head" else None
     arrays = {}
     affine = shape = None
-    keys = ("chi", "M0", "R1", "R2star", "segmentation", "brain_mask") if kind == "full-head" else ("chi", "segmentation")
+    keys = (
+        ("chi", "M0", "R1", "R2star", "segmentation", "brain_mask") if kind == "full-head" else ("chi", "segmentation")
+    )
     for key in keys:
         entry = manifest["files"][key]
-        path = (root/entry["path"]).resolve()
+        path = (root / entry["path"]).resolve()
         if not path.is_relative_to(root):
             raise ValueError("QSM manifest paths must stay inside root")
         if _file_sha256(path) != entry["sha256"]:
@@ -106,7 +122,7 @@ def load_qsm2(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
         elif img.shape != shape or not np.allclose(mat, affine, rtol=0, atol=1e-5):
             raise ValueError(f"QSM maps do not share a physical grid: {key}")
         data = img.get_fdata(dtype=np.float64 if dtype == torch.float64 else np.float32)
-        arrays[key] = torch.from_numpy(np.ascontiguousarray(data.transpose(2,1,0)))
+        arrays[key] = torch.from_numpy(np.ascontiguousarray(data.transpose(2, 1, 0)))
         if not torch.isfinite(arrays[key]).all():
             raise ValueError(f"non-finite QSM map: {key}")
     labels = arrays.pop("segmentation")
@@ -122,15 +138,14 @@ def load_qsm2(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
         if background != 0:
             raise ValueError("challenge brain-only chi requires zero exterior susceptibility")
         arrays["brain_mask"] = (((labels >= 1) & (labels <= 11)) | (labels == 16)).to(dtype)
-    fractions = {name: (labels == label).to(dtype) for label,name in QSM_LABELS.items()
-                 if (labels == label).any()}
+    fractions = {name: (labels == label).to(dtype) for label, name in QSM_LABELS.items() if (labels == label).any()}
     fractions["background"] = ((labels == 0) | (labels == 14)).to(dtype)
-    chi = arrays.pop("chi")*1e-6
-    voxel = tuple((np.diag(affine)[:3]*scale)[::-1])
-    origin = tuple(affine[:3,3]*scale)
-    anatomy = Anatomy(fractions,voxel,origin,chi,arrays,background,map_field)
+    chi = arrays.pop("chi") * 1e-6
+    voxel = tuple((np.diag(affine)[:3] * scale)[::-1])
+    origin = tuple(affine[:3, 3] * scale)
+    anatomy = Anatomy(fractions, voxel, origin, chi, arrays, background, map_field)
     if isinstance(resolution, str):
-        options = {"native": None, "0.64mm": (.00064,)*3, "1mm": (.001,)*3}
+        options = {"native": None, "0.64mm": (0.00064,) * 3, "1mm": (0.001,) * 3}
         if resolution not in options:
             raise ValueError("resolution must be native, 0.64mm, 1mm, or a voxel tuple")
         resolution = options[resolution]

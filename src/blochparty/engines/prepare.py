@@ -38,8 +38,14 @@ class Prepared:
     features: frozenset  # what the case uses, by capabilities.FEATURES name
 
 
-def prepare(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, m_init: Tensor | None = None,
-            scanner: Scanner | None = None, maps: FieldMaps | None = None) -> Prepared:
+def prepare(
+    phantom: Phantom,
+    seq: Sequence,
+    coils: Tensor | None = None,
+    m_init: Tensor | None = None,
+    scanner: Scanner | None = None,
+    maps: FieldMaps | None = None,
+) -> Prepared:
     """The checks and shared derivations of a case (module docstring). Raises ValueError for inputs no engine
     accepts: coil sensitivities from both ``coils`` and ``maps``, an ``m_init`` bound-pool column without a bound
     pool, restricted diffusion with a diffusion tensor."""
@@ -71,5 +77,6 @@ def prepare(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, m_init
         mb = bound.f * pd
     elif bound is None and mb is not None:
         raise ValueError("m_init has a bound-pool column but the phantom has no bound pool")
-    return Prepared(n, fields, moving, field, start, bound, gen, (mx, my, mz, mb),
-                    features(phantom, seq, m_init, scanner, maps))
+    return Prepared(
+        n, fields, moving, field, start, bound, gen, (mx, my, mz, mb), features(phantom, seq, m_init, scanner, maps)
+    )

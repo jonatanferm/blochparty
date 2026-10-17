@@ -24,9 +24,12 @@ def params():
     ph = random_phantom()
     g = torch.Generator().manual_seed(1)
     coils = torch.randn(len(ph), 3, dtype=torch.complex128, generator=g)
-    return [torch.tensor(800.0, dtype=torch.float64, requires_grad=True),
-            torch.tensor(1500.0, dtype=torch.float64, requires_grad=True),
-            ph.t2.clone().requires_grad_(), coils.requires_grad_()]
+    return [
+        torch.tensor(800.0, dtype=torch.float64, requires_grad=True),
+        torch.tensor(1500.0, dtype=torch.float64, requires_grad=True),
+        ph.t2.clone().requires_grad_(),
+        coils.requires_grad_(),
+    ]
 
 
 @pytest.mark.parametrize("kw", [{}, {"checkpoint_every": 7}])

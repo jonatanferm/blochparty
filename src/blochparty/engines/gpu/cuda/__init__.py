@@ -78,6 +78,7 @@ class _Cuda:
     def synchronize(self) -> None:
         torch.cuda.synchronize()
 
+
 CUDA = _Cuda()
 
 
@@ -89,13 +90,43 @@ def available() -> bool:
         return False
 
 
-def simulate_cuda(phantom: Phantom, seq: Sequence, coils: torch.Tensor | None = None, *, m_init: torch.Tensor | None = None,
-                  chunk: int = 32768, group: int = 256, scanner=None, mma: bool | None = None, seed: int = 0, maps=None,
-                  checkpoint_every: int | None = None, readouts: str = "direct", nufft_width: int = 6,
-                  nufft_terms: int = 3, pulses: str = "step") -> SimResult:
+def simulate_cuda(
+    phantom: Phantom,
+    seq: Sequence,
+    coils: torch.Tensor | None = None,
+    *,
+    m_init: torch.Tensor | None = None,
+    chunk: int = 32768,
+    group: int = 256,
+    scanner=None,
+    mma: bool | None = None,
+    seed: int = 0,
+    maps=None,
+    checkpoint_every: int | None = None,
+    readouts: str = "direct",
+    nufft_width: int = 6,
+    nufft_terms: int = 3,
+    pulses: str = "step",
+) -> SimResult:
     """Forward simulation on an NVIDIA GPU, with ``simulate_metal``'s arguments, results (float32, on the CPU),
     gradients (the same hand-written adjoint) and limits; see its docstring. ``mma`` picks the sensitivity layout
     and kernel as on Metal (``bloch_chunk_mma``: any coil count up to ``MAX_COILS``, NUFFT readouts, reused
     pulses; ``bloch_chunk``: at most 32 coils); both reduce the coils by warp shuffles here."""
-    return _simulate(CUDA, phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps, checkpoint_every,
-                     readouts, nufft_width, nufft_terms, pulses)
+    return _simulate(
+        CUDA,
+        phantom,
+        seq,
+        coils,
+        m_init,
+        chunk,
+        group,
+        scanner,
+        mma,
+        seed,
+        maps,
+        checkpoint_every,
+        readouts,
+        nufft_width,
+        nufft_terms,
+        pulses,
+    )

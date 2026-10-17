@@ -59,8 +59,9 @@ def test_leading_order_is_the_expansion_of_the_magnitude(a):
     g = torch.tensor([0.7, -0.4, 1.0], dtype=torch.float64) * G_MAX
     f0 = GAMMA_BAR * 0.55
     lin = r @ g
-    lead = concomitant_coefficients(r, f0, a) @ torch.stack([g[0]**2, g[1]**2, g[2]**2, g[0] * g[1], g[0] * g[2],
-                                                              g[1] * g[2]])
+    lead = concomitant_coefficients(r, f0, a) @ torch.stack(
+        [g[0] ** 2, g[1] ** 2, g[2] ** 2, g[0] * g[1], g[0] * g[2], g[1] * g[2]]
+    )
     if a == 0.5:
         assert rel(lead, bernstein(r, g, f0)) < 1e-14
     # transverse coefficients reproduce the vector field's (Bx, By)
@@ -72,9 +73,21 @@ def test_leading_order_is_the_expansion_of_the_magnitude(a):
     for scale in (1.0, 2.0, 4.0):
         b = vector_field(r, g, 0.0, a)
         f0s = f0 * scale
-        excess = torch.tensor([float(mpmath.sqrt(mpmath.mpf(float(bx))**2 + mpmath.mpf(float(by))**2
-                                                 + (mpmath.mpf(f0s) + mpmath.mpf(float(bz)))**2) - f0s - mpmath.mpf(float(bz)))
-                               for bx, by, bz in b.tolist()], dtype=torch.float64)
+        excess = torch.tensor(
+            [
+                float(
+                    mpmath.sqrt(
+                        mpmath.mpf(float(bx)) ** 2
+                        + mpmath.mpf(float(by)) ** 2
+                        + (mpmath.mpf(f0s) + mpmath.mpf(float(bz))) ** 2
+                    )
+                    - f0s
+                    - mpmath.mpf(float(bz))
+                )
+                for bx, by, bz in b.tolist()
+            ],
+            dtype=torch.float64,
+        )
         t2 = b[:, 0] ** 2 + b[:, 1] ** 2
         assert rel(exact_excess(lin, b[:, 0], b[:, 1], f0s), excess) < 1e-13  # the stable form is exact
         assert torch.allclose(lead / scale, t2 / (2 * f0s), rtol=1e-13)
@@ -162,8 +175,9 @@ def test_maxwell_compensated_echo(sim):
     s, p = G * delta / tau, G * G * delta / tau
     root = math.sqrt(2 * p - s * s)
     after = [((s + root) / 2, tau), ((s - root) / 2, tau)]
-    assert math.isclose(sum(a * d for a, d in after), G * delta) and math.isclose(sum(a * a * d for a, d in after),
-                                                                                    G * G * delta)
+    assert math.isclose(sum(a * d for a, d in after), G * delta) and math.isclose(
+        sum(a * a * d for a, d in after), G * G * delta
+    )
     compensated = phases(sim, r, spin_echo([(G, delta)], after), scanner)
     assert (compensated - 1).abs().max() < 1e-9
     # uncompensated (half the amplitude for twice as long): the 180 negates the first half's phase
@@ -206,7 +220,9 @@ def _moving_spin_in_a_compensated_echo(sim, engine):
             if not bool(seq.grad[j].any()):
                 continue
             a, b = float(t_end[j] - seq.dt[j]), float(t_end[j])
-            fc = torch.stack([bernstein(r0 + v * t, seq.grad[j], f0) for t in 0.5 * (a + b) + 0.5 * (b - a) * nodes], -1)
+            fc = torch.stack(
+                [bernstein(r0 + v * t, seq.grad[j], f0) for t in 0.5 * (a + b) + 0.5 * (b - a) * nodes], -1
+            )
             integral = 0.5 * (b - a) * (fc * weights).sum(-1)
             total += -integral if j <= k else integral  # segment 0 the 90, 1..k the first lobe, k + 1 the 180
         expect = torch.exp(-2j * math.pi * total)
@@ -244,8 +260,13 @@ def test_exact_mode(sim):
         f0 = GAMMA_BAR * b0
         exact = phases(sim, r, seq, Scanner(field_strength=b0, concomitant="exact"))
         b = vector_field(r, g, 0.0)
-        mod = torch.tensor([float(mpmath.sqrt(mpmath.mpf(bx)**2 + mpmath.mpf(by)**2 + (mpmath.mpf(f0) + bz)**2) - f0)
-                            for bx, by, bz in b.tolist()], dtype=torch.float64)
+        mod = torch.tensor(
+            [
+                float(mpmath.sqrt(mpmath.mpf(bx) ** 2 + mpmath.mpf(by) ** 2 + (mpmath.mpf(f0) + bz) ** 2) - f0)
+                for bx, by, bz in b.tolist()
+            ],
+            dtype=torch.float64,
+        )
         assert (exact - torch.exp(-2j * math.pi * delta * mod)).abs().max() < 1e-9
         lead = phases(sim, r, seq, Scanner(field_strength=b0))
         gaps.append(torch.angle(exact / lead))
@@ -280,8 +301,12 @@ def field_case(mode, seed=0):
     g = torch.Generator().manual_seed(seed + 7)
     off = 30.0 * torch.randn(len(seq), dtype=torch.float64, generator=g)
     coils = torch.randn(len(ph), 3, dtype=torch.complex128, generator=g)
-    return ph, replace(seq, b0_offset=off), coils, Scanner(field_strength=torch.tensor(0.3, dtype=torch.float64),
-                                                           concomitant=mode)
+    return (
+        ph,
+        replace(seq, b0_offset=off),
+        coils,
+        Scanner(field_strength=torch.tensor(0.3, dtype=torch.float64), concomitant=mode),
+    )
 
 
 @pytest.mark.parametrize("mode", ["leading", "exact"])
@@ -306,5 +331,7 @@ def test_field_strength_gradient_vs_finite_differences(mode):
     (g,) = torch.autograd.grad(loss(b0), [b0])
     h = 1e-5
     with torch.no_grad():
-        fd = (loss(torch.tensor(0.3 + h, dtype=torch.float64)) - loss(torch.tensor(0.3 - h, dtype=torch.float64))) / (2 * h)
+        fd = (loss(torch.tensor(0.3 + h, dtype=torch.float64)) - loss(torch.tensor(0.3 - h, dtype=torch.float64))) / (
+            2 * h
+        )
     assert abs(float(g) - float(fd)) < 1e-6 * abs(float(fd))

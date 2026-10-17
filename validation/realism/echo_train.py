@@ -12,6 +12,7 @@ it, so 396 lines over 21 echoes (19 shots), ky = 0 in echo 11; the headers' echo
 10.26 = 11.0 and 105 / 9.56 = 11.0. +ky / -ky energy 0.86-0.92 from 5 to 150 lines out (later echoes on +ky).
 simulate_heads.py's ``--train header`` plays this train; the fitted one was 16 echoes at TE / 9 (12.6 ms, 25 shots).
 """
+
 import argparse
 import re
 from pathlib import Path
@@ -24,6 +25,7 @@ from scipy import ndimage, signal
 def line_energy(paths, slices=range(1, 8)):
     """[(log energy per phase-encode line)], [(file, TE ms, echo spacing ms)] for 3 T volumes."""
     import h5py
+
     rows, info = [], []
     for f in paths:
         with h5py.File(f, "r") as h:
@@ -55,7 +57,12 @@ def main():
     jumps = np.argsort(np.abs(np.diff(res)))[::-1][:24]
     print("largest steps (ky of the line after the step):", sorted(int(j + 1 - c) for j in jumps))
     q = (5, 10, 20, 40, 64, 100, 150)
-    print("+ky / -ky energy at", q, "lines:", np.round([np.exp(np.mean(L[:, c + d] - L[:, c - d])) for d in q], 3).tolist())
+    print(
+        "+ky / -ky energy at",
+        q,
+        "lines:",
+        np.round([np.exp(np.mean(L[:, c + d] - L[:, c - d])) for d in q], 3).tolist(),
+    )
 
 
 if __name__ == "__main__":

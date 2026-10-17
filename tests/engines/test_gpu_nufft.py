@@ -3,6 +3,7 @@ readout as a type-1 NUFFT gives the same signal as the per-sample path and the c
 EPI with alternating readouts, TSE with a bound pool and 16 slices' pulses), also when threadgroups
 fall back to the per-sample path or dispatches would split a readout, and leaves the final
 magnetization unchanged."""
+
 import pytest
 import torch
 
@@ -21,18 +22,29 @@ def phantom(mt=False):
     ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, ph.db0 + (torch.rand(len(ph), generator=g, dtype=f64) - 0.5) * 40)
     if mt:
         n = len(ph)
-        ph.bound = BoundPool(torch.full((n,), 0.15, dtype=f64), torch.full((n,), 19.0, dtype=f64), ph.t1,
-                             torch.full((n,), 9.7e-6, dtype=f64), model="rate")
+        ph.bound = BoundPool(
+            torch.full((n,), 0.15, dtype=f64),
+            torch.full((n,), 19.0, dtype=f64),
+            ph.t1,
+            torch.full((n,), 9.7e-6, dtype=f64),
+            model="rate",
+        )
     return ph
 
 
 CASES = {
     "GRE, RF spoiling": lambda: bp.gre_2d(48, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2),
     "EPI, alternating readouts": lambda: bp.epi_2d(48, dwell=5e-6, slice_thickness=5e-3),
-    "TSE, bound pool, 16 slices": lambda: bp.tse_2d(48, etl=8, tr=0.8, slice_thickness=5e-3, spoiling="gradient",
-                                                    n_dummy=1, slice_order=[0.005 * (j - 6) for j in
-                                                                            list(range(0, 16, 2)) + list(range(1, 16, 2))],
-                                                    bound_only_beyond=0.0075),
+    "TSE, bound pool, 16 slices": lambda: bp.tse_2d(
+        48,
+        etl=8,
+        tr=0.8,
+        slice_thickness=5e-3,
+        spoiling="gradient",
+        n_dummy=1,
+        slice_order=[0.005 * (j - 6) for j in list(range(0, 16, 2)) + list(range(1, 16, 2))],
+        bound_only_beyond=0.0075,
+    ),
 }
 
 

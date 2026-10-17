@@ -52,13 +52,25 @@ def resolve(engine: str) -> str:
     for name in ("cuda", "metal"):
         if available(name):
             return name
-    raise RuntimeError("engine='gpu': no GPU engine here (Metal needs an Apple GPU with MPS; CUDA an NVIDIA GPU "
-                       "with NVRTC)")
+    raise RuntimeError(
+        "engine='gpu': no GPU engine here (Metal needs an Apple GPU with MPS; CUDA an NVIDIA GPU with NVRTC)"
+    )
 
 
-def simulate(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_init: Tensor | None = None,
-             checkpoint_every: int | None = None, merge_free_runs: bool = True, scanner: Scanner | None = None,
-             seed: int = 0, maps: FieldMaps | None = None, engine: str = "core", **options) -> SimResult:
+def simulate(
+    phantom: Phantom,
+    seq: Sequence,
+    coils: Tensor | None = None,
+    *,
+    m_init: Tensor | None = None,
+    checkpoint_every: int | None = None,
+    merge_free_runs: bool = True,
+    scanner: Scanner | None = None,
+    seed: int = 0,
+    maps: FieldMaps | None = None,
+    engine: str = "core",
+    **options,
+) -> SimResult:
     """Run ``seq`` on ``phantom``.
 
     coils: (N, C) complex receive sensitivities at the spin positions (default: one uniform coil).
@@ -96,18 +108,37 @@ def simulate(phantom: Phantom, seq: Sequence, coils: Tensor | None = None, *, m_
         hint = f" (an option of engine={others[0]!r})" if others else ""
         raise TypeError(f"simulate(engine={engine!r}) got unexpected keyword argument(s) {', '.join(unknown)}{hint}")
     if name == "core":
-        return _core(phantom, seq, coils, m_init=m_init, checkpoint_every=checkpoint_every,
-                     merge_free_runs=merge_free_runs, scanner=scanner, seed=seed, maps=maps)
+        return _core(
+            phantom,
+            seq,
+            coils,
+            m_init=m_init,
+            checkpoint_every=checkpoint_every,
+            merge_free_runs=merge_free_runs,
+            scanner=scanner,
+            seed=seed,
+            maps=maps,
+        )
     if not merge_free_runs:
         raise ValueError(f"merge_free_runs=False is the core's segment-by-segment stepping, not engine={engine!r}'s")
     if name == "chunked":
         if seed != 0:
             raise ValueError("engine='chunked' has no random walks (seed): it does not simulate diffusion")
-        return _chunked(phantom, seq, coils, m_init=m_init, checkpoint_every=checkpoint_every, scanner=scanner,
-                        maps=maps, **options)
+        return _chunked(
+            phantom, seq, coils, m_init=m_init, checkpoint_every=checkpoint_every, scanner=scanner, maps=maps, **options
+        )
     if name == "metal":
         from .gpu.metal import simulate_metal as run
     else:
         from .gpu.cuda import simulate_cuda as run
-    return run(phantom, seq, coils, m_init=m_init, checkpoint_every=checkpoint_every, scanner=scanner, seed=seed,
-               maps=maps, **options)
+    return run(
+        phantom,
+        seq,
+        coils,
+        m_init=m_init,
+        checkpoint_every=checkpoint_every,
+        scanner=scanner,
+        seed=seed,
+        maps=maps,
+        **options,
+    )

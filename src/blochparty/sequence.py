@@ -84,8 +84,9 @@ class Sequence:
             is_rf=[r for r in self.is_rf for _ in range(k if r else 1)],
             adc=tail(self.adc),
             spoil=tail(self.spoil),
-            bound_only=None if self.bound_only is None else
-            [b for b, r in zip(self.bound_only, self.is_rf) for _ in range(k if r else 1)],
+            bound_only=None
+            if self.bound_only is None
+            else [b for b, r in zip(self.bound_only, self.is_rf) for _ in range(k if r else 1)],
         )
 
     def merge_free(self) -> Sequence:
@@ -120,11 +121,25 @@ class Sequence:
         b0 = None
         if self.b0_offset is not None:
             b0 = self.b0_offset[take].index_put((rows,), total(self.b0_offset * self.dt)[rows] / dt_sum[rows])
-        rf_freq = None if self.rf_freq is None else self.rf_freq[take].index_put((rows,), torch.zeros_like(rows, dtype=self.rf_freq.dtype))
+        rf_freq = (
+            None
+            if self.rf_freq is None
+            else self.rf_freq[take].index_put((rows,), torch.zeros_like(rows, dtype=self.rf_freq.dtype))
+        )
         meta = {k: v for k, v in self.meta.items() if k not in ("blocks", "block_segments", "segment_block")}
-        return Sequence(dt, self.rf[take], grad, self.adc_phase[take], is_rf[first].tolist(), adc[first].tolist(),
-                        spoil[last].tolist(), meta | {"merged_free": True}, b0, rf_freq,
-                        None if self.bound_only is None else np.asarray(self.bound_only, dtype=bool)[first].tolist())
+        return Sequence(
+            dt,
+            self.rf[take],
+            grad,
+            self.adc_phase[take],
+            is_rf[first].tolist(),
+            adc[first].tolist(),
+            spoil[last].tolist(),
+            meta | {"merged_free": True},
+            b0,
+            rf_freq,
+            None if self.bound_only is None else np.asarray(self.bound_only, dtype=bool)[first].tolist(),
+        )
 
     def to(self, dtype=None, device=None) -> Sequence:
         conv = lambda t: t.to(dtype=dtype, device=device)

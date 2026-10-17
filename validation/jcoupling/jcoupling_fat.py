@@ -20,6 +20,7 @@ modulation partly recovers by TE 160. At ~113 ms the modulation is 0.687 with 8 
 the CPMG fat T2 (tissuedb LIPIDS); an echo-spacing-dependent fat T2 needs measured curves at intermediate spacings, or
 a model of the methylene chain and of what else fast refocusing suppresses.
 """
+
 import numpy as np
 from scipy.optimize import brentq
 
@@ -38,21 +39,29 @@ def main():
     t_se = np.array([10, 20, 40, 80, 160]) * 1e-3
     m_se = fat_modulation(t_se, field, mode="se").numpy()
     t2 = brentq(lambda T2: mono_t2(t_cpmg, m_cpmg * np.exp(-t_cpmg / T2)) - 0.145, 0.05, 2.0)
-    print(f"J modulation alone: CPMG 8 ms at echoes 1 / 5 / 10 / 17: {np.round(m_cpmg[[0, 4, 9, 16]], 3)}; "
-          f"single echo at TE 10 / 20 / 40 / 80 / 160 ms: {np.round(m_se, 3)}")
+    print(
+        f"J modulation alone: CPMG 8 ms at echoes 1 / 5 / 10 / 17: {np.round(m_cpmg[[0, 4, 9, 16]], 3)}; "
+        f"single echo at TE 10 / 20 / 40 / 80 / 160 ms: {np.round(m_se, 3)}"
+    )
     print(f"intrinsic T2 that makes CPMG (8 ms, 17 echoes) read 145 ms: {t2 * 1e3:.0f} ms")
-    print(f"predicted single-echo apparent T2 (TE 10-160 ms): {mono_t2(t_se, m_se * np.exp(-t_se / t2)) * 1e3:.0f} ms "
-          f"(measured at 3 T: 48 ms Jordan 2013, 68 ms de Bazelaire 2004)")
-    print("J modulation at ~113 ms (fastMRI's effective TE) by echo spacing (a fixed time: fits over 17 echoes span "
-          "different times at each spacing and the modulation oscillates):")
+    print(
+        f"predicted single-echo apparent T2 (TE 10-160 ms): {mono_t2(t_se, m_se * np.exp(-t_se / t2)) * 1e3:.0f} ms "
+        f"(measured at 3 T: 48 ms Jordan 2013, 68 ms de Bazelaire 2004)"
+    )
+    print(
+        "J modulation at ~113 ms (fastMRI's effective TE) by echo spacing (a fixed time: fits over 17 echoes span "
+        "different times at each spacing and the modulation oscillates):"
+    )
     for esp in (6e-3, 7.6e-3, 8e-3, 10.26e-3, 12e-3, 16e-3):
         k = int(round(0.113 / esp))
         m = fat_modulation(esp * np.arange(1, k + 1), field, mode="cpmg", esp=esp).numpy()[-1]
         print(f"  CPMG {esp * 1e3:5.2f} ms: echo {k} at {k * esp * 1e3:.0f} ms, {m:.3f}")
     se100 = fat_modulation([0.1], field, mode="se").numpy()[0]
     fse100 = fat_modulation(10.26e-3 * np.arange(1, 11), field, mode="cpmg", esp=10.26e-3).numpy()[-1]
-    print(f"fat at TE ~100 ms, J only: CPMG 10.26 ms / single echo = {fse100 / se100:.2f} "
-          f"(Henkelman 1992: up to ~2 in vivo)")
+    print(
+        f"fat at TE ~100 ms, J only: CPMG 10.26 ms / single echo = {fse100 / se100:.2f} "
+        f"(Henkelman 1992: up to ~2 in vivo)"
+    )
 
 
 if __name__ == "__main__":

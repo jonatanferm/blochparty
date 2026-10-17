@@ -43,18 +43,22 @@ def test_spin_echo_refocuses_off_resonance():
     n, t2, tau = 200, 0.08, 10e-3
     db0 = torch.linspace(-500, 500, n, dtype=torch.float64)
     # pulse centres at 0.5 us and tau; the echo forms at 2*tau - 0.5 us
-    seq = (SequenceBuilder()
-           .rf(1e-6, flip_deg=90.0)
-           .delay(tau - 2e-6)
-           .rf(2e-6, flip_deg=180.0, phase=math.pi / 2)
-           .delay(tau - 1.5e-6 - 0.5e-9)
-           .readout(1, 1e-9)
-           .build())
+    seq = (
+        SequenceBuilder()
+        .rf(1e-6, flip_deg=90.0)
+        .delay(tau - 2e-6)
+        .rf(2e-6, flip_deg=180.0, phase=math.pi / 2)
+        .delay(tau - 1.5e-6 - 0.5e-9)
+        .readout(1, 1e-9)
+        .build()
+    )
     s = simulate(spins(n, t2=t2, t1=1e9, db0=db0), seq).signal[0, 0] / n
     assert abs(abs(s) - math.exp(-2 * tau / t2)) < 1e-4
     # and without the refocusing pulse there is (almost) nothing left
-    fid = simulate(spins(n, t2=t2, t1=1e9, db0=db0),
-                   SequenceBuilder().rf(1e-6, flip_deg=90.0).delay(2 * tau).readout(1, 1e-9).build())
+    fid = simulate(
+        spins(n, t2=t2, t1=1e9, db0=db0),
+        SequenceBuilder().rf(1e-6, flip_deg=90.0).delay(2 * tau).readout(1, 1e-9).build(),
+    )
     assert abs(fid.signal[0, 0]) / n < 0.05
 
 
@@ -72,6 +76,7 @@ def test_spoiled_gre_steady_state():
     for _ in range(400):
         b.rf(1e-6, flip_deg=flip).delay(te - 0.5e-6).readout(1, 1e-9).delay(tr - te - 0.5e-6 - 1e-9).spoil()
     s = simulate(spins(t1=t1, t2=t2), b.build()).signal[0, -1]
-    expected = spoiled_gre_signal(1.0, torch.tensor(t1, dtype=torch.float64), torch.tensor(t2, dtype=torch.float64),
-                                  tr, te, math.radians(flip))
+    expected = spoiled_gre_signal(
+        1.0, torch.tensor(t1, dtype=torch.float64), torch.tensor(t2, dtype=torch.float64), tr, te, math.radians(flip)
+    )
     assert abs(abs(s) - expected) < 1e-5

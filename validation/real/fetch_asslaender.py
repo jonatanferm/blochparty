@@ -20,8 +20,14 @@ def main():
     if not (OUT / ".git").exists():
         subprocess.run(["git", "clone", "-q", REPO, str(OUT)], check=True)
     subprocess.run(["git", "-C", str(OUT), "checkout", "-q", COMMIT], check=True)
-    print("data at", OUT, "commit", subprocess.run(["git", "-C", str(OUT), "rev-parse", "--short", "HEAD"],
-                                                   capture_output=True, text=True).stdout.strip())
+    print(
+        "data at",
+        OUT,
+        "commit",
+        subprocess.run(
+            ["git", "-C", str(OUT), "rev-parse", "--short", "HEAD"], capture_output=True, text=True
+        ).stdout.strip(),
+    )
 
 
 if __name__ == "__main__":

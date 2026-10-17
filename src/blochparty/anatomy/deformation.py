@@ -16,7 +16,7 @@ def _bspline_weights(n, h, spacing):
     t = torch.arange(n, dtype=torch.float64) * (h / spacing)
     i = t.floor().long()
     u = t - i
-    w = torch.stack(((1 - u) ** 3, 3 * u ** 3 - 6 * u ** 2 + 4, -3 * u ** 3 + 3 * u ** 2 + 3 * u + 1, u ** 3), -1) / 6
+    w = torch.stack(((1 - u) ** 3, 3 * u**3 - 6 * u**2 + 4, -3 * u**3 + 3 * u**2 + 3 * u + 1, u**3), -1) / 6
     return torch.zeros(n, int(i[-1]) + 4, dtype=torch.float64).scatter_(1, i[:, None] + torch.arange(4), w)
 
 
@@ -37,8 +37,11 @@ def deformation_jacobian(displacement: Tensor, voxel) -> Tensor:
     g = [[torch.gradient(displacement[k], spacing=[h], dim=l)[0] for l, h in enumerate(voxel)] for k in range(3)]
     for k in range(3):
         g[k][k] = g[k][k] + 1
-    return (g[0][0] * (g[1][1] * g[2][2] - g[1][2] * g[2][1]) - g[0][1] * (g[1][0] * g[2][2] - g[1][2] * g[2][0])
-            + g[0][2] * (g[1][0] * g[2][1] - g[1][1] * g[2][0]))
+    return (
+        g[0][0] * (g[1][1] * g[2][2] - g[1][2] * g[2][1])
+        - g[0][1] * (g[1][0] * g[2][2] - g[1][2] * g[2][0])
+        + g[0][2] * (g[1][0] * g[2][1] - g[1][1] * g[2][0])
+    )
 
 
 def deform(anatomy: Anatomy, displacement: Tensor, order: int = 1) -> Anatomy:
@@ -56,32 +59,58 @@ def deform(anatomy: Anatomy, displacement: Tensor, order: int = 1) -> Anatomy:
     ref = next(iter(anatomy.fractions.values()))
     if order == 3:
         from scipy import ndimage
-        coords = np.stack([np.arange(n, dtype=np.float32).reshape([-1 if i == k else 1 for i in range(3)])
-                           + (displacement[k] / h).numpy().astype(np.float32)
-                           for k, (n, h) in enumerate(zip(shape, anatomy.voxel))])
 
-        def warp3(volume, fill=0.):
-            out = ndimage.map_coordinates((volume - fill).numpy().astype(np.float32), coords, order=3, mode="constant",
-                                          cval=0.0, prefilter=True)
+        coords = np.stack(
+            [
+                np.arange(n, dtype=np.float32).reshape([-1 if i == k else 1 for i in range(3)])
+                + (displacement[k] / h).numpy().astype(np.float32)
+                for k, (n, h) in enumerate(zip(shape, anatomy.voxel))
+            ]
+        )
+
+        def warp3(volume, fill=0.0):
+            out = ndimage.map_coordinates(
+                (volume - fill).numpy().astype(np.float32), coords, order=3, mode="constant", cval=0.0, prefilter=True
+            )
             return torch.from_numpy(out).to(volume.dtype) + fill
 
         fractions = _renormalize({k: warp3(v).clamp(0, 1) for k, v in anatomy.fractions.items()})
         chi = None if anatomy.chi is None else warp3(anatomy.chi, anatomy.chi_background)
-        return Anatomy(fractions, anatomy.voxel, anatomy.origin, chi, {k: warp3(v) for k, v in anatomy.maps.items()},
-                       anatomy.chi_background, anatomy.map_field_T)
+        return Anatomy(
+            fractions,
+            anatomy.voxel,
+            anatomy.origin,
+            chi,
+            {k: warp3(v) for k, v in anatomy.maps.items()},
+            anatomy.chi_background,
+            anatomy.map_field_T,
+        )
     axes = torch.meshgrid(*(torch.arange(n, dtype=torch.float64) for n in shape), indexing="ij")
     # grid_sample, align_corners=True: index i of n sits at -1 + 2 i / (n - 1); its last axis is (x, y, z)
-    grid = torch.stack([2 * (a + displacement[k] / h) / max(n - 1, 1) - 1
-                        for k, (a, h, n) in reversed(list(enumerate(zip(axes, anatomy.voxel, shape))))], -1)
+    grid = torch.stack(
+        [
+            2 * (a + displacement[k] / h) / max(n - 1, 1) - 1
+            for k, (a, h, n) in reversed(list(enumerate(zip(axes, anatomy.voxel, shape))))
+        ],
+        -1,
+    )
     grid = grid[None].to(ref.dtype)
     del axes
 
-    def warp(volume, fill=0.):
-        out = torch.nn.functional.grid_sample((volume - fill)[None, None], grid, mode="bilinear",
-                                              padding_mode="zeros", align_corners=True)
+    def warp(volume, fill=0.0):
+        out = torch.nn.functional.grid_sample(
+            (volume - fill)[None, None], grid, mode="bilinear", padding_mode="zeros", align_corners=True
+        )
         return out[0, 0] + fill
 
     fractions = _renormalize({k: warp(v).clamp(0, 1) for k, v in anatomy.fractions.items()})
     chi = None if anatomy.chi is None else warp(anatomy.chi, anatomy.chi_background)
-    return Anatomy(fractions, anatomy.voxel, anatomy.origin, chi, {k: warp(v) for k, v in anatomy.maps.items()},
-                   anatomy.chi_background, anatomy.map_field_T)
+    return Anatomy(
+        fractions,
+        anatomy.voxel,
+        anatomy.origin,
+        chi,
+        {k: warp(v) for k, v in anatomy.maps.items()},
+        anatomy.chi_background,
+        anatomy.map_field_T,
+    )

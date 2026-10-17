@@ -35,8 +35,7 @@ def test_gradcheck_sequence_and_tissue_parameters():
         sig = simulate(few_spins(t1, t2), small_sequence(flip, tr, gx)).signal
         return torch.view_as_real(sig)
 
-    args = [torch.tensor(v, dtype=torch.float64, requires_grad=True)
-            for v in (30.0, 8e-3, 900.0, 0.7, 0.05)]
+    args = [torch.tensor(v, dtype=torch.float64, requires_grad=True) for v in (30.0, 8e-3, 900.0, 0.7, 0.05)]
     assert torch.autograd.gradcheck(f, args, eps=1e-6, atol=1e-6, rtol=1e-4)
 
 
@@ -61,9 +60,13 @@ def test_checkpointing_gives_identical_gradients():
 
 def test_gradient_descent_finds_ernst_angle():
     t1, t2, tr, te = 0.1, 0.05, 5e-3, 2e-3
-    spin = Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=torch.ones(1, dtype=torch.float64),
-                   t1=torch.full((1,), t1, dtype=torch.float64), t2=torch.full((1,), t2, dtype=torch.float64),
-                   db0=torch.zeros(1, dtype=torch.float64))
+    spin = Phantom(
+        pos=torch.zeros(1, 3, dtype=torch.float64),
+        pd=torch.ones(1, dtype=torch.float64),
+        t1=torch.full((1,), t1, dtype=torch.float64),
+        t2=torch.full((1,), t2, dtype=torch.float64),
+        db0=torch.zeros(1, dtype=torch.float64),
+    )
     flip = torch.tensor(60.0, dtype=torch.float64, requires_grad=True)
 
     def steady_state_signal():

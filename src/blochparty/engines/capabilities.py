@@ -25,15 +25,26 @@ ENGINES = ("core", "metal", "cuda", "chunked")
 _ALL = frozenset(FEATURES)
 _GPU_GRAD = _ALL - {"generalized", "pools", "diffusion", "motion", "bound_only"}
 SUPPORTED = {
-    ("core", "forward"): _ALL, ("core", "gradients"): _ALL,
-    ("metal", "forward"): _ALL, ("metal", "gradients"): _GPU_GRAD,
-    ("cuda", "forward"): _ALL, ("cuda", "gradients"): _GPU_GRAD,
-    ("chunked", "forward"): frozenset({"b1"}), ("chunked", "gradients"): frozenset({"b1"}),
+    ("core", "forward"): _ALL,
+    ("core", "gradients"): _ALL,
+    ("metal", "forward"): _ALL,
+    ("metal", "gradients"): _GPU_GRAD,
+    ("cuda", "forward"): _ALL,
+    ("cuda", "gradients"): _GPU_GRAD,
+    ("chunked", "forward"): frozenset({"b1"}),
+    ("chunked", "gradients"): frozenset({"b1"}),
 }
-_GPU_REFUSED = (frozenset({"pools", "generalized"}), frozenset({"bound_only", "pools"}),
-                frozenset({"bound_only", "generalized"}))
-REFUSED = {"core": (frozenset({"bound_only", "generalized"}),), "metal": _GPU_REFUSED, "cuda": _GPU_REFUSED,
-           "chunked": ()}
+_GPU_REFUSED = (
+    frozenset({"pools", "generalized"}),
+    frozenset({"bound_only", "pools"}),
+    frozenset({"bound_only", "generalized"}),
+)
+REFUSED = {
+    "core": (frozenset({"bound_only", "generalized"}),),
+    "metal": _GPU_REFUSED,
+    "cuda": _GPU_REFUSED,
+    "chunked": (),
+}
 
 
 def features(phantom, seq, m_init=None, scanner=None, maps=None) -> frozenset:
@@ -72,6 +83,9 @@ def check(engine: str, used: frozenset, grad: bool = False) -> None:
     if bad:
         what = "; ".join(" with ".join(FEATURES[k] for k in b.split(" with ")) for b in bad)
         kind = "gradients through" if grad else "simulating with"
-        alt = ("blochparty.simulate (the core), or the GPU under torch.no_grad()" if grad and engine in ("metal", "cuda")
-               else "blochparty.simulate (the core)")
+        alt = (
+            "blochparty.simulate (the core), or the GPU under torch.no_grad()"
+            if grad and engine in ("metal", "cuda")
+            else "blochparty.simulate (the core)"
+        )
         raise NotImplementedError(f"{engine} engine: {kind} {what} is not implemented; use {alt} (docs/ENGINES.md)")

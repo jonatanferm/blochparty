@@ -2,6 +2,7 @@
 transcription and unit errors, the round trip to the values anatomy.DEFAULT_TISSUES uses, and a
 candidate table that assembles a phantom. The independent checks of a literature table are these
 cross-checks; the values themselves keep their source and location per row."""
+
 import csv
 import dataclasses
 import math
@@ -28,8 +29,24 @@ from blochparty.tissuedb import FIELD_DEPENDENT, FRACTIONS, PROPERTIES, load, po
 DB = load()
 CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
 
-HEADER = ["tissue", "region", "property", "field_T", "value", "sd", "sd_kind", "n", "unit", "species", "state",
-          "temperature_C", "method", "source", "location", "note"]
+HEADER = [
+    "tissue",
+    "region",
+    "property",
+    "field_T",
+    "value",
+    "sd",
+    "sd_kind",
+    "n",
+    "unit",
+    "species",
+    "state",
+    "temperature_C",
+    "method",
+    "source",
+    "location",
+    "note",
+]
 
 
 def test_schema():
@@ -72,9 +89,18 @@ def test_schema():
 
 def test_units_by_magnitude():
     """Catches ms-for-s, %-for-fraction and mm^2/s-for-m^2/s: every value in its plausible SI range."""
-    ranges = {"t1": (.05, 8.), "t2": (2e-5, 3.), "t2star": (5e-5, 3.), "bound_t2": (1e-6, 1e-3),
-              "md": (0, 4e-9), "exchange_rate": (.1, 200), "chi": (-15, 1), "chi_qsm": (-5, 5),
-              "permittivity_rel": (1, 200), "conductivity": (0, 3)}
+    ranges = {
+        "t1": (0.05, 8.0),
+        "t2": (2e-5, 3.0),
+        "t2star": (5e-5, 3.0),
+        "bound_t2": (1e-6, 1e-3),
+        "md": (0, 4e-9),
+        "exchange_rate": (0.1, 200),
+        "chi": (-15, 1),
+        "chi_qsm": (-5, 5),
+        "permittivity_rel": (1, 200),
+        "conductivity": (0, 3),
+    }
     for m in DB.measurements:
         if m.property in ranges:
             lo, hi = ranges[m.property]
@@ -134,13 +160,21 @@ def test_t1_rises_with_field_within_a_source():
 
 # (tissue, property, field): why the sources may differ by more than a factor of two
 AGREEMENT_EXCEPTIONS = {
-    ("eye.lens", "t1", 3.): "Ma 2019 lens nucleus 0.58 s (abstract, sequence not stated) vs Lie 2021 VFA 1.26 s",
-    ("kidney.cortex", "t2", 3.): "Chen 2016 MRF 47 ms vs T2-prepared / GRASE 121-132 ms (Wolf 2018 review)",
-    ("kidney.medulla", "t2", 3.): "as the cortex: MRF vs T2-prepared / GRASE",
-    ("brain.gm", "fa", 3.): "Veenith 2013 atlas ROIs (partial volume with WM) 0.29 vs Acosta-Franco 2025 age-fit cortex 0.12",
+    ("eye.lens", "t1", 3.0): "Ma 2019 lens nucleus 0.58 s (abstract, sequence not stated) vs Lie 2021 VFA 1.26 s",
+    ("kidney.cortex", "t2", 3.0): "Chen 2016 MRF 47 ms vs T2-prepared / GRASE 121-132 ms (Wolf 2018 review)",
+    ("kidney.medulla", "t2", 3.0): "as the cortex: MRF vs T2-prepared / GRASE",
+    (
+        "brain.gm",
+        "fa",
+        3.0,
+    ): "Veenith 2013 atlas ROIs (partial volume with WM) 0.29 vs Acosta-Franco 2025 age-fit cortex 0.12",
     ("lung", "t2star", 1.5): "UTE echo times differ: 0.98 ms (Stock 1999) to 2.11 ms (Yu 2011)",
-    ("muscle.skeletal", "t2", 3.): "Serrao 2020 abdominal MRF 74 ms (flagged high) vs multi-echo SE 29-31 ms",
-    ("fat.subcutaneous", "t2", 3.): "J coupling: single-echo SE 48-68 ms vs CPMG at 8 ms spacing 140-159 ms (Keene 2020)",
+    ("muscle.skeletal", "t2", 3.0): "Serrao 2020 abdominal MRF 74 ms (flagged high) vs multi-echo SE 29-31 ms",
+    (
+        "fat.subcutaneous",
+        "t2",
+        3.0,
+    ): "J coupling: single-echo SE 48-68 ms vs CPMG at 8 ms spacing 140-159 ms (Keene 2020)",
 }
 
 
@@ -158,8 +192,8 @@ def test_human_in_vivo_sources_agree_within_a_factor_of_two():
         if min(means.values()) <= 0 or key in AGREEMENT_EXCEPTIONS:
             continue
         compared += 1
-        if key[1] in FRACTIONS and max(means.values()) < .2:
-            assert max(means.values()) - min(means.values()) <= .1, (key, means)
+        if key[1] in FRACTIONS and max(means.values()) < 0.2:
+            assert max(means.values()) - min(means.values()) <= 0.1, (key, means)
         else:
             assert max(means.values()) / min(means.values()) <= 2, (key, means)
     assert compared > 20
@@ -167,38 +201,49 @@ def test_human_in_vivo_sources_agree_within_a_factor_of_two():
 
 # Rows that reproduce what anatomy/tables.py's tables use: (class, field, TissueProperties field) -> query.
 ROUND_TRIP = {
-    ("wm", 1.5, "t1"): ("brain.wm", "t1", "stanisz2005"), ("wm", 1.5, "t2"): ("brain.wm", "t2", "stanisz2005"),
-    ("wm", 3., "t1"): ("brain.wm", "t1", "stanisz2005"), ("wm", 3., "t2"): ("brain.wm", "t2", "stanisz2005"),
-    ("gm", 1.5, "t1"): ("brain.gm", "t1", "stanisz2005"), ("gm", 1.5, "t2"): ("brain.gm", "t2", "stanisz2005"),
-    ("gm", 3., "t1"): ("brain.gm", "t1", "stanisz2005"), ("gm", 3., "t2"): ("brain.gm", "t2", "stanisz2005"),
+    ("wm", 1.5, "t1"): ("brain.wm", "t1", "stanisz2005"),
+    ("wm", 1.5, "t2"): ("brain.wm", "t2", "stanisz2005"),
+    ("wm", 3.0, "t1"): ("brain.wm", "t1", "stanisz2005"),
+    ("wm", 3.0, "t2"): ("brain.wm", "t2", "stanisz2005"),
+    ("gm", 1.5, "t1"): ("brain.gm", "t1", "stanisz2005"),
+    ("gm", 1.5, "t2"): ("brain.gm", "t2", "stanisz2005"),
+    ("gm", 3.0, "t1"): ("brain.gm", "t1", "stanisz2005"),
+    ("gm", 3.0, "t2"): ("brain.gm", "t2", "stanisz2005"),
     ("muscle", 1.5, "t1"): ("muscle.skeletal", "t1", "stanisz2005"),
     ("muscle", 1.5, "t2"): ("muscle.skeletal", "t2", "stanisz2005"),
-    ("muscle", 3., "t1"): ("muscle.skeletal", "t1", "stanisz2005"),
-    ("muscle", 3., "t2"): ("muscle.skeletal", "t2", "stanisz2005"),
-    ("vessels", 1.5, "t1"): ("blood", "t1", "stanisz2005"), ("vessels", 1.5, "t2"): ("blood", "t2", "stanisz2005"),
-    ("vessels", 3., "t1"): ("blood", "t1", "stanisz2005"), ("vessels", 3., "t2"): ("blood", "t2", "stanisz2005"),
-    ("csf", 1.5, "t1"): ("csf", "t1", "spijkerman2018"), ("csf", 3., "t1"): ("csf", "t1", "spijkerman2018"),
-    ("wm", 3., "t2star"): ("brain.wm", "t2star", "shin2025"), ("gm", 3., "t2star"): ("brain.gm", "t2star", "shin2025"),
-    ("wm", 7., "t1"): ("brain.wm", "t1", "caan2019"), ("wm", 7., "t2star"): ("brain.wm", "t2star", "caan2019"),
-    ("gm", 7., "t1"): ("brain.gm", "t1", "caan2019"), ("gm", 7., "t2star"): ("brain.gm", "t2star", "caan2019"),
-    ("fat", 3., "t1"): ("fat.subcutaneous", "t1", "debazelaire2004"),
-    ("fat", 3., "t2"): ("fat.subcutaneous", "t2", "debazelaire2004"),
-    ("fat", 1.5, "t1"): ("fat.subcutaneous", "t1", "itis_v4_2"), ("fat", 1.5, "t2"): ("fat.subcutaneous", "t2", "itis_v4_2"),
-    ("wm", 3., "bound_fraction"): ("brain.wm", "bound_fraction", "yarnykh2016"),
-    ("gm", 3., "bound_fraction"): ("brain.gm", "bound_fraction", "yarnykh2016"),
-    ("wm", 3., "exchange_rate"): ("brain.wm", "exchange_rate", "yarnykh2012"),
-    ("wm", 3., "bound_t2"): ("brain.wm", "bound_t2", "yarnykh2012"),
-    ("gm", 3., "exchange_rate"): ("brain.gm", "exchange_rate", "yarnykh2012"),
-    ("gm", 3., "bound_t2"): ("brain.gm", "bound_t2", "yarnykh2012"),
-    ("muscle", 3., "bound_fraction"): ("muscle.skeletal", "bound_fraction", "sinclair2010"),
-    ("muscle", 3., "bound_t2"): ("muscle.skeletal", "bound_t2", "sinclair2010"),
-    ("wm", 3., "diffusivity"): ("brain.wm", "md", "helenius2002"),
-    ("gm", 3., "diffusivity"): ("brain.gm", "md", "helenius2002"),
-    ("vessels", 3., "diffusivity"): ("blood", "md", "funck2018"),
-    ("fat", 3., "diffusivity"): ("fat.subcutaneous", "md", "weidlich2018"),
-    ("csf", 3., "diffusivity"): ("water", "md", "holz2000"),
-    ("fat", 3., "bound_fraction"): ("fat", "bound_fraction", "chen2010"),
-    ("csf", 3., "bound_fraction"): ("csf", "bound_fraction", "smith2005"),
+    ("muscle", 3.0, "t1"): ("muscle.skeletal", "t1", "stanisz2005"),
+    ("muscle", 3.0, "t2"): ("muscle.skeletal", "t2", "stanisz2005"),
+    ("vessels", 1.5, "t1"): ("blood", "t1", "stanisz2005"),
+    ("vessels", 1.5, "t2"): ("blood", "t2", "stanisz2005"),
+    ("vessels", 3.0, "t1"): ("blood", "t1", "stanisz2005"),
+    ("vessels", 3.0, "t2"): ("blood", "t2", "stanisz2005"),
+    ("csf", 1.5, "t1"): ("csf", "t1", "spijkerman2018"),
+    ("csf", 3.0, "t1"): ("csf", "t1", "spijkerman2018"),
+    ("wm", 3.0, "t2star"): ("brain.wm", "t2star", "shin2025"),
+    ("gm", 3.0, "t2star"): ("brain.gm", "t2star", "shin2025"),
+    ("wm", 7.0, "t1"): ("brain.wm", "t1", "caan2019"),
+    ("wm", 7.0, "t2star"): ("brain.wm", "t2star", "caan2019"),
+    ("gm", 7.0, "t1"): ("brain.gm", "t1", "caan2019"),
+    ("gm", 7.0, "t2star"): ("brain.gm", "t2star", "caan2019"),
+    ("fat", 3.0, "t1"): ("fat.subcutaneous", "t1", "debazelaire2004"),
+    ("fat", 3.0, "t2"): ("fat.subcutaneous", "t2", "debazelaire2004"),
+    ("fat", 1.5, "t1"): ("fat.subcutaneous", "t1", "itis_v4_2"),
+    ("fat", 1.5, "t2"): ("fat.subcutaneous", "t2", "itis_v4_2"),
+    ("wm", 3.0, "bound_fraction"): ("brain.wm", "bound_fraction", "yarnykh2016"),
+    ("gm", 3.0, "bound_fraction"): ("brain.gm", "bound_fraction", "yarnykh2016"),
+    ("wm", 3.0, "exchange_rate"): ("brain.wm", "exchange_rate", "yarnykh2012"),
+    ("wm", 3.0, "bound_t2"): ("brain.wm", "bound_t2", "yarnykh2012"),
+    ("gm", 3.0, "exchange_rate"): ("brain.gm", "exchange_rate", "yarnykh2012"),
+    ("gm", 3.0, "bound_t2"): ("brain.gm", "bound_t2", "yarnykh2012"),
+    ("muscle", 3.0, "bound_fraction"): ("muscle.skeletal", "bound_fraction", "sinclair2010"),
+    ("muscle", 3.0, "bound_t2"): ("muscle.skeletal", "bound_t2", "sinclair2010"),
+    ("wm", 3.0, "diffusivity"): ("brain.wm", "md", "helenius2002"),
+    ("gm", 3.0, "diffusivity"): ("brain.gm", "md", "helenius2002"),
+    ("vessels", 3.0, "diffusivity"): ("blood", "md", "funck2018"),
+    ("fat", 3.0, "diffusivity"): ("fat.subcutaneous", "md", "weidlich2018"),
+    ("csf", 3.0, "diffusivity"): ("water", "md", "holz2000"),
+    ("fat", 3.0, "bound_fraction"): ("fat", "bound_fraction", "chen2010"),
+    ("csf", 3.0, "bound_fraction"): ("csf", "bound_fraction", "smith2005"),
 }
 
 
@@ -224,38 +269,72 @@ def test_li2014_muscle_md_reproduces_default():
     rows = query("muscle.skeletal", "md", source="li2014")
     assert len(rows) == 8
     values = [m.value for m in rows]
-    used = DEFAULT_TISSUES[3.]["muscle"].diffusivity
-    assert statistics.fmean(values) == pytest.approx(used.mean, abs=.005e-9)
-    assert statistics.stdev(values) == pytest.approx(used.sd, abs=.005e-9)
+    used = DEFAULT_TISSUES[3.0]["muscle"].diffusivity
+    assert statistics.fmean(values) == pytest.approx(used.mean, abs=0.005e-9)
+    assert statistics.stdev(values) == pytest.approx(used.sd, abs=0.005e-9)
 
 
 def test_cole_cole_reproduces_gabriel_values():
     """The import's Cole-Cole evaluation against Gabriel-model values as tabulated by IFAC
     (Andreuccetti et al., niremf.ifac.cnr.it, an independent implementation): 128 MHz."""
-    def value(tissue, prop, strength=3.):
-        rows = query(tissue, prop, strength, source="itis_v4_2", region={"brain.gm": "Brain (Grey Matter)",
-                     "brain.wm": "Brain (White Matter)", "csf": "Cerebrospinal Fluid", "muscle.skeletal": "Muscle"}[tissue])
+
+    def value(tissue, prop, strength=3.0):
+        rows = query(
+            tissue,
+            prop,
+            strength,
+            source="itis_v4_2",
+            region={
+                "brain.gm": "Brain (Grey Matter)",
+                "brain.wm": "Brain (White Matter)",
+                "csf": "Cerebrospinal Fluid",
+                "muscle.skeletal": "Muscle",
+            }[tissue],
+        )
         assert len(rows) == 1
         return rows[0].value
-    expected = {"brain.gm": (73.5, .59), "brain.wm": (52.5, .34), "csf": (84.0, 2.14), "muscle.skeletal": (63.5, .72)}
+
+    expected = {
+        "brain.gm": (73.5, 0.59),
+        "brain.wm": (52.5, 0.34),
+        "csf": (84.0, 2.14),
+        "muscle.skeletal": (63.5, 0.72),
+    }
     for tissue, (eps, sigma) in expected.items():
         # 127.7 MHz (3 T) vs 128 MHz: < 0.3 % in eps and sigma for these tissues
-        assert value(tissue, "permittivity_rel") == pytest.approx(eps, rel=.01), tissue
-        assert value(tissue, "conductivity") == pytest.approx(sigma, rel=.02), tissue
+        assert value(tissue, "permittivity_rel") == pytest.approx(eps, rel=0.01), tissue
+        assert value(tissue, "conductivity") == pytest.approx(sigma, rel=0.02), tissue
 
 
 def row(source, value, sd=None, n=None, state="in_vivo", species="human", region="r", prop="t1", method=""):
-    return tissuedb.Measurement("t", region, prop, 3., value, sd, "between_subject" if sd else "", n, "s",
-                                species, state, None, method, source, "Table 1", "")
+    return tissuedb.Measurement(
+        "t",
+        region,
+        prop,
+        3.0,
+        value,
+        sd,
+        "between_subject" if sd else "",
+        n,
+        "s",
+        species,
+        state,
+        None,
+        method,
+        source,
+        "Table 1",
+        "",
+    )
 
 
 def test_pooling_rule():
     # one value per source: its regions averaged first; two sources: their mean, spread half the difference
-    value, sd, keys = tissuedb.combine([row("a", 1.0, .1, 10, region="x"), row("a", 2.0, .1, 10, region="y"),
-                                        row("b", 3.0, .2, 30)])
+    value, sd, keys = tissuedb.combine(
+        [row("a", 1.0, 0.1, 10, region="x"), row("a", 2.0, 0.1, 10, region="y"), row("b", 3.0, 0.2, 30)]
+    )
     assert keys == ["a", "b"]
     assert value == pytest.approx(2.25)
-    assert sd == pytest.approx(math.hypot(math.sqrt((.1**2 + .2**2) / 2), 0.75))
+    assert sd == pytest.approx(math.hypot(math.sqrt((0.1**2 + 0.2**2) / 2), 0.75))
     # three or more: the median and 1.4826 MAD
     value, sd, _ = tissuedb.combine([row("a", 1.0), row("b", 1.2), row("c", 2.0)])
     assert value == pytest.approx(1.2) and sd == pytest.approx(1.4826 * 0.2)
@@ -264,52 +343,70 @@ def test_pooling_rule():
 
 def test_one_large_study_does_not_decide():
     """Studies count once: 54 subjects of an odd method do not outvote three smaller studies."""
-    rows = [row("small1", .069, n=6), row("small2", .080, n=19), row("small3", .072, n=12), row("big", .108, n=54)]
+    rows = [row("small1", 0.069, n=6), row("small2", 0.080, n=19), row("small3", 0.072, n=12), row("big", 0.108, n=54)]
     value, _, _ = tissuedb.combine(rows)
-    assert value == pytest.approx((.072 + .080) / 2)  # the median, not the n-weighted 0.093
+    assert value == pytest.approx((0.072 + 0.080) / 2)  # the median, not the n-weighted 0.093
 
 
 def test_reference_methods_first():
-    ref = lambda method, prop="t2": tissuedb.reference_method(row("a", 1., prop=prop, method=method))
-    for m in ("multi-echo SE (32 echoes, 10 ms)", "CPMG", "2D multi-gradient spin echo (GraSE)", "T2-prepared EPI",
-              "multi-echo TSE T2 mapping", "SE, 7 TEs 10-640 ms"):
+    ref = lambda method, prop="t2": tissuedb.reference_method(row("a", 1.0, prop=prop, method=method))
+    for m in (
+        "multi-echo SE (32 echoes, 10 ms)",
+        "CPMG",
+        "2D multi-gradient spin echo (GraSE)",
+        "T2-prepared EPI",
+        "multi-echo TSE T2 mapping",
+        "SE, 7 TEs 10-640 ms",
+    ):
         assert ref(m), m
     for m in ("SyMRI (QRAPMASTER)", "MRF (2D FISP-MRF)", "GESFIDE (R2 from echo part)", "literature compilation"):
         assert not ref(m), m
     for m in ("IR, 10 TIs", "SE-IR (6 TI)", "saturation recovery, 7 TRs", "SIR (selective IR)", "SE variable TR/TE"):
         assert ref(m, "t1"), m
-    for m in ("2D IR Look-Locker", "MOLLI", "3D VFA (B1-corrected)", "MP2RAGE", "MPRAGE (multi-TI)",
-              "IR-TFE (Deichmann model)", "TOMROP (Look-Locker type)"):
+    for m in (
+        "2D IR Look-Locker",
+        "MOLLI",
+        "3D VFA (B1-corrected)",
+        "MP2RAGE",
+        "MPRAGE (multi-TI)",
+        "IR-TFE (Deichmann model)",
+        "TOMROP (Look-Locker type)",
+    ):
         assert not ref(m, "t1"), m
     # brain at 3 T: synthetic MRI (n = 54, WM T2 108 ms > GM 80 ms) and GESFIDE are left out
-    wm, gm = pooled("brain.wm", "t2", 3.), pooled("brain.gm", "t2", 3.)
+    wm, gm = pooled("brain.wm", "t2", 3.0), pooled("brain.gm", "t2", 3.0)
     assert "ndengera2022" not in wm.citation.split(";")[0] and "reference methods only" in wm.citation
     assert gm.mean / wm.mean > 1.05  # GM T2 above WM T2 in every spin-echo study (Lu 2005: 83 / 75 ms)
     # Wansapura 1999's abstract (labels swapped by assumption) is flagged: in the table, not in the pool
     assert "flagged rows left out: wansapura1999" in gm.citation and "wansapura1999" not in gm.citation.split(";")[0]
-    assert pooled("muscle.skeletal", "t2", 3.).mean == pytest.approx(.030, abs=.003)  # spin echo; MRF reads 44-74 ms
+    assert pooled("muscle.skeletal", "t2", 3.0).mean == pytest.approx(0.030, abs=0.003)  # spin echo; MRF reads 44-74 ms
 
 
 def test_calibration_rows_override_and_are_flagged():
     """A row whose note starts with CALIBRATION (a value fitted to real scans) overrides the literature of its tier;
     the result is marked assumed and its citation names what it overrides."""
-    src = {k: tissuedb.Source(k, "", 0, "", "", "", "", "calibration" if k == "cal" else "article", "") for k in ("a", "b", "cal")}
+    src = {
+        k: tissuedb.Source(k, "", 0, "", "", "", "", "calibration" if k == "cal" else "article", "")
+        for k in ("a", "b", "cal")
+    }
     tis = {"t": tissuedb.Tissue("t", "t", "", "t", "")}
-    lit = [row("a", .050, method="multi-echo SE", prop="t2"), row("b", .060, method="CPMG", prop="t2")]
-    cal = dataclasses.replace(row("cal", .090, method="calibration: level in fastMRI T2w", prop="t2"), note="CALIBRATION: x")
+    lit = [row("a", 0.050, method="multi-echo SE", prop="t2"), row("b", 0.060, method="CPMG", prop="t2")]
+    cal = dataclasses.replace(
+        row("cal", 0.090, method="calibration: level in fastMRI T2w", prop="t2"), note="CALIBRATION: x"
+    )
     db = tissuedb.Database(tuple(lit), src, tis)
-    plain = pooled("t", "t2", 3., db=db)
-    assert plain.mean == pytest.approx(.055) and not plain.assumed
-    d = pooled("t", "t2", 3., db=tissuedb.Database(tuple(lit + [cal]), src, tis))
-    assert d.mean == pytest.approx(.090) and d.assumed
+    plain = pooled("t", "t2", 3.0, db=db)
+    assert plain.mean == pytest.approx(0.055) and not plain.assumed
+    d = pooled("t", "t2", 3.0, db=tissuedb.Database(tuple(lit + [cal]), src, tis))
+    assert d.mean == pytest.approx(0.090) and d.assumed
     assert "CALIBRATION, overrides: a, b" in d.citation
 
 
 def test_pooled_prefers_human_in_vivo_and_flags_fallbacks():
-    d = pooled("brain.wm", "t1", 3.)
+    d = pooled("brain.wm", "t1", 3.0)
     assert isinstance(d, Distribution) and not d.assumed and "human in vivo" in d.citation
     assert "stanisz2005" not in d.citation  # ex vivo animal rows are a fallback only
-    ex = pooled("brain.wm", "t1", 3., species="bovine")
+    ex = pooled("brain.wm", "t1", 3.0, species="bovine")
     assert ex.assumed and ex.mean == pytest.approx(1.084)
     assert pooled("brain.wm", "t1", 12.3) is None  # T1 never borrows another field
     assert pooled("water", "md").assumed  # physical, not human in vivo
@@ -317,12 +414,12 @@ def test_pooled_prefers_human_in_vivo_and_flags_fallbacks():
 
 def test_default_tissues_unchanged_by_import():
     before = repr(DEFAULT_TISSUES)
-    tissue_table(3.)
+    tissue_table(3.0)
     assert repr(DEFAULT_TISSUES) == before
-    assert DEFAULT_TISSUES[3]["wm"].t1.mean == 1.084 and DEFAULT_TISSUES[3]["fat"].t1.mean == .382
+    assert DEFAULT_TISSUES[3]["wm"].t1.mean == 1.084 and DEFAULT_TISSUES[3]["fat"].t1.mean == 0.382
 
 
-@pytest.mark.parametrize("strength", (1.5, 3.))
+@pytest.mark.parametrize("strength", (1.5, 3.0))
 def test_tissue_table_assembles_a_phantom(strength):
     table = tissue_table(strength)
     assert set(table) == set(CLASSES) | set(DEEP_GREY) | set(GENERATED)
@@ -331,7 +428,7 @@ def test_tissue_table_assembles_a_phantom(strength):
         for f in fields(p):
             d = getattr(p, f.name)
             assert d is None or d.citation
-    a = Anatomy({k: torch.full((2, 2, 2), 1 / len(table), dtype=torch.float64) for k in table}, (.001,) * 3, (0, 0, 0))
+    a = Anatomy({k: torch.full((2, 2, 2), 1 / len(table), dtype=torch.float64) for k in table}, (0.001,) * 3, (0, 0, 0))
     ph = to_phantom(a, {strength: table}, strength, mt=True, diffusion=True, chi_to_b0=False, t2star="off")
     assert ph.bound is not None and (ph.diffusion >= 0).all() and len(ph) > 0
     assert torch.isfinite(ph.t1).all() and (ph.t2 <= ph.t1).all()
@@ -341,15 +438,18 @@ def test_deep_grey_nuclei_from_their_rows_then_the_nearest_ancestor():
     """3 T: the nuclei's T2 are their own spin-echo rows (Krug 2022: putamen 65, pallidum 57 ms), below
     cortex; what a nucleus lacks (pallidum PD, every nucleus's susceptibility) comes from the nearest
     ancestor, assumed; classes with a DEFAULT_TISSUES entry never use the ancestor rule."""
-    table = tissue_table(3.)
+    table = tissue_table(3.0)
     for name in DEEP_GREY:
         t2 = table[name].t2
         assert not t2.assumed and f"brain.gm.deep.{name} t2" in t2.citation and t2.mean < table["gm"].t2.mean
-    assert table["putamen"].t2.mean == pytest.approx(.065) and table["pallidum"].t2.mean == pytest.approx(.057)
+    assert table["putamen"].t2.mean == pytest.approx(0.065) and table["pallidum"].t2.mean == pytest.approx(0.057)
     pd = table["pallidum"].pd
     assert pd.assumed and pd.citation.startswith("Assumption: brain.gm.deep used for brain.gm.deep.pallidum")
     assert table["caudate"].chi.assumed and "brain.gm used for brain.gm.deep.caudate" in table["caudate"].chi.citation
     for name in CLASSES:
         if name in table:
-            assert not any(re.match(r"Assumption: \S+ used for \S+: ", getattr(table[name], f.name).citation or "")
-                           for f in fields(table[name]) if getattr(table[name], f.name) is not None)
+            assert not any(
+                re.match(r"Assumption: \S+ used for \S+: ", getattr(table[name], f.name).citation or "")
+                for f in fields(table[name])
+                if getattr(table[name], f.name) is not None
+            )

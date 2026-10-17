@@ -39,21 +39,24 @@ def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     if dtype not in (torch.float32, torch.float64):
         raise ValueError("dtype must be float32 or float64")
     root = Path(root).resolve()
-    manifest = json.loads((root/"verified_source.json").read_text())
+    manifest = json.loads((root / "verified_source.json").read_text())
     if manifest.get("schema") != 1 or manifest.get("doi") != "10.21942/uva.19646364.v3":
         raise ValueError("unexpected AHEAD manifest")
     arrays, affine = {}, None
     for key in ("chi", "R1", "R2star", "relative_PD"):
         entry = manifest["files"][key]
-        path = (root/entry["path"]).resolve()
+        path = (root / entry["path"]).resolve()
         if not path.is_relative_to(root):
             raise ValueError("AHEAD manifest paths must stay inside root")
         if _file_sha256(path) != entry["decompressed_sha256"]:
             raise ValueError(f"checksum mismatch: {path}")
         img = nib.as_closest_canonical(nib.load(path))
         mat = img.affine
-        if img.header.get_xyzt_units()[0] != "mm" or not np.allclose(mat[:3, :3], np.diag(np.diag(mat[:3, :3])), atol=1e-6) \
-                or (np.diag(mat)[:3] <= 0).any():
+        if (
+            img.header.get_xyzt_units()[0] != "mm"
+            or not np.allclose(mat[:3, :3], np.diag(np.diag(mat[:3, :3])), atol=1e-6)
+            or (np.diag(mat)[:3] <= 0).any()
+        ):
             raise ValueError(f"unexpected AHEAD grid: {key}")
         if affine is None:
             affine = mat
@@ -65,12 +68,17 @@ def load_ahead(root, resolution="1mm", *, dtype=torch.float32) -> Anatomy:
     mask = ((r1 > 0) & (pd > 0)).to(dtype)
     if (pd < 0).any() or (r1 < 0).any() or (r2s < 0).any():
         raise ValueError("AHEAD PD and rates must be nonnegative")
-    voxel = tuple((np.diag(affine)[:3]*1e-3)[::-1])
-    origin = tuple(affine[:3, 3]*1e-3)
-    maps = {"M0": pd*mask, "R1": torch.where(mask > 0, r1, 0.), "R2star": torch.where(mask > 0, r2s, 0.), "brain_mask": mask}
-    anatomy = Anatomy({"brain": mask}, voxel, origin, arrays["chi"]*mask, maps, 0.0, 7.0)
+    voxel = tuple((np.diag(affine)[:3] * 1e-3)[::-1])
+    origin = tuple(affine[:3, 3] * 1e-3)
+    maps = {
+        "M0": pd * mask,
+        "R1": torch.where(mask > 0, r1, 0.0),
+        "R2star": torch.where(mask > 0, r2s, 0.0),
+        "brain_mask": mask,
+    }
+    anatomy = Anatomy({"brain": mask}, voxel, origin, arrays["chi"] * mask, maps, 0.0, 7.0)
     if isinstance(resolution, str):
-        options = {"native": None, "1mm": (.001,)*3}
+        options = {"native": None, "1mm": (0.001,) * 3}
         if resolution not in options:
             raise ValueError("resolution must be native, 1mm, or a voxel tuple")
         resolution = options[resolution]

@@ -127,7 +127,9 @@ def _rf_segment(mx, my, mz, mb, dt, rf, g, off, spins: _Spins, f_rf=None, bound_
         bz = bz + off
     if spins.mode:
         bz = bz + _concomitant(bz, g, spins)
-    if spins.modes is not None:  # generalized Bloch (never with bound-only RF: capabilities.REFUSED): the RF rotates the bound pool through its modes
+    if (
+        spins.modes is not None
+    ):  # generalized Bloch (never with bound-only RF: capabilities.REFUSED): the RF rotates the bound pool through its modes
         # the split is accurate for steps << T2b (~1e-3 in Z at 1.7 T2b, 0.06 at 8 T2b): sub-step
         n_sub = max(1, math.ceil(float(dt.detach()) / (0.5 * float(spins.bound.t2.detach().min()))))
         for _ in range(n_sub):
@@ -226,8 +228,9 @@ def _moving_fields(spins: _Spins, eff: Tensor) -> tuple[Tensor, Tensor | None]:
     flat = eff.reshape(-1, 3)
     enc = eff
     if nl is not None:
-        enc = torch.cat([nl.encoding_positions(flat[i:i + _ENCODE_BLOCK])
-                         for i in range(0, flat.shape[0], _ENCODE_BLOCK)]).reshape(eff.shape)
+        enc = torch.cat(
+            [nl.encoding_positions(flat[i : i + _ENCODE_BLOCK]) for i in range(0, flat.shape[0], _ENCODE_BLOCK)]
+        ).reshape(eff.shape)
     conc = None
     if spins.mode == 1:
         conc = concomitant_coefficients(flat, f0, a)
@@ -362,16 +365,27 @@ def _run(mx, my, mz, mb, steps, seq: Sequence, spins: _Spins, use_off: bool, f_r
             sp = step_spins if eff is None else step_spins._replace(pos=enc[:, 0])
             if conc_seg is not None:
                 sp = sp._replace(conc=conc_seg[:, 0])
-            mx, my, mz, mb = _rf_segment(mx, my, mz, mb, seq.dt[a], seq.rf[a], seq.grad[a], off, sp,
-                                         None if f_rf is None else f_rf[a],
-                                         bound_only=bool(seq.bound_only[a]) if seq.bound_only is not None else False)
+            mx, my, mz, mb = _rf_segment(
+                mx,
+                my,
+                mz,
+                mb,
+                seq.dt[a],
+                seq.rf[a],
+                seq.grad[a],
+                off,
+                sp,
+                None if f_rf is None else f_rf[a],
+                bound_only=bool(seq.bound_only[a]) if seq.bound_only is not None else False,
+            )
             if seq.adc[a]:
                 samples.append(_sample(mx, my, seq.adc_phase[a], step_spins)[None])
         else:
             adc_idx = [i for i in range(b - a) if seq.adc[a + i]]
             off = seq.b0_offset[a:b] if use_off else None
-            mx, my, mz, mb, sig = _free_run(mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off,
-                                            seq.adc_phase[a:b], adc_idx, step_spins, enc, conc_seg)
+            mx, my, mz, mb, sig = _free_run(
+                mx, my, mz, mb, seq.dt[a:b], seq.grad[a:b], off, seq.adc_phase[a:b], adc_idx, step_spins, enc, conc_seg
+            )
             if sig is not None:
                 samples.append(sig)
         if seq.spoil[b - 1]:
@@ -413,7 +427,7 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
     transverse = torch.zeros(d, dtype=torch.bool, device=pd.device)  # spoiled: every free pool's Mxy, the modes
     for i in range(np_ + 1):
         transverse[3 * i] = transverse[3 * i + 1] = True
-    transverse[d - 1 - nj:d - 1] = True
+    transverse[d - 1 - nj : d - 1] = True
     keep = (~transverse).to(pd.dtype)
     samples, key, E = [], None, None
     for s in range(len(seq)):
@@ -423,7 +437,7 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
         if moving:  # where every spin is during this segment, and the fields there
             eff = None
             if spins.walk is not None:
-                eff, r = _walk(r, seq.dt[s:s + 1], s, spins)
+                eff, r = _walk(r, seq.dt[s : s + 1], s, spins)
             if spins.move is not None:
                 mot, seg, r0 = spins.move
                 eff = positions(r0 if eff is None else eff, mot, seg, s, s + 1)
@@ -433,10 +447,15 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
             if spins.field is not None:
                 enc, conc_seg = _moving_fields(spins, eff)
             sp = sp._replace(pos=enc[:, 0]) if conc_seg is None else sp._replace(pos=enc[:, 0], conc=conc_seg[:, 0])
-        new_key = (float(dt.detach()), float(rf[0].detach()), float(rf[1].detach()), *map(float, g.detach()),
-                   0.0 if off is None else float(off.detach()),
-                   float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0,
-                   bool(seq.bound_only[s]) if seq.bound_only is not None else False)
+        new_key = (
+            float(dt.detach()),
+            float(rf[0].detach()),
+            float(rf[1].detach()),
+            *map(float, g.detach()),
+            0.0 if off is None else float(off.detach()),
+            float(f_rf[s].detach()) if f_rf is not None and seq.is_rf[s] else 0.0,
+            bool(seq.bound_only[s]) if seq.bound_only is not None else False,
+        )
         if moving or new_key != key or torch.is_grad_enabled():
             bz = sp.pos @ g + sp.db0
             if off is not None:
@@ -459,9 +478,10 @@ def _simulate_exchange(seq: Sequence, spins: _Spins, pools, m_init, r=None) -> S
         if seq.spoil[s]:
             v = v * keep
     sig = torch.cat(samples) if samples else pd.new_zeros(0, 2, spins.sens_re.shape[1])
-    m_pools = torch.stack([v[:, 3 * i:3 * i + 3] for i in range(1, np_ + 1)], 1) if np_ else None
-    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, v[:, :3], v[:, 3 * (np_ + 1)] if bound is not None else None,
-                     m_pools)
+    m_pools = torch.stack([v[:, 3 * i : 3 * i + 3] for i in range(1, np_ + 1)], 1) if np_ else None
+    return SimResult(
+        torch.complex(sig[:, 0], sig[:, 1]).T, v[:, :3], v[:, 3 * (np_ + 1)] if bound is not None else None, m_pools
+    )
 
 
 def simulate(
@@ -523,8 +543,23 @@ def simulate(
     move = None
     if phantom.motion is not None:
         move = (phantom.motion, phantom.motion.per_segment(seq.dt), start)
-    spins = _Spins(fields.pos, phantom.db0, pd, 1.0 / phantom.t1, 1.0 / phantom.t2, sens_re, sens_im, phantom.b1,
-                   fields.conc, fields.mode, bound, pool_modes(bound, pd) if gen else None, walk, move, field=field)
+    spins = _Spins(
+        fields.pos,
+        phantom.db0,
+        pd,
+        1.0 / phantom.t1,
+        1.0 / phantom.t2,
+        sens_re,
+        sens_im,
+        phantom.b1,
+        fields.conc,
+        fields.mode,
+        bound,
+        pool_modes(bound, pd) if gen else None,
+        walk,
+        move,
+        field=field,
+    )
     moving = walk is not None or move is not None
     if maps is not None:
         grid = maps.channels(pd.dtype).to(pd.device)
@@ -562,12 +597,12 @@ def simulate(
     sigs = [pd.new_zeros(0, 2, spins.sens_re.shape[1])]
     for part in chunks:
         if use_ckpt:
-            mx, my, mz, mb, sig, r = checkpoint(_run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, r,
-                                                use_reentrant=False)
+            mx, my, mz, mb, sig, r = checkpoint(
+                _run, mx, my, mz, mb, part, seq, spins, use_off, f_rf, r, use_reentrant=False
+            )
         else:
             mx, my, mz, mb, sig, r = _run(mx, my, mz, mb, part, seq, spins, use_off, f_rf, r)
         sigs.append(sig)
     sig = torch.cat(sigs)  # (n_adc, 2, C)
     assert sig.shape[0] == seq.n_adc and n == mx.shape[0]
-    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1),
-                     mb[0] if gen else mb)
+    return SimResult(torch.complex(sig[:, 0], sig[:, 1]).T, torch.stack([mx, my, mz], dim=-1), mb[0] if gen else mb)

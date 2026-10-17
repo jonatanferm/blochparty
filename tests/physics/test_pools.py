@@ -30,9 +30,17 @@ def full_ode(ph: Phantom, seq):
     out = []
     for s_ in range(n):
         pd, r1, r2 = float(ph.pd[s_]), 1 / float(ph.t1[s_]), 1 / float(ph.t2[s_])
-        P = [(pd, r1, r2, 0.0, 0.0, 0.0)] + [(float(q.f[s_]) * pd, 1 / float(q.t1[s_]), 1 / float(q.t2[s_]),
-                                              float(q.dw[s_]), float(q.k[s_]) * float(q.f[s_]), float(q.k[s_]))
-                                             for q in pools]
+        P = [(pd, r1, r2, 0.0, 0.0, 0.0)] + [
+            (
+                float(q.f[s_]) * pd,
+                1 / float(q.t1[s_]),
+                1 / float(q.t2[s_]),
+                float(q.dw[s_]),
+                float(q.k[s_]) * float(q.f[s_]),
+                float(q.k[s_]),
+            )
+            for q in pools
+        ]
         m = np.concatenate([[0, 0, p[0]] for p in P] + ([[float(bound.f[s_]) * pd]] if bound is not None else []))
         for s in range(len(seq)):
             bx, by = seq.rf[s].numpy() if seq.is_rf[s] else (0.0, 0.0)
@@ -46,11 +54,11 @@ def full_ode(ph: Phantom, seq):
             def rhs(_, m):
                 dm = np.zeros_like(m)
                 for i, (m0, q1, q2, dw, k_out, k_in) in enumerate(P):
-                    v = m[3 * i:3 * i + 3]
+                    v = m[3 * i : 3 * i + 3]
                     b = 2 * math.pi * np.array([b1 * bx, b1 * by, bz + dw])
-                    dm[3 * i:3 * i + 3] += np.cross(v, b) - np.array([q2 * v[0], q2 * v[1], q1 * (v[2] - m0)])
+                    dm[3 * i : 3 * i + 3] += np.cross(v, b) - np.array([q2 * v[0], q2 * v[1], q1 * (v[2] - m0)])
                     if i:  # exchange with the water, all three components
-                        dm[3 * i:3 * i + 3] += k_out * m[:3] - k_in * v
+                        dm[3 * i : 3 * i + 3] += k_out * m[:3] - k_in * v
                         dm[:3] += k_in * v - k_out * m[:3]
                 if bound is not None:
                     f, k, r1b = float(bound.f[s_]), float(bound.k[s_]), 1 / float(bound.t1[s_])
@@ -61,7 +69,7 @@ def full_ode(ph: Phantom, seq):
             m = solve_ivp(rhs, (0, float(seq.dt[s])), m, method="DOP853", rtol=1e-11, atol=1e-13).y[:, -1]
             if seq.spoil[s]:
                 for i in range(len(P)):
-                    m[3 * i:3 * i + 2] = 0
+                    m[3 * i : 3 * i + 2] = 0
         out.append(m)
     return np.array(out)
 
@@ -83,8 +91,14 @@ def test_two_site_exchange_free_decay():
     # M = [[-(R2a + i wa + kab), kba], [kab, -(R2b + i wb + kba)]], signal a + b
     pd, f, k, t2a, t2b, dwb = 1.0, 0.2, 12.0, 0.08, 0.012, 25.0
     one = lambda v: torch.full((1,), v, dtype=f64)
-    ph = Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=one(pd), t1=one(1e6), t2=one(t2a), db0=one(0.0),
-                 pools=(ExchangePool(f=f, k=k, t1=1e6, t2=t2b, dw=dwb),))
+    ph = Phantom(
+        pos=torch.zeros(1, 3, dtype=f64),
+        pd=one(pd),
+        t1=one(1e6),
+        t2=one(t2a),
+        db0=one(0.0),
+        pools=(ExchangePool(f=f, k=k, t1=1e6, t2=t2b, dw=dwb),),
+    )
     dwell = 0.5e-3
     seq = bp.SequenceBuilder().rf(1e-6, flip_deg=90.0).readout(200, dwell).build()
     sig = simulate(ph, seq).signal[0].numpy()
@@ -103,7 +117,9 @@ def test_inert_pool_matches_split_core():
     inert = replace(ph, pools=(ExchangePool(f=0.0, k=0.0, t1=1.0, t2=0.1, dw=0.0),))
     split = simulate(ph, seq.subdivide_rf(8))  # splitting error ~ (dt/8)^2
     exact = simulate(inert, seq)
-    assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(exact.m_bound, split.m_bound, atol=2e-6)
+    assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(
+        exact.m_bound, split.m_bound, atol=2e-6
+    )
 
 
 # ---------------------------------------------------------------- with FieldMaps, motion, diffusion (ROADMAP M1c)
@@ -115,7 +131,9 @@ def test_pools_under_field_maps_equal_the_fields_per_spin():
     ph, seq = pool_case(0, True)
     seq = with_readout(seq)
     maps = _maps_for(ph)
-    v = sample(maps.channels(), torch.as_tensor(maps.origin, dtype=f64), torch.as_tensor(maps.spacing, dtype=f64), ph.pos)
+    v = sample(
+        maps.channels(), torch.as_tensor(maps.origin, dtype=f64), torch.as_tensor(maps.spacing, dtype=f64), ph.pos
+    )
     per_spin = replace(ph, db0=ph.db0 + v[:, 0], b1=v[:, 1] if ph.b1 is None else ph.b1 * v[:, 1])
     a = simulate(ph, seq, maps=maps)
     b = simulate(per_spin, seq, torch.complex(v[:, 2::2], v[:, 3::2]))
@@ -148,7 +166,9 @@ def test_inert_pools_moving_match_the_split_core(kind):
     # both on the subdivided sequence: the walks are keyed by segment index (splitting error ~ (dt/8)^2)
     fine = seq.subdivide_rf(8)
     split, exact = simulate(ph, fine, seed=5), simulate(inert, fine, seed=5)
-    assert torch.allclose(exact.signal, split.signal, atol=2e-6) and torch.allclose(exact.m_bound, split.m_bound, atol=2e-6)
+    assert torch.allclose(exact.signal, split.signal, atol=2e-6) and torch.allclose(
+        exact.m_bound, split.m_bound, atol=2e-6
+    )
     still = simulate(replace(inert, motion=None, diffusion=None), fine, seed=5)
     assert (still.signal - exact.signal).abs().max() > 1e-3  # the motion matters
 
@@ -171,9 +191,17 @@ def full_ode_generalized(ph: Phantom, seq):
     out = []
     for s_ in range(n):
         pd, r1, r2 = float(ph.pd[s_]), 1 / float(ph.t1[s_]), 1 / float(ph.t2[s_])
-        P = [(pd, r1, r2, 0.0, 0.0, 0.0)] + [(float(q.f[s_]) * pd, 1 / float(q.t1[s_]), 1 / float(q.t2[s_]),
-                                              float(q.dw[s_]), float(q.k[s_]) * float(q.f[s_]), float(q.k[s_]))
-                                             for q in pools]
+        P = [(pd, r1, r2, 0.0, 0.0, 0.0)] + [
+            (
+                float(q.f[s_]) * pd,
+                1 / float(q.t1[s_]),
+                1 / float(q.t2[s_]),
+                float(q.dw[s_]),
+                float(q.k[s_]) * float(q.f[s_]),
+                float(q.k[s_]),
+            )
+            for q in pools
+        ]
         f, k, r1b, t2b, dwb = (float(getattr(bound, a)[s_]) for a in ("f", "k", "t1", "t2", "dw"))
         r1b = 1 / r1b
         b1 = float(ph.b1[s_]) if ph.b1 is not None else 1.0
@@ -187,27 +215,27 @@ def full_ode_generalized(ph: Phantom, seq):
             def rhs(_, m):
                 dm = np.zeros_like(m)
                 for i, (m0, q1, q2, dw, k_out, k_in) in enumerate(P):
-                    v = m[3 * i:3 * i + 3]
+                    v = m[3 * i : 3 * i + 3]
                     w = np.array([wx, wy, 2 * math.pi * (bz + dw)])
-                    dm[3 * i:3 * i + 3] += np.cross(v, w) - np.array([q2 * v[0], q2 * v[1], q1 * (v[2] - m0)])
+                    dm[3 * i : 3 * i + 3] += np.cross(v, w) - np.array([q2 * v[0], q2 * v[1], q1 * (v[2] - m0)])
                     if i:
-                        dm[3 * i:3 * i + 3] += k_out * m[:3] - k_in * v
+                        dm[3 * i : 3 * i + 3] += k_out * m[:3] - k_in * v
                         dm[:3] += k_in * v - k_out * m[:3]
                 zb = m[nf]
-                u = m[nf + 1::2] + 1j * m[nf + 2::2]
+                u = m[nf + 1 :: 2] + 1j * m[nf + 2 :: 2]
                 S = u.sum()
                 du = -(pj / t2b + 2j * math.pi * (bz + dwb)) * u + cj * (-wy + 1j * wx) * zb
                 dm[nf] = wy * S.real - wx * S.imag + r1b * (f * pd - zb) + k * f * m[2] - k * zb
                 dm[2] += -k * f * m[2] + k * zb
-                dm[nf + 1::2], dm[nf + 2::2] = du.real, du.imag
+                dm[nf + 1 :: 2], dm[nf + 2 :: 2] = du.real, du.imag
                 return dm
 
             m = solve_ivp(rhs, (0, float(seq.dt[s])), m, method="DOP853", rtol=1e-10, atol=1e-12).y[:, -1]
             if seq.spoil[s]:
                 for i in range(len(P)):
-                    m[3 * i:3 * i + 2] = 0
-                m[nf + 1:] = 0
-        out.append(m[:nf + 1])
+                    m[3 * i : 3 * i + 2] = 0
+                m[nf + 1 :] = 0
+        out.append(m[: nf + 1])
     return np.array(out)
 
 
@@ -217,9 +245,16 @@ def test_generalized_bound_pool_with_free_pools_matches_ode(shape):
     ph, seq = pool_case(0, True)
     ph = replace(ph, bound=replace(ph.bound, model="generalized", lineshape=shape))
     keep = slice(0, 2)  # two spins: the ODE carries 2 x 30 mode components for the super-Lorentzian
-    ph = replace(ph, pos=ph.pos[keep], pd=ph.pd[keep], t1=ph.t1[keep], t2=ph.t2[keep], db0=ph.db0[keep],
-                 bound=ph.bound[keep], pools=tuple(replace(q, **{a: getattr(q, a)[keep] for a in ("f", "k", "t1", "t2", "dw")})
-                                                     for q in ph.pools))
+    ph = replace(
+        ph,
+        pos=ph.pos[keep],
+        pd=ph.pd[keep],
+        t1=ph.t1[keep],
+        t2=ph.t2[keep],
+        db0=ph.db0[keep],
+        bound=ph.bound[keep],
+        pools=tuple(replace(q, **{a: getattr(q, a)[keep] for a in ("f", "k", "t1", "t2", "dw")}) for q in ph.pools),
+    )
     ref = full_ode_generalized(ph, seq)
     out = simulate(ph, seq)
     got = np.concatenate([out.m.numpy(), out.m_pools.numpy().reshape(2, -1), out.m_bound.numpy()[:, None]], 1)
@@ -234,7 +269,9 @@ def test_generalized_with_inert_pools_matches_the_split_core():
     seq = with_readout(seq)
     inert = replace(ph, pools=(ExchangePool(f=0.0, k=0.0, t1=1.0, t2=0.1, dw=0.0),))
     exact, split = simulate(inert, seq), simulate(ph, seq)
-    assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(exact.m_bound, split.m_bound, atol=5e-6)
+    assert torch.allclose(exact.signal, split.signal, atol=2e-5) and torch.allclose(
+        exact.m_bound, split.m_bound, atol=5e-6
+    )
 
 
 @pytest.mark.parametrize("offset", [2e3, 5e3])
@@ -243,9 +280,15 @@ def test_generalized_with_pools_approaches_the_rate_model_off_resonance(offset):
     # the exact engine takes the 0.5 s pulse as one segment
     def z(model):
         one = torch.ones(1, dtype=f64)
-        ph = Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=one, t1=one, t2=0.05 * one, db0=-offset * one,
-                     bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model),
-                     pools=(ExchangePool(f=0.01, k=500.0, t1=1.0, t2=0.01, dw=450.0),))
+        ph = Phantom(
+            pos=torch.zeros(1, 3, dtype=f64),
+            pd=one,
+            t1=one,
+            t2=0.05 * one,
+            db0=-offset * one,
+            bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model),
+            pools=(ExchangePool(f=0.01, k=500.0, t1=1.0, t2=0.01, dw=450.0),),
+        )
         return float(simulate(ph, bp.SequenceBuilder().rf(0.5, amplitude=64.0, n_steps=1).build()).m[0, 2])
 
     assert z("generalized") == pytest.approx(z("rate"), abs=2e-3)
@@ -260,8 +303,15 @@ def _wm_like(model, db0, cutoff):
     one = torch.ones(1, dtype=f64)
     amide = ExchangePool(f=0.01, k=50.0, t1=1.0, t2=0.02, dw=3.5e-6 * 3 * bp.GAMMA_BAR)
     myelin = ExchangePool(f=0.15, k=10.0, t1=0.5, t2=0.012, dw=0.0)
-    return Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=one, t1=one, t2=0.07 * one, db0=db0 * one,
-                   bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=10e-6, model=model, cutoff=cutoff), pools=(amide, myelin))
+    return Phantom(
+        pos=torch.zeros(1, 3, dtype=f64),
+        pd=one,
+        t1=one,
+        t2=0.07 * one,
+        db0=db0 * one,
+        bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=10e-6, model=model, cutoff=cutoff),
+        pools=(amide, myelin),
+    )
 
 
 def _pulsed_saturation(n_pulses=36, duration=50e-3, b1_ut=2.0, gap=5e-3):

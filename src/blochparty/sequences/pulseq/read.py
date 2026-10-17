@@ -13,8 +13,7 @@ from ..builder import MAX_RF_STEP, _subdivide
 from .write import _fingerprint
 
 _KNOWN_EXTENSIONS = {"LABELSET", "LABELINC", "TRIGGERS", "DELAYS"}
-_KNOWN_BLOCK_FIELDS = {"block_duration", "rf", "gx", "gy", "gz", "adc", "label", "soft_delay",
-                       "trigger", "delay"}
+_KNOWN_BLOCK_FIELDS = {"block_duration", "rf", "gx", "gy", "gz", "adc", "label", "soft_delay", "trigger", "delay"}
 
 
 def _load(seq_or_path):
@@ -51,9 +50,17 @@ def _check_extensions(seq) -> None:
         raise NotImplementedError(f"unsupported Pulseq extension(s): {sorted(unknown)}")
 
 
-def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: float | None = None,
-                rf_raster: float | None = None, max_rf_step: float | None = None, convention: str = "physical",
-                **meta) -> Sequence:
+def read_pulseq(
+    seq_or_path,
+    *,
+    dtype=torch.float64,
+    device=None,
+    ramp_raster: float | None = None,
+    rf_raster: float | None = None,
+    max_rf_step: float | None = None,
+    convention: str = "physical",
+    **meta,
+) -> Sequence:
     """Convert a Pulseq sequence (``.seq`` path or ``pypulseq.Sequence``) to a ``Sequence``.
 
     ramp_raster: longest piece a sloped gradient section is cut into (default: the
@@ -117,8 +124,9 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
             else:  # piecewise linear between (t, signal) points
                 sloped = (np.diff(sig) != 0) | (f_rf != 0)
                 edges = np.sort(np.concatenate([t_rf, _subdivide(t_rf, sloped, rf_raster)]))
-                edges = np.concatenate([edges, _subdivide(edges, np.ones(len(edges) - 1, dtype=bool),
-                                                          max_rf_step or MAX_RF_STEP)])
+                edges = np.concatenate(
+                    [edges, _subdivide(edges, np.ones(len(edges) - 1, dtype=bool), max_rf_step or MAX_RF_STEP)]
+                )
             points += [rf.delay + edges, np.array([rf.delay + rf.center])]
             rf_lo, rf_hi = rf.delay + edges.min(), rf.delay + edges.max()
 
@@ -191,10 +199,15 @@ def read_pulseq(seq_or_path, *, dtype=torch.float64, device=None, ramp_raster: f
         is_rf=np.concatenate(rf_flags).tolist(),
         adc=np.concatenate(adc_flags).tolist(),
         spoil=[False] * n_seg,
-        meta={"adc_per_readout": adc_counts, "block_segments": block_segments,
-              "segment_block": np.repeat(np.asarray(list(seq.block_events), dtype=np.int64),
-                                         [b - a for a, b in block_segments]),
-              "definitions": dict(getattr(seq, "definitions", {})), "convention": convention},
+        meta={
+            "adc_per_readout": adc_counts,
+            "block_segments": block_segments,
+            "segment_block": np.repeat(
+                np.asarray(list(seq.block_events), dtype=np.int64), [b - a for a, b in block_segments]
+            ),
+            "definitions": dict(getattr(seq, "definitions", {})),
+            "convention": convention,
+        },
     )
     if convention == "physical":  # what write_pulseq re-emits (it writes the physical reading)
         out.meta["pulseq_source"] = seq

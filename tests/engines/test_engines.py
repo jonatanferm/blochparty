@@ -67,7 +67,7 @@ def read_matrix(path: Path = DOC) -> dict[str, dict[tuple[str, str], str]]:
     for line in rows[2:]:
         cells = [c.strip() for c in line.strip("|").split("|")]
         name = cells[0].replace("`", "")
-        out[name] = dict(zip(cols, cells[1:1 + len(cols)]))
+        out[name] = dict(zip(cols, cells[1 : 1 + len(cols)]))
     return out
 
 
@@ -125,12 +125,25 @@ def case_b1(leaf):
 
 def _maps(leaf):
     """B0, B1+ and two coils on a 4 x 9 x 9 grid around the phantom."""
-    zz, yy, xx = torch.meshgrid(torch.linspace(-0.1, 0.1, 4, dtype=f64), torch.linspace(-0.3, 0.3, 9, dtype=f64),
-                                torch.linspace(-0.3, 0.3, 9, dtype=f64), indexing="ij")
-    coils = torch.stack([torch.exp(-((xx - 0.1 * (c - 0.5)) ** 2 + yy ** 2) / 0.02) * torch.exp(1j * (3 * yy - 2 * c * xx))
-                         for c in range(2)])
-    return bp.FieldMaps((-0.3, -0.3, -0.1), (0.075, 0.075, 0.2 / 3), b0=leaf(40 * xx ** 2 - 20 * yy + 5 * zz),
-                        b1=leaf(1 + 0.3 * xx), coils=leaf(coils))
+    zz, yy, xx = torch.meshgrid(
+        torch.linspace(-0.1, 0.1, 4, dtype=f64),
+        torch.linspace(-0.3, 0.3, 9, dtype=f64),
+        torch.linspace(-0.3, 0.3, 9, dtype=f64),
+        indexing="ij",
+    )
+    coils = torch.stack(
+        [
+            torch.exp(-((xx - 0.1 * (c - 0.5)) ** 2 + yy**2) / 0.02) * torch.exp(1j * (3 * yy - 2 * c * xx))
+            for c in range(2)
+        ]
+    )
+    return bp.FieldMaps(
+        (-0.3, -0.3, -0.1),
+        (0.075, 0.075, 0.2 / 3),
+        b0=leaf(40 * xx**2 - 20 * yy + 5 * zz),
+        b1=leaf(1 + 0.3 * xx),
+        coils=leaf(coils),
+    )
 
 
 def case_maps_static(leaf):
@@ -142,9 +155,12 @@ def _motion(leaf, n):
     """Flow, a periodic displacement and a slow rotation about z, all at once."""
     g = _g(4)
     rnd = lambda *s: torch.rand(*s, generator=g, dtype=f64)
-    return bp.Motion(velocity=leaf((rnd(n, 3) - 0.5) * 0.2), displacement=leaf((rnd(n, 3) - 0.5) * 0.004),
-                     waveform=lambda t: np.sin(2 * np.pi * t / 0.02),
-                     rigid=lambda t: tuple(map(np.stack, zip(*[rotation_z(2.0 * x, (0.002, 0.0, 0.0)) for x in t]))))
+    return bp.Motion(
+        velocity=leaf((rnd(n, 3) - 0.5) * 0.2),
+        displacement=leaf((rnd(n, 3) - 0.5) * 0.004),
+        waveform=lambda t: np.sin(2 * np.pi * t / 0.02),
+        rigid=lambda t: tuple(map(np.stack, zip(*[rotation_z(2.0 * x, (0.002, 0.0, 0.0)) for x in t]))),
+    )
 
 
 def case_maps_moving(leaf):
@@ -156,8 +172,12 @@ def _with_bound(leaf, seed, model, shape="superlorentzian"):
     ph, seq = bm_case(seed, shape)
     seq = with_readout(seq)
     b = ph.bound
-    ph = replace(ph, t1=leaf(ph.t1), b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64),
-                 bound=replace(b, f=leaf(b.f), k=leaf(b.k), model=model))
+    ph = replace(
+        ph,
+        t1=leaf(ph.t1),
+        b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64),
+        bound=replace(b, f=leaf(b.f), k=leaf(b.k), model=model),
+    )
     seq = replace(seq, rf=leaf(seq.rf))
     m0 = torch.randn(len(ph), 4, dtype=f64, generator=_g(1)).abs()
     return ph, seq, {"coils": bp.birdcage_sensitivities(ph.pos, 2), "m_init": leaf(m0)}
@@ -200,8 +220,14 @@ def _diffusing(leaf, n=200, seed=2):
     d = rot @ torch.diag(torch.tensor([0.5e-9, 1.5e-9, 2.5e-9], dtype=f64)) @ rot.T
     # the leaf is a per-spin scale: a perturbation of the tensor itself must stay symmetric
     scale = leaf(0.5 + rnd(n))
-    ph = bp.Phantom(pos=(rnd(n, 3) - 0.5) * 0.02, pd=torch.ones(n, dtype=f64), t1=leaf(torch.full((n,), 1.0, dtype=f64)),
-                    t2=torch.full((n,), 0.08, dtype=f64), db0=(rnd(n) - 0.5) * 50, diffusion=scale[:, None, None] * d)
+    ph = bp.Phantom(
+        pos=(rnd(n, 3) - 0.5) * 0.02,
+        pd=torch.ones(n, dtype=f64),
+        t1=leaf(torch.full((n,), 1.0, dtype=f64)),
+        t2=torch.full((n,), 0.08, dtype=f64),
+        db0=(rnd(n) - 0.5) * 50,
+        diffusion=scale[:, None, None] * d,
+    )
     seq = pgse((1.2e5, 3e4, -2e4), readout=8)
     return ph, replace(seq, rf=leaf(seq.rf)), {"coils": bp.birdcage_sensitivities(ph.pos, 2), "seed": 9}
 
@@ -215,10 +241,15 @@ def case_restricted(leaf):
     # integer for 1 ms segments, where the walk (and so the signal) jumps (docs/LESSONS.md)
     n = 300
     g = _g(5)
-    ph = bp.Phantom(pos=(torch.rand(n, 3, dtype=f64, generator=g) - 0.5) * 0.01, pd=torch.ones(n, dtype=f64),
-                    t1=leaf(torch.full((n,), 1.0, dtype=f64)), t2=torch.full((n,), 0.08, dtype=f64),
-                    db0=torch.zeros(n, dtype=f64), diffusion=leaf((1.5 + torch.rand(n, dtype=f64, generator=g)) * 1e-9),
-                    restriction=bp.Restriction("cylinder", 5e-6, (0.0, 0.6, 0.8)))
+    ph = bp.Phantom(
+        pos=(torch.rand(n, 3, dtype=f64, generator=g) - 0.5) * 0.01,
+        pd=torch.ones(n, dtype=f64),
+        t1=leaf(torch.full((n,), 1.0, dtype=f64)),
+        t2=torch.full((n,), 0.08, dtype=f64),
+        db0=torch.zeros(n, dtype=f64),
+        diffusion=leaf((1.5 + torch.rand(n, dtype=f64, generator=g)) * 1e-9),
+        restriction=bp.Restriction("cylinder", 5e-6, (0.0, 0.6, 0.8)),
+    )
     seq = sgp(1.0 / 5e-6, 1e-3, 10e-3, axis=1)
     return ph, replace(seq, rf=leaf(seq.rf)), {"seed": 2}
 
@@ -258,8 +289,10 @@ def case_girf(leaf):
     ph = bp.shepp_logan(8)
     amp = leaf(torch.tensor([[0.01], [0.02], [0.015]], dtype=f64))
     b0a = leaf(torch.tensor([[1e-5], [2e-5], [-1e-5]], dtype=f64))
-    model = [GIRF.identity(delay=[2e-6, 2e-6, 3e-6]),
-             EddyCurrents.per_axis(amp, [[0.5e-3]] * 3, b0_amplitude=b0a, b0_time_constant=[[1e-3]] * 3)]
+    model = [
+        GIRF.identity(delay=[2e-6, 2e-6, 3e-6]),
+        EddyCurrents.per_axis(amp, [[0.5e-3]] * 3, b0_amplitude=b0a, b0_time_constant=[[1e-3]] * 3),
+    ]
     seq = apply_girf(bp.gre_2d(8, n_dummy=2, ramps=True), model)
     return replace(ph, t1=leaf(ph.t1)), seq, {"coils": bp.birdcage_sensitivities(ph.pos, 2)}
 
@@ -350,22 +383,33 @@ def case_diffusion_nonlinearity(leaf):
 def case_bound_field_model(leaf):
     ph, seq, kw = _with_bound(leaf, 0, "rate")
     seq = replace(seq, grad=seq.grad * 20)
-    return ph, seq, {**kw, "scanner": Scanner(field_strength=leaf(torch.tensor(0.55, dtype=f64)),
-                                              nonlinearity=distortion())}
+    return (
+        ph,
+        seq,
+        {**kw, "scanner": Scanner(field_strength=leaf(torch.tensor(0.55, dtype=f64)), nonlinearity=distortion())},
+    )
 
 
 def case_pools_field_model(leaf):
     ph, seq, kw = _pools(leaf, True)
     seq = replace(seq, grad=seq.grad * 30)  # ~3 mT/m: concomitant fields of a few Hz at 0.55 T
-    return ph, seq, {**kw, "scanner": Scanner(field_strength=leaf(torch.tensor(0.55, dtype=f64)),
-                                              nonlinearity=distortion())}
+    return (
+        ph,
+        seq,
+        {**kw, "scanner": Scanner(field_strength=leaf(torch.tensor(0.55, dtype=f64)), nonlinearity=distortion())},
+    )
 
 
 def _bound_diffusing(leaf, model):
     ph, seq, kw = _diffusing(leaf, n=64)
     n = len(ph)
-    bound = bp.BoundPool(f=leaf(torch.full((n,), 0.12, dtype=f64)), k=leaf(torch.full((n,), 40.0, dtype=f64)),
-                         t1=torch.ones(n, dtype=f64), t2=torch.full((n,), 12e-6, dtype=f64), model=model)
+    bound = bp.BoundPool(
+        f=leaf(torch.full((n,), 0.12, dtype=f64)),
+        k=leaf(torch.full((n,), 40.0, dtype=f64)),
+        t1=torch.ones(n, dtype=f64),
+        t2=torch.full((n,), 12e-6, dtype=f64),
+        model=model,
+    )
     return replace(ph, bound=bound), seq, kw
 
 
@@ -493,8 +537,9 @@ def directional_fd(feature: str, eps=1e-5) -> tuple[float, float]:
 # ---------------------------------------------------------------- the tests
 
 MATRIX = read_matrix()
-CELLS = [(feature, eng, kind, mark) for feature, row in MATRIX.items() for (eng, kind), mark in row.items()
-         if mark != "–"]
+CELLS = [
+    (feature, eng, kind, mark) for feature, row in MATRIX.items() for (eng, kind), mark in row.items() if mark != "–"
+]
 SLOW = {("free pools + generalized Bloch", "core", "gradients")}  # 60-dimensional matrix exponentials, ~3 s
 
 
@@ -508,9 +553,11 @@ def test_matrix_rows_are_the_cases():
                 assert row[(e, "gradients")] == "✗", (feature, e)
 
 
-@pytest.mark.parametrize("feature, eng, kind, mark",
-                         [pytest.param(*c, marks=pytest.mark.slow) if c[:3] in SLOW else c for c in CELLS],
-                         ids=[f"{e}-{k}-{f}" for f, e, k, _ in CELLS])
+@pytest.mark.parametrize(
+    "feature, eng, kind, mark",
+    [pytest.param(*c, marks=pytest.mark.slow) if c[:3] in SLOW else c for c in CELLS],
+    ids=[f"{e}-{k}-{f}" for f, e, k, _ in CELLS],
+)
 def test_cell(feature, eng, kind, mark):
     case = build(feature, grad=kind == "gradients")
     if mark == "✗":
@@ -552,7 +599,9 @@ def test_capabilities_declare_the_matrix():
     for feature, row in MATRIX.items():
         for kind in ("forward", "gradients"):
             case = build(feature, grad=kind == "gradients")
-            used = C.features(case.phantom, case.seq, case.kw.get("m_init"), case.kw.get("scanner"), case.kw.get("maps"))
+            used = C.features(
+                case.phantom, case.seq, case.kw.get("m_init"), case.kw.get("scanner"), case.kw.get("maps")
+            )
             for eng in ENGINES:
                 if row[(eng, kind)] == "–":
                     continue

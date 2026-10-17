@@ -39,7 +39,9 @@ def _field_model_buffer(scanner) -> Tensor:
         norm = torch.zeros(size, size, dtype=torch.float64)
         for nn in range(size):
             for m in range(nn + 1):
-                norm[nn, m] = 1.0 if m == 0 else math.sqrt((2 * nn + 1) * math.factorial(nn - m) / (2 * math.factorial(nn + m)))
+                norm[nn, m] = (
+                    1.0 if m == 0 else math.sqrt((2 * nn + 1) * math.factorial(nn - m) / (2 * math.factorial(nn + m)))
+                )
         scale = nl.r0 * norm
         a, b = (t.detach().double().cpu() * scale for t in (nl.alpha, nl.beta))
         head[:3] = [1.0, float(size), float(nl.r0)]
@@ -58,6 +60,7 @@ def _cost_order(phantom: Phantom, seq: Sequence) -> Tensor | None:
     off = 0.0 if seq.b0_offset is None else float(seq.b0_offset.detach().double()[rf].abs().max())
     cost = phantom.db0.detach().double().cpu().abs() + phantom.pos.detach().double().cpu().abs() @ g + off
     return torch.argsort(cost, stable=True)
+
 
 NUFFT_MIN_SAMPLES = 16  # readouts shorter than this keep the per-sample path
 
@@ -78,8 +81,14 @@ def _readout_runs(seq: Sequence) -> list[tuple[int, int]]:
     same = np.zeros(len(dt), dtype=bool)
     # equal to the last bits: segment edges come from absolute times (dt 9.999999999999999e-06 vs 1e-05)
     tol_g = 1e-9 * max(float(np.abs(g).max()), 1.0)
-    same[1:] = (ok[1:] & ok[:-1] & ~sp[:-1] & (np.abs(dt[1:] - dt[:-1]) <= 1e-9 * dt[1:])
-                & (np.abs(g[1:] - g[:-1]) <= tol_g).all(1) & (np.abs(b0[1:] - b0[:-1]) <= 1e-9))
+    same[1:] = (
+        ok[1:]
+        & ok[:-1]
+        & ~sp[:-1]
+        & (np.abs(dt[1:] - dt[:-1]) <= 1e-9 * dt[1:])
+        & (np.abs(g[1:] - g[:-1]) <= tol_g).all(1)
+        & (np.abs(b0[1:] - b0[:-1]) <= 1e-9)
+    )
     starts = np.flatnonzero(ok & ~same)
     ends = np.append(starts[1:], len(dt))
     runs = []
@@ -95,6 +104,7 @@ def _readout_runs(seq: Sequence) -> list[tuple[int, int]]:
     for a, k in runs:
         kinds.setdefault((k, round(float(dt[a]) * 1e12)), []).append((a, k))
     return max(kinds.values(), key=len)
+
 
 PULSE_MEMORY = 2 << 30  # bytes of per-spin pulse maps at most (pulses="reuse")
 
@@ -130,12 +140,17 @@ def _reused_pulses(seq: Sequence, flags: Tensor, frf: Tensor | None, tol: float 
     for a, k in runs:
         if k < 2:
             continue
-        i, key = slice(a, a + k), (k, round(float(dt[a:a + k].sum()) * 1e9))
+        i, key = slice(a, a + k), (k, round(float(dt[a : a + k].sum()) * 1e9))
         for gi in bucket.get(key, ()):
             r = groups[gi][0]
             j = slice(r, r + k)
-            if not (np.array_equal(f[i], f[j]) and close(dt[i], dt[j]) and close(g[i], g[j]) and close(b0[i], b0[j])
-                    and close(fr[i], fr[j])):
+            if not (
+                np.array_equal(f[i], f[j])
+                and close(dt[i], dt[j])
+                and close(g[i], g[j])
+                and close(b0[i], b0[j])
+                and close(fr[i], fr[j])
+            ):
                 continue
             c = np.vdot(z[j], z[i])
             ph = float(np.angle(c)) if c != 0 else 0.0
@@ -162,14 +177,42 @@ def _take(phantom: Phantom, idx: Tensor) -> Phantom:
     """The (static) spins ``idx`` of a phantom with free pools."""
     n, pd = len(phantom), phantom.pd
     pick = lambda t: None if t is None else t[idx]
-    pools = tuple(type(q)(*(getattr(q.expand(n, pd), a)[idx] for a in ("f", "k", "t1", "t2", "dw"))) for q in phantom.pools or ())
+    pools = tuple(
+        type(q)(*(getattr(q.expand(n, pd), a)[idx] for a in ("f", "k", "t1", "t2", "dw"))) for q in phantom.pools or ()
+    )
     bound = None if phantom.bound is None else phantom.bound.expand(n, pd)[idx]
-    return dataclasses.replace(phantom, pos=phantom.pos[idx], pd=pd[idx], t1=phantom.t1[idx], t2=phantom.t2[idx],
-                               db0=phantom.db0[idx], b1=pick(phantom.b1), bound=bound, pools=pools)
+    return dataclasses.replace(
+        phantom,
+        pos=phantom.pos[idx],
+        pd=pd[idx],
+        t1=phantom.t1[idx],
+        t2=phantom.t2[idx],
+        db0=phantom.db0[idx],
+        b1=pick(phantom.b1),
+        bound=bound,
+        pools=pools,
+    )
 
 
-def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None, reuse: bool = False, *, backend):
+def _forward(
+    phantom: Phantom,
+    seq: Sequence,
+    coils,
+    m_init,
+    chunk,
+    group,
+    scanner,
+    mma,
+    seed,
+    maps,
+    ordered: bool = False,
+    fields_in=None,
+    keep: bool = False,
+    nufft=None,
+    reuse: bool = False,
+    *,
+    backend,
+):
     """The forward kernels. ``fields_in``: the field model's inputs (``fields.SpinFields``) in place of
     spin_fields(scanner, pos). ``keep``: also return what the adjoint needs, with the state before every
     ``chunk`` segments (one dispatch each). ``nufft``: (width, terms) of NUFFT readouts; ``reuse``: reused
@@ -180,10 +223,13 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             continue
         if keep:
             raise ValueError(f"{opt} is forward only")
-        for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
-                              ("free pools", bool(getattr(phantom, "pools", None))),
-                              ("the generalized bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
-                              ("concomitant fields", bool(spin_fields(scanner, phantom.pos).mode))):
+        for what, present in (
+            ("diffusion", phantom.diffusion is not None),
+            ("motion", phantom.motion is not None),
+            ("free pools", bool(getattr(phantom, "pools", None))),
+            ("the generalized bound pool", phantom.bound is not None and phantom.bound.model == "generalized"),
+            ("concomitant fields", bool(spin_fields(scanner, phantom.pos).mode)),
+        ):
             if present:
                 raise ValueError(f"{opt} is for static spins without {what}")
         mma = True
@@ -194,13 +240,29 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             a = runs[0][0]
             off = 0.0 if seq.b0_offset is None else float(seq.b0_offset[a])
             pos_enc = spin_fields(scanner, phantom.pos).pos
-            turns = float(seq.dt[a]) * (pos_enc.detach().double().cpu() @ seq.grad[a].detach().double().cpu()
-                                        + phantom.db0.detach().double().cpu() + off)
+            turns = float(seq.dt[a]) * (
+                pos_enc.detach().double().cpu() @ seq.grad[a].detach().double().cpu()
+                + phantom.db0.detach().double().cpu()
+                + off
+            )
             order = torch.argsort(turns - torch.floor(turns), stable=True)
             inv = torch.argsort(order)
-            r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
-                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
-                         nufft=nufft, reuse=reuse, backend=backend)
+            r = _forward(
+                _take(phantom, order),
+                seq,
+                None if coils is None else coils[order],
+                None if m_init is None else m_init[order],
+                chunk,
+                group,
+                scanner,
+                mma,
+                seed,
+                maps,
+                True,
+                nufft=nufft,
+                reuse=reuse,
+                backend=backend,
+            )
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv])
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as the core (free pools with the generalized bound pool: capabilities.REFUSED)
@@ -211,9 +273,20 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         order = None if ordered or moving else _cost_order(phantom, seq)
         if order is not None:  # run the spins sorted by cost, return them in the caller's order
             inv = torch.argsort(order)
-            r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
-                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
-                         backend=backend)
+            r = _forward(
+                _take(phantom, order),
+                seq,
+                None if coils is None else coils[order],
+                None if m_init is None else m_init[order],
+                chunk,
+                group,
+                scanner,
+                mma,
+                seed,
+                maps,
+                True,
+                backend=backend,
+            )
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv], r.m_pools[inv])
     dev, f32 = backend.device, torch.float32
     n = len(phantom)
@@ -244,8 +317,22 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             nz, ny, nx = maps.shape()
             mg = torch.cat([origin, spacing, torch.tensor([nx, ny, nz], dtype=torch.float64)])
             map_bufs = [grid.reshape(-1).to(dev, f32).contiguous(), mg.to(dev, f32).contiguous()]
-    spins = torch.stack([fields.pos[:, 0], fields.pos[:, 1], fields.pos[:, 2], phantom.pd, 1 / phantom.t1,
-                         1 / phantom.t2, db0, b1.to(phantom.pd.dtype)]).to(dev, f32).contiguous()
+    spins = (
+        torch.stack(
+            [
+                fields.pos[:, 0],
+                fields.pos[:, 1],
+                fields.pos[:, 2],
+                phantom.pd,
+                1 / phantom.t1,
+                1 / phantom.t2,
+                db0,
+                b1.to(phantom.pd.dtype),
+            ]
+        )
+        .to(dev, f32)
+        .contiguous()
+    )
     if coils is None:
         coils = torch.ones(n, 1, dtype=torch.complex64)
     n_coils = coils.shape[1]
@@ -268,11 +355,25 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     b0 = getattr(seq, "b0_offset", None)
     b0 = torch.zeros_like(seq.dt) if b0 is None else b0
     psi = torch.remainder(seq.adc_phase.double(), 2 * math.pi)  # RF spoiling makes phases large: wrap before float32
-    segs = torch.stack([seq.dt.double(), seq.rf[:, 0].double(), seq.rf[:, 1].double(), seq.grad[:, 0].double(),
-                        seq.grad[:, 1].double(), seq.grad[:, 2].double(), psi, b0.double()], 1).to(dev, f32).contiguous()
+    segs = (
+        torch.stack(
+            [
+                seq.dt.double(),
+                seq.rf[:, 0].double(),
+                seq.rf[:, 1].double(),
+                seq.grad[:, 0].double(),
+                seq.grad[:, 1].double(),
+                seq.grad[:, 2].double(),
+                psi,
+                b0.double(),
+            ],
+            1,
+        )
+        .to(dev, f32)
+        .contiguous()
+    )
     adc = torch.tensor(seq.adc, dtype=torch.int32)
-    flags = (torch.tensor(seq.is_rf, dtype=torch.int32) | (adc << 1) |
-             (torch.tensor(seq.spoil, dtype=torch.int32) << 2))
+    flags = torch.tensor(seq.is_rf, dtype=torch.int32) | (adc << 1) | (torch.tensor(seq.spoil, dtype=torch.int32) << 2)
     bound_only = getattr(seq, "bound_only", None)
     if bound_only is not None and any(bound_only):  # RF only the bound pool feels (Sequence.bound_only)
         bo = torch.tensor(bound_only, dtype=torch.int32)
@@ -288,8 +389,10 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     pool = prep.bound
     if pool is not None:  # magnetization transfer: the bound pool's Mz, parameters, RF frequency, lineshape
         mb64 = mb.detach().double().cpu()
-        mt_bufs = [mb64.float().to(dev).contiguous(),
-                   torch.stack([pool.f, pool.k, 1 / pool.t1, pool.t2, pool.dw]).detach().to(dev, f32).contiguous()]
+        mt_bufs = [
+            mb64.float().to(dev).contiguous(),
+            torch.stack([pool.f, pool.k, 1 / pool.t1, pool.t2, pool.dw]).detach().to(dev, f32).contiguous(),
+        ]
         gen_bufs = None
         if pool.model == "generalized":  # modes instead of the saturation lineshape
             from ...generalized_bloch import modes as green_modes
@@ -298,8 +401,10 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             table = torch.tensor([[q.real, q.imag, c.real, c.imag] for q, c in zip(pm, cm)], dtype=f32)
             t2b_min = float(pool.t2.detach().min())
             dts = seq.dt.detach().double().cpu()
-            nsub = torch.tensor([max(1, math.ceil(float(d) / (0.5 * t2b_min))) if r else 1
-                                 for d, r in zip(dts, seq.is_rf)], dtype=torch.int32)
+            nsub = torch.tensor(
+                [max(1, math.ceil(float(d) / (0.5 * t2b_min))) if r else 1 for d, r in zip(dts, seq.is_rf)],
+                dtype=torch.int32,
+            )
             gen_bufs = [torch.zeros(2 * len(pm), n, device=dev, dtype=f32), table.to(dev), nsub.to(dev), len(pm)]
             dummy = torch.zeros(1, device=dev, dtype=f32)
             mt_bufs += [dummy, dummy, dummy, 2]
@@ -315,8 +420,9 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
                 lx, log_f = exchange._sl_table(torch.float64, torch.device("cpu"))
                 kind = 1.0 if pool.lineshape == "lorentzian" else 2.0
                 cut = 0.0 if pool.cutoff is None else float(pool.cutoff)
-                line = torch.tensor([kind, cut, float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN,
-                                     float(len(lx))], dtype=f32)
+                line = torch.tensor(
+                    [kind, cut, float(lx[0]), float(lx[1] - lx[0]), exchange._SL_XMIN, float(len(lx))], dtype=f32
+                )
             mt_bufs += [frf.to(dev, f32).contiguous(), line.to(dev), log_f.reshape(-1).to(dev, f32).contiguous(), 1]
     else:
         dummy = torch.zeros(1, device=dev, dtype=f32)
@@ -361,12 +467,24 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             ax = res.axis if res.axis is not None else torch.zeros(n, 3, dtype=torch.float64)
             geom = torch.cat([res.size[None], ax.T, centre.T]).to(dev, f32).contiguous()
             geom_bufs = [wsub.to(dev), geom, KINDS.index(res.kind) + 1]
-        walk_bufs = [start.T.to(dev, f32).contiguous(), chol.to(dev, f32).contiguous(),
-                     int(seed) & 0xFFFFFFFF, (int(seed) >> 32) & 0xFFFFFFFF, *geom_bufs]
+        walk_bufs = [
+            start.T.to(dev, f32).contiguous(),
+            chol.to(dev, f32).contiguous(),
+            int(seed) & 0xFFFFFFFF,
+            (int(seed) >> 32) & 0xFFFFFFFF,
+            *geom_bufs,
+        ]
     else:  # motion alone: the tissue-frame position stays r0
         dz = torch.zeros(1, device=dev, dtype=f32)
-        walk_bufs = [r_start.T.to(dev, f32).contiguous() if phantom.motion is not None else dz, dz, 0, 0,
-                     torch.zeros(1, device=dev, dtype=torch.int32), dz, 0]
+        walk_bufs = [
+            r_start.T.to(dev, f32).contiguous() if phantom.motion is not None else dz,
+            dz,
+            0,
+            0,
+            torch.zeros(1, device=dev, dtype=torch.int32),
+            dz,
+            0,
+        ]
     move_bufs = [torch.zeros(1, device=dev, dtype=f32), torch.zeros(1, device=dev, dtype=f32)]
     if phantom.motion is not None:
         mo = phantom.motion
@@ -394,7 +512,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         for k, q in enumerate(pools):
             q = q.expand(n, pd64)
             init[5 + 3 * k] = q.f.detach() * pd64
-            params[5 * k: 5 * k + 5] = torch.stack([q.f, q.k, 1 / q.t1, 1 / q.t2, q.dw]).detach()
+            params[5 * k : 5 * k + 5] = torch.stack([q.f, q.k, 1 / q.t1, 1 / q.t2, q.dw]).detach()
         if pool is not None:
             init[nc - 1] = mb.detach().double().cpu()
         hi = init.float()
@@ -410,8 +528,23 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     conc_b, mode_flag = conc_buf
     U_b, modes_b, nsub_b, nj_v = gen_bufs
     P_b, chol_b, seed_lo, seed_hi, wsub_b, geom_b, kind_v = walk_bufs
-    bufs = (MB, pool_b, frf_b, line_b, logf_b, conc_b, U_b, modes_b, nsub_b, P_b, chol_b, wsub_b, geom_b, *move_bufs,
-            *map_bufs)
+    bufs = (
+        MB,
+        pool_b,
+        frf_b,
+        line_b,
+        logf_b,
+        conc_b,
+        U_b,
+        modes_b,
+        nsub_b,
+        P_b,
+        chol_b,
+        wsub_b,
+        geom_b,
+        *move_bufs,
+        *map_bufs,
+    )
 
     # NUFFT readouts: run starts, one merged free segment per run appended after the sequence (the jump),
     # the grid rows after the samples in sig
@@ -424,13 +557,15 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             raise ValueError("nufft_terms must be 1..8")
         n_r, dt_r = runs[0][1], float(seq.dt[runs[0][0]])
         ng = 2 * n_r + (2 * n_r) % 2
-        nodes = 0.5 * (dt_r + n_r * dt_r) + 0.5 * (n_r * dt_r - dt_r) * np.cos(np.pi * (2 * np.arange(terms) + 1) / (2 * terms))
+        nodes = 0.5 * (dt_r + n_r * dt_r) + 0.5 * (n_r * dt_r - dt_r) * np.cos(
+            np.pi * (2 * np.arange(terms) + 1) / (2 * terms)
+        )
         nu[:6] = torch.tensor([ng, width, terms, 2.30 * width, n_adc, NUFFT_WMAX], dtype=torch.float64)
-        nu[6:6 + terms] = torch.from_numpy(nodes)
+        nu[6 : 6 + terms] = torch.from_numpy(nodes)
         merged = []
         for r, (a, k) in enumerate(runs):
             run_of[a] = r
-            nu[NU_HEAD + 3 * r: NU_HEAD + 3 * r + 3] = torch.tensor([k, S + r, k // 2 + 1], dtype=torch.float64)
+            nu[NU_HEAD + 3 * r : NU_HEAD + 3 * r + 3] = torch.tensor([k, S + r, k // 2 + 1], dtype=torch.float64)
             row = segs[a].clone()
             row[0], row[1], row[2], row[6] = k * float(seq.dt[a]), 0.0, 0.0, 0.0
             merged.append(row)
@@ -462,8 +597,20 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         pinfo = torch.tensor([[a, k] for a, k, _ in pulses], dtype=torch.int32).reshape(-1).to(dev)
         U_b = torch.zeros(len(pulses) * K * threads, device=dev, dtype=f32)
         prm_p = torch.tensor([n, threads, len(pulses), int(pool is not None)], dtype=torch.int32).to(dev)
-        getattr(lib, "pulse_maps" + suffix)(U_b, spins, segs, flags, mt_bufs[1], mt_bufs[2], mt_bufs[3], mt_bufs[4],
-                                            pinfo, prm_p, threads=len(pulses) * threads, group_size=group)
+        getattr(lib, "pulse_maps" + suffix)(
+            U_b,
+            spins,
+            segs,
+            flags,
+            mt_bufs[1],
+            mt_bufs[2],
+            mt_bufs[3],
+            mt_bufs[4],
+            pinfo,
+            prm_p,
+            threads=len(pulses) * threads,
+            group_size=group,
+        )
         bufs = (*bufs[:6], U_b, *bufs[7:])
     run_of, nu_b = run_of.to(dev), nu.to(dev, f32).contiguous()
     spans = runs + [(s_, k) for _, k, occ in pulses for s_, _ in occ]
@@ -479,10 +626,34 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     starts = bounds
     ends = bounds[1:] + [S]
     tiles = (n_tiles, threads) if mma else (0, 0)
-    prms = torch.from_numpy(np.array([[n, n_coils, s0, s1, *tiles, mt_flag, mode_flag, nj_v, seed_lo, seed_hi,
-                                       kind_v, int(phantom.motion is not None), int(phantom.diffusion is not None), mapped,
-                                       int(fmove), int(bool(runs)), int(bool(pulses)), pbase] for s0, s1 in zip(starts, ends)],
-                                     dtype=np.uint32).view(np.int32)).to(dev)
+    prms = torch.from_numpy(
+        np.array(
+            [
+                [
+                    n,
+                    n_coils,
+                    s0,
+                    s1,
+                    *tiles,
+                    mt_flag,
+                    mode_flag,
+                    nj_v,
+                    seed_lo,
+                    seed_hi,
+                    kind_v,
+                    int(phantom.motion is not None),
+                    int(phantom.diffusion is not None),
+                    mapped,
+                    int(fmove),
+                    int(bool(runs)),
+                    int(bool(pulses)),
+                    pbase,
+                ]
+                for s0, s1 in zip(starts, ends)
+            ],
+            dtype=np.uint32,
+        ).view(np.int32)
+    ).to(dev)
 
     ckpts = []
     mb_row = mt_bufs[0][None] if pool is not None else torch.zeros(1, n, device=dev, dtype=f32)
@@ -490,26 +661,55 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         if keep:  # the state before this dispatch: m (3), mb, their low parts (4)
             ckpts.append(torch.cat([M, mb_row, lo_buf]).clone())
         if mma:
-            getattr(lib, "bloch_chunk_mma" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
-                                                     *bm_bufs, fm_buf, lo_buf, run_of, nu_b, threads=threads,
-                                                     group_size=group)
+            getattr(lib, "bloch_chunk_mma" + suffix)(
+                M,
+                spins,
+                sens,
+                segs,
+                flags,
+                rows,
+                sig,
+                *bufs,
+                prms[c],
+                *bm_bufs,
+                fm_buf,
+                lo_buf,
+                run_of,
+                nu_b,
+                threads=threads,
+                group_size=group,
+            )
         else:
-            getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
-                                                 *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
+            getattr(lib, "bloch_chunk" + suffix)(
+                M,
+                spins,
+                sens,
+                segs,
+                flags,
+                rows,
+                sig,
+                *bufs,
+                prms[c],
+                *bm_bufs,
+                fm_buf,
+                lo_buf,
+                threads=threads,
+                group_size=group,
+            )
     backend.synchronize()
     full = sig.cpu()
     sig = full[: n_adc * n_coils * 2].view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
     if runs:  # the grids: FFT, deconvolve the kernel, recombine the decay terms, demodulate, add to the samples
         width, terms = nufft
-        grid = full[n_adc * n_coils * 2:].view(len(runs), terms, ng, n_coils, 2).double()
+        grid = full[n_adc * n_coils * 2 :].view(len(runs), terms, ng, n_coils, 2).double()
         F = torch.fft.fft(torch.complex(grid[..., 0], grid[..., 1]), dim=2)
         n_r, dt_r = runs[0][1], float(seq.dt[runs[0][0]])
         kp = np.arange(-(n_r // 2), n_r - n_r // 2)
         hat = torch.from_numpy(_es_hat(kp, ng, width, 2.30 * width))
         Fk = F[:, :, torch.from_numpy(kp % ng), :] / hat[None, None, :, None]  # (runs, terms, n, C)
         tt = (np.arange(n_r) + 1) * dt_r
-        nodes = nu[6:6 + terms].numpy()
+        nodes = nu[6 : 6 + terms].numpy()
         lag = np.ones((terms, n_r))
         for a_ in range(terms):
             for b_ in range(terms):
@@ -525,8 +725,8 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         signal = signal.to(torch.complex64)
     if pools:
         st = bm_bufs[0].cpu().double()
-        st = (st[:len(st) // 2] + st[len(st) // 2:]).float()
-        m_pools = torch.stack([st[3 + 3 * k: 6 + 3 * k].T for k in range(len(pools))], 1).contiguous()
+        st = (st[: len(st) // 2] + st[len(st) // 2 :]).float()
+        m_pools = torch.stack([st[3 + 3 * k : 6 + 3 * k].T for k in range(len(pools))], 1).contiguous()
         return SimResult(signal, st[:3].T.contiguous(), st[-1].clone() if pool is not None else None, m_pools)
     lo = lo_buf.cpu().double()
     m = (M.cpu().double() + lo[:3]).float().T.contiguous()
@@ -534,6 +734,23 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     if not keep:
         return res
     sens_d = torch.stack([coils.real, coils.imag], -1).reshape(n, 2 * n_coils).T.to(dev, f32).contiguous()
-    return res, dict(ckpts=ckpts, spins=spins, sens=sens_d, segs=segs, flags=flags, rows=rows, pool=mt_bufs[1],
-                     frf=mt_bufs[2], line=mt_bufs[3], log_f=mt_bufs[4], mt=mt_flag, conc=conc_buf[0], mode=conc_buf[1],
-                     n_adc=n_adc, n_coils=n_coils, threads=threads, suffix=suffix, sig=sig)
+    return res, dict(
+        ckpts=ckpts,
+        spins=spins,
+        sens=sens_d,
+        segs=segs,
+        flags=flags,
+        rows=rows,
+        pool=mt_bufs[1],
+        frf=mt_bufs[2],
+        line=mt_bufs[3],
+        log_f=mt_bufs[4],
+        mt=mt_flag,
+        conc=conc_buf[0],
+        mode=conc_buf[1],
+        n_adc=n_adc,
+        n_coils=n_coils,
+        threads=threads,
+        suffix=suffix,
+        sig=sig,
+    )

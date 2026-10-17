@@ -29,8 +29,7 @@ def ernst(t1, t2, tr, te, flip_deg):
 def voxel(k, t1, t2, db0=0.0):
     x = torch.arange(k, dtype=torch.float64) * (L / k)
     full = lambda v: torch.full((k,), v, dtype=torch.float64)
-    return Phantom(pos=torch.stack([x, 0 * x, 0 * x], dim=-1), pd=full(1.0), t1=full(t1), t2=full(t2),
-                   db0=full(db0))
+    return Phantom(pos=torch.stack([x, 0 * x, 0 * x], dim=-1), pd=full(1.0), t1=full(t1), t2=full(t2), db0=full(db0))
 
 
 def unit_grad(duration):

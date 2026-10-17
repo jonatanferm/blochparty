@@ -72,7 +72,9 @@ def nominal(meas: int = 1) -> np.ndarray:
     edges = DWELL * np.arange(-1, N)  # cell i is (edges[i], edges[i + 1]]
     out = np.zeros((g.shape[1], N))
     for j in range(g.shape[1]):
-        cum = np.concatenate([[0], np.cumsum((g[1:, j] + g[:-1, j]) / 2 * 10e-6)])  # exact integral of the linear pieces
+        cum = np.concatenate(
+            [[0], np.cumsum((g[1:, j] + g[:-1, j]) / 2 * 10e-6)]
+        )  # exact integral of the linear pieces
         m = np.interp(edges, tg, cum, left=0, right=cum[-1])
         # within a linear piece the integral is quadratic: interpolate it exactly at the cell edges
         for k, e in enumerate(edges):
@@ -94,8 +96,11 @@ def estimate(o, i):
     so, si = spectrum(o), spectrum(i)
     h = (so * si.conj()).sum(0) / (np.abs(si) ** 2).sum(0)
     f = np.fft.fftfreq(N, DWELL)
-    w = np.where(np.abs(f) < 0.8 * F_CUT, 1.0,
-                 np.where(np.abs(f) < F_CUT, 0.5 * (1 + np.cos(math.pi * (np.abs(f) - 0.8 * F_CUT) / (0.2 * F_CUT))), 0.0))
+    w = np.where(
+        np.abs(f) < 0.8 * F_CUT,
+        1.0,
+        np.where(np.abs(f) < F_CUT, 0.5 * (1 + np.cos(math.pi * (np.abs(f) - 0.8 * F_CUT) / (0.2 * F_CUT))), 0.0),
+    )
     return h * w
 
 
@@ -143,8 +148,15 @@ def played(model, i_cells: np.ndarray, axis: str) -> tuple[np.ndarray, np.ndarra
     s = len(i_cells)
     g = torch.zeros(s, 3, dtype=torch.float64)
     g[:, "xyz".index(axis)] = torch.from_numpy(i_cells) * GAMMA_BAR  # mT/m -> Hz/m
-    seq = Sequence(torch.full((s,), DWELL, dtype=torch.float64), torch.zeros(s, 2, dtype=torch.float64), g,
-                   torch.zeros(s, dtype=torch.float64), [False] * s, [False] * s, [False] * s)
+    seq = Sequence(
+        torch.full((s,), DWELL, dtype=torch.float64),
+        torch.zeros(s, 2, dtype=torch.float64),
+        g,
+        torch.zeros(s, dtype=torch.float64),
+        [False] * s,
+        [False] * s,
+        [False] * s,
+    )
     out = apply_girf(seq, model)
     return out.grad[:, "xyz".index(axis)].numpy() / GAMMA_BAR, out.b0_offset.numpy()
 
@@ -177,9 +189,11 @@ def main():
         band = np.abs(f) < 10e3
         # the authors' input is point samples at t_i, ours the cell (t_{i-1}, t_i]: half a dwell apart
         diff = np.abs(h1[ax][band] - a1[ax][band] * np.exp(2j * math.pi * f[band] * DWELL / 2)).max()
-        print(f"G{ax} Meas1: ours |H(0)| {abs(h1[ax][0]):.4f}, delay {delay_of(h1[ax]) * 1e6:+.2f} us; authors' "
-              f"(coils separate, their input frame) delay {delay_of(a1[ax]) * 1e6:+.2f} us; max |H_ours - H_authors| "
-              f"< 10 kHz after the half-dwell frame shift {diff:.3f}; B0 term at DC {hb1[ax][0].real:+.3f} Hz per mT/m ({time.perf_counter() - t0:.0f} s)")
+        print(
+            f"G{ax} Meas1: ours |H(0)| {abs(h1[ax][0]):.4f}, delay {delay_of(h1[ax]) * 1e6:+.2f} us; authors' "
+            f"(coils separate, their input frame) delay {delay_of(a1[ax]) * 1e6:+.2f} us; max |H_ours - H_authors| "
+            f"< 10 kHz after the half-dwell frame shift {diff:.3f}; B0 term at DC {hb1[ax][0].real:+.3f} Hz per mT/m ({time.perf_counter() - t0:.0f} s)"
+        )
     import torch
 
     from blochparty.girf import GIRF
@@ -188,8 +202,10 @@ def main():
     delay = {ax: delay_of(h1[ax]) for ax in "xyz"}
     pure = GIRF.identity(torch.tensor([delay[a] for a in "xyz"], dtype=torch.float64))
     print(f"impulse-response window keeps DC gain {[round(float(full.taps[j, j].sum()), 4) for j in range(3)]}")
-    print("Meas2 (8 months later), predicted from Meas1: rms error / peak over 1.9-3.5 ms, median over 18 blips "
-          "(max); moment error at 3.5 ms / blip moment")
+    print(
+        "Meas2 (8 months later), predicted from Meas1: rms error / peak over 1.9-3.5 ms, median over 18 blips "
+        "(max); moment error at 3.5 ms / blip moment"
+    )
     for ax in "xyz":
         for pol, sign in (("Positive", 1), ("Negative", -1)):
             o2, b2 = outputs(2, ax, pol)
@@ -200,7 +216,9 @@ def main():
                 else:
                     pred = np.stack([played(model, sign * i2[j], ax)[0] for j in range(len(i2))])
                 rel, mom = errors(pred, o2, win)
-                rows[name] = f"{np.median(rel) * 100:5.2f} ({rel.max() * 100:5.2f}) %, moment {np.median(mom) * 100:.2f} %"
+                rows[name] = (
+                    f"{np.median(rel) * 100:5.2f} ({rel.max() * 100:5.2f}) %, moment {np.median(mom) * 100:.2f} %"
+                )
             print(f"  G{ax} {pol}: " + "; ".join(f"{k} {v}" for k, v in rows.items()))
     # B0 term: the phase it accumulates; the part that flips with the blip (a GIRF predicts) vs
     # the part that does not (drift left after the reference correction, concomitant fields)
@@ -210,9 +228,11 @@ def main():
         _, bn = outputs(2, ax, "Negative")
         odd = 2 * math.pi * np.cumsum((bp - bn) / 2, axis=1)[:, ten] * DWELL
         even = 2 * math.pi * np.cumsum((bp + bn) / 2, axis=1)[:, ten] * DWELL
-        pred = np.array([2 * math.pi * played(full, i2[j], ax)[1][:ten + 1].sum() * DWELL for j in range(len(i2))])
-        print(f"  B0 term G{ax}, phase at 10 ms: odd part {np.abs(odd).max():.3f} rad max, predicted {np.abs(pred).max():.3f}, "
-              f"rms(odd - predicted) {np.sqrt(np.mean((odd - pred) ** 2)):.3f}; even part {np.abs(even).max():.3f} rad max")
+        pred = np.array([2 * math.pi * played(full, i2[j], ax)[1][: ten + 1].sum() * DWELL for j in range(len(i2))])
+        print(
+            f"  B0 term G{ax}, phase at 10 ms: odd part {np.abs(odd).max():.3f} rad max, predicted {np.abs(pred).max():.3f}, "
+            f"rms(odd - predicted) {np.sqrt(np.mean((odd - pred) ** 2)):.3f}; even part {np.abs(even).max():.3f} rad max"
+        )
     print(f"done ({time.perf_counter() - t0:.0f} s)")
 
 

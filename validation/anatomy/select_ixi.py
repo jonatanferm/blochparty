@@ -11,6 +11,7 @@ SD; defaults from r27's real slices, gap.py features: area 7129 +- 921 px at 1.7
 
     uv run python validation/anatomy/select_ixi.py --count 64 --out validation/anatomy/data/ixi/selection.json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -25,6 +26,7 @@ HERE = Path(__file__).resolve().parent
 def proxies(t2_path):
     import nibabel as nib
     from scipy import ndimage
+
     img = nib.load(t2_path)
     v = np.asarray(img.dataobj, dtype=np.float32)
     aff = img.affine
@@ -48,8 +50,11 @@ def proxies(t2_path):
     per = csf.sum((1, 2)).astype(float)
     zc = int(np.argmax(ndimage.uniform_filter1d(per, int(10 / dz) + 1)))
     k = max(1, int(round(30 / dz)))
-    return {"area_cm2": float(head[zc].sum() * inplane / 100), "csf_share": float(csf[zc:zc + k].sum() / max(inner[zc:zc + k].sum(), 1)),
-            "level": zc}
+    return {
+        "area_cm2": float(head[zc].sum() * inplane / 100),
+        "csf_share": float(csf[zc : zc + k].sum() / max(inner[zc : zc + k].sum(), 1)),
+        "level": zc,
+    }
 
 
 def main():
@@ -60,9 +65,13 @@ def main():
     ap.add_argument("--csf", default="0.152,0.068", help="target CSF-bright share mean,SD")
     ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--calibration", type=Path, default=HERE / "ixi_calibration_r27.json",
-                    help="JSON {subjects: {id: {area_cm2, csf_share}}} measured on simulated slices of prepared subjects "
-                         "(gap.py features): a linear fit maps the raw-T2 proxies onto those units before the targets apply")
+    ap.add_argument(
+        "--calibration",
+        type=Path,
+        default=HERE / "ixi_calibration_r27.json",
+        help="JSON {subjects: {id: {area_cm2, csf_share}}} measured on simulated slices of prepared subjects "
+        "(gap.py features): a linear fit maps the raw-T2 proxies onto those units before the targets apply",
+    )
     args = ap.parse_args()
     cache = args.root / "proxies.json"
     prox = json.loads(cache.read_text()) if cache.exists() else {}
@@ -76,17 +85,24 @@ def main():
         except Exception as e:  # a broken file: skip, say so
             print(f"{p.name}: {e}", flush=True)
             continue
-        print(f"IXI{int(sid):03d} age {demo[sid]['age']:.0f}: area {prox[sid]['area_cm2']:.0f} cm2, csf {prox[sid]['csf_share']:.3f}", flush=True)
+        print(
+            f"IXI{int(sid):03d} age {demo[sid]['age']:.0f}: area {prox[sid]['area_cm2']:.0f} cm2, csf {prox[sid]['csf_share']:.3f}",
+            flush=True,
+        )
         cache.write_text(json.dumps(prox, indent=1))
     ids = sorted(prox, key=int)
-    a = np.array([prox[s]["area_cm2"] for s in ids]); c = np.array([prox[s]["csf_share"] for s in ids])
+    a = np.array([prox[s]["area_cm2"] for s in ids])
+    c = np.array([prox[s]["csf_share"] for s in ids])
     ta, tc = (float(x) for x in args.area.split(",")), (float(x) for x in args.csf.split(","))
     ta, tc = tuple(ta), tuple(tc)
-    if args.calibration and args.calibration.exists():  # proxies -> simulated-slice units, fitted on the prepared subjects
+    if (
+        args.calibration and args.calibration.exists()
+    ):  # proxies -> simulated-slice units, fitted on the prepared subjects
         cal = json.loads(args.calibration.read_text())["subjects"]
         both = [s for s in ids if s in cal]
         for name, x, key in (("area", a, "area_cm2"), ("csf", c, "csf_share")):
-            px = np.array([prox[s][key] for s in both]); y = np.array([cal[s][key] for s in both])
+            px = np.array([prox[s][key] for s in both])
+            y = np.array([cal[s][key] for s in both])
             slope, icpt = np.polyfit(px, y, 1)
             r = np.corrcoef(px, y)[0, 1]
             print(f"calibration {name}: realism = {slope:.3f} x proxy + {icpt:.3f} (r {r:.2f}, n {len(both)})")
@@ -94,11 +110,15 @@ def main():
                 a = slope * a + icpt
             else:
                 c = slope * c + icpt
-    print(f"{len(ids)} subjects: area {a.mean():.0f} +- {a.std():.0f} (target {ta[0]} +- {ta[1]}), csf {c.mean():.3f} +- {c.std():.3f} "
-          f"(target {tc[0]} +- {tc[1]})")
+    print(
+        f"{len(ids)} subjects: area {a.mean():.0f} +- {a.std():.0f} (target {ta[0]} +- {ta[1]}), csf {c.mean():.3f} +- {c.std():.3f} "
+        f"(target {tc[0]} +- {tc[1]})"
+    )
+
     # importance weights: target density over the pool's own density (Gaussian fits), on both proxies
     def dens(x, mu, sd):
         return np.exp(-0.5 * ((x - mu) / sd) ** 2) / sd
+
     w = dens(a, *ta) / dens(a, a.mean(), a.std() + 1e-9) * dens(c, *tc) / dens(c, c.mean(), c.std() + 1e-9)
     w /= w.sum()
     rng = np.random.default_rng(args.seed)
@@ -106,12 +126,23 @@ def main():
     pick = np.array([ids.index(s) for s in chosen])
     ca, cc = a[pick], c[pick]  # in the calibrated units
     ages = np.array([demo[s]["age"] for s in chosen])
-    print(f"chosen {len(chosen)}: area {ca.mean():.0f} +- {ca.std():.0f}, csf {cc.mean():.3f} +- {cc.std():.3f}, "
-          f"ages {ages.min():.0f}-{ages.max():.0f} (median {np.median(ages):.0f})")
+    print(
+        f"chosen {len(chosen)}: area {ca.mean():.0f} +- {ca.std():.0f}, csf {cc.mean():.3f} +- {cc.std():.3f}, "
+        f"ages {ages.min():.0f}-{ages.max():.0f} (median {np.median(ages):.0f})"
+    )
     print("ids:", ",".join(sorted(chosen, key=int)))
     if args.out:
-        args.out.write_text(json.dumps({"targets": {"area_cm2": ta, "csf_share": tc}, "ids": sorted(chosen, key=int),
-                                        "proxies": {s: prox[s] for s in chosen}, "weights": dict(zip(ids, w.round(5).tolist()))}, indent=1))
+        args.out.write_text(
+            json.dumps(
+                {
+                    "targets": {"area_cm2": ta, "csf_share": tc},
+                    "ids": sorted(chosen, key=int),
+                    "proxies": {s: prox[s] for s in chosen},
+                    "weights": dict(zip(ids, w.round(5).tolist())),
+                },
+                indent=1,
+            )
+        )
 
 
 if __name__ == "__main__":

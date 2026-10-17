@@ -38,6 +38,7 @@ class _Opts(NamedTuple):
     memory: float
     backend: object
 
+
 N_SPIN_GRADS = 20  # rows of the adjoint's per-spin gradients: pos (3), db0, pd, r1, r2, b1, conc (7), bound (5)
 
 
@@ -45,22 +46,68 @@ class _GPUSimulate(torch.autograd.Function):
     """The forward kernels with checkpoints; backward: bloch_adjoint, one dispatch per interval."""
 
     @staticmethod
-    def forward(ctx, opts: _Opts, pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc,
-                bound, rf_freq):
+    def forward(
+        ctx,
+        opts: _Opts,
+        pos,
+        pd,
+        t1,
+        t2,
+        db0,
+        coils_ri,
+        dt,
+        rf,
+        grad,
+        adc_phase,
+        m0,
+        b1,
+        b0_offset,
+        conc,
+        bound,
+        rf_freq,
+    ):
         ctx.set_materialize_grads(False)
         d = lambda t: None if t is None else t.detach()
-        ph = Phantom(d(pos), d(pd), d(t1), d(t2), d(db0), b1=d(b1),
-                     bound=None if bound is None else exchange.BoundPool(*d(bound).unbind(-1), lineshape=opts.lineshape,
-                                                                         cutoff=opts.cutoff, memory=opts.memory))
-        sq = Sequence(d(dt), d(rf), d(grad), d(adc_phase), opts.is_rf, opts.adc, opts.spoil, {}, d(b0_offset), d(rf_freq))
+        ph = Phantom(
+            d(pos),
+            d(pd),
+            d(t1),
+            d(t2),
+            d(db0),
+            b1=d(b1),
+            bound=None
+            if bound is None
+            else exchange.BoundPool(
+                *d(bound).unbind(-1), lineshape=opts.lineshape, cutoff=opts.cutoff, memory=opts.memory
+            ),
+        )
+        sq = Sequence(
+            d(dt), d(rf), d(grad), d(adc_phase), opts.is_rf, opts.adc, opts.spoil, {}, d(b0_offset), d(rf_freq)
+        )
         coils = torch.complex(coils_ri[..., 0], coils_ri[..., 1]).detach()
         from ...fields import SpinFields
 
-        res, cx = _forward(ph, sq, coils, d(m0), opts.every, 256, None, opts.mma, 0, None, True,
-                           SpinFields(d(pos), d(conc), opts.mode), keep=True, backend=opts.backend)
+        res, cx = _forward(
+            ph,
+            sq,
+            coils,
+            d(m0),
+            opts.every,
+            256,
+            None,
+            opts.mma,
+            0,
+            None,
+            True,
+            SpinFields(d(pos), d(conc), opts.mode),
+            keep=True,
+            backend=opts.backend,
+        )
         ctx.opts, ctx.cx = opts, cx
-        ctx.like = [None if t is None else (t.dtype, t.device) for t in
-                    (pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq)]
+        ctx.like = [
+            None if t is None else (t.dtype, t.device)
+            for t in (pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq)
+        ]
         sig = torch.view_as_real(res.signal.T.contiguous())  # (n_adc, C, 2)
         m = res.m if res.m_bound is None else torch.cat([res.m, res.m_bound[:, None]], 1)
         ctx.save_for_backward(t1, t2, adc_phase, sig, bound, b1, conc)
@@ -84,7 +131,9 @@ class _GPUSimulate(torch.autograd.Function):
         if g_sig is not None and cx["n_adc"]:  # dL/d(raw coil sums): dL/dsignal rotated by exp(+i psi)
             psi = adc_phase.detach().double().cpu()[adc_idx][:, None]
             gr, gi = g_sig[..., 0].double().cpu(), g_sig[..., 1].double().cpu()
-            h = torch.stack([gr * torch.cos(psi) - gi * torch.sin(psi), gr * torch.sin(psi) + gi * torch.cos(psi)], -1).float()
+            h = torch.stack(
+                [gr * torch.cos(psi) - gi * torch.sin(psi), gr * torch.sin(psi) + gi * torch.cos(psi)], -1
+            ).float()
         lam = torch.zeros(4, n, dtype=f32)
         if g_m is not None:
             lam[: g_m.shape[1]] = g_m.detach().float().cpu().T
@@ -109,16 +158,64 @@ class _GPUSimulate(torch.autograd.Function):
         replay = getattr(lib, "bloch_replay" + cx["suffix"])
         n_int = len(cx["ckpts"])
         u32 = lambda rows: torch.from_numpy(np.array(rows, dtype=np.uint32).view(np.int32)).to(dev)
-        prms = u32([[n, nc, c * every, min(S, (c + 1) * every), cx["mt"], cx["mode"], need_seg, need_sens,
-                     g_sig is not None, every] for c in range(n_int)])
+        prms = u32(
+            [
+                [
+                    n,
+                    nc,
+                    c * every,
+                    min(S, (c + 1) * every),
+                    cx["mt"],
+                    cx["mode"],
+                    need_seg,
+                    need_sens,
+                    g_sig is not None,
+                    every,
+                ]
+                for c in range(n_int)
+            ]
+        )
         reds = u32([[sgs, every, c * every, min(S, (c + 1) * every) - c * every] for c in range(n_int)])
         for c in reversed(range(n_int)):
             s0, s1 = c * every, min(S, (c + 1) * every)
             prm = prms[c]
-            replay(cx["ckpts"][c], cx["spins"], cx["segs"], cx["flags"], cx["pool"], cx["frf"], cx["line"], cx["log_f"],
-                   cx["conc"], R, prm, threads=threads, group_size=256)
-            kernel(cx["ckpts"][c], cx["spins"], sens, cx["segs"], cx["flags"], cx["rows"], h, cx["pool"], cx["frf"],
-                   cx["line"], cx["log_f"], cx["conc"], R, lam, GS, GC, GSEG, prm, threads=threads, group_size=256)
+            replay(
+                cx["ckpts"][c],
+                cx["spins"],
+                cx["segs"],
+                cx["flags"],
+                cx["pool"],
+                cx["frf"],
+                cx["line"],
+                cx["log_f"],
+                cx["conc"],
+                R,
+                prm,
+                threads=threads,
+                group_size=256,
+            )
+            kernel(
+                cx["ckpts"][c],
+                cx["spins"],
+                sens,
+                cx["segs"],
+                cx["flags"],
+                cx["rows"],
+                h,
+                cx["pool"],
+                cx["frf"],
+                cx["line"],
+                cx["log_f"],
+                cx["conc"],
+                R,
+                lam,
+                GS,
+                GC,
+                GSEG,
+                prm,
+                threads=threads,
+                group_size=256,
+            )
             if need_seg:
                 lib.seg_reduce(GSEG, SEG, reds[c], threads=8 * (s1 - s0))
         opts.backend.synchronize()
@@ -151,11 +248,17 @@ class _GPUSimulate(torch.autograd.Function):
         if need[11]:
             out[11] = GS[7]
         if need[13]:
-            out[13] = GS[8:8 + conc.shape[1]].T.contiguous()
+            out[13] = GS[8 : 8 + conc.shape[1]].T.contiguous()
         if need[14]:  # f, k, t1b (r1b = 1 / t1b), t2b, dw
             t1b = bound.detach().double().cpu()[:, 2]
             out[14] = torch.stack([GS[15], GS[16], -GS[17] / t1b**2, GS[18], GS[19]], -1)
-        return (None, *[None if g is None or not need[i] else g.to(dtype=ctx.like[i][0], device=ctx.like[i][1]) for i, g in enumerate(out)])
+        return (
+            None,
+            *[
+                None if g is None or not need[i] else g.to(dtype=ctx.like[i][0], device=ctx.like[i][1])
+                for i, g in enumerate(out)
+            ],
+        )
 
 
 def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps, mma, every, backend) -> SimResult:
@@ -168,8 +271,12 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
     if maps is not None:  # static spins: the maps sampled at the true positions, differentiably
         from ...maps import sample
 
-        v = sample(maps.channels(pd.dtype), torch.as_tensor(maps.origin, dtype=pd.dtype),
-                   torch.as_tensor(maps.spacing, dtype=pd.dtype), phantom.pos)
+        v = sample(
+            maps.channels(pd.dtype),
+            torch.as_tensor(maps.origin, dtype=pd.dtype),
+            torch.as_tensor(maps.spacing, dtype=pd.dtype),
+            phantom.pos,
+        )
         db0 = db0 + v[:, 0]
         b1 = v[:, 1] if b1 is None else b1 * v[:, 1]
         if maps.coils is not None:
@@ -188,11 +295,28 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
     every = every or default_checkpoint_every(len(seq))
     if every % 64:
         raise ValueError(f"checkpoint_every must be a multiple of 64, got {every}")
-    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff, memory,
-                 backend)
-    sig, m = _GPUSimulate.apply(opts, fields.pos, pd, phantom.t1, phantom.t2, db0, torch.view_as_real(coils),
-                                  seq.dt, seq.rf, seq.grad, seq.adc_phase, m0, b1, seq.b0_offset, fields.conc, bound,
-                                  rf_freq)
+    opts = _Opts(
+        list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff, memory, backend
+    )
+    sig, m = _GPUSimulate.apply(
+        opts,
+        fields.pos,
+        pd,
+        phantom.t1,
+        phantom.t2,
+        db0,
+        torch.view_as_real(coils),
+        seq.dt,
+        seq.rf,
+        seq.grad,
+        seq.adc_phase,
+        m0,
+        b1,
+        seq.b0_offset,
+        fields.conc,
+        bound,
+        rf_freq,
+    )
     signal = torch.view_as_complex(sig.contiguous()).T
     if bound is not None:
         return SimResult(signal, m[:, :3], m[:, 3])

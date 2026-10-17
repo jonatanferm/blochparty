@@ -51,8 +51,16 @@ def read_mariepy_maps(path) -> EMMaps:
         plus, minus, mask = (torch.from_numpy(np.asarray(f[k])) for k in ("plus", "minus", "mask"))
     if plus.ndim != 4 or plus.shape != minus.shape or tuple(mask.shape) != tuple(plus.shape[1:]):
         raise ValueError("unexpected map shapes")
-    return EMMaps(plus.to(torch.complex128), minus.to(torch.complex128), mask.bool(), tuple(meta["origin"]),
-                  float(meta["resolution"]), float(meta["frequency_hz"]), list(meta["channels"]), meta)
+    return EMMaps(
+        plus.to(torch.complex128),
+        minus.to(torch.complex128),
+        mask.bool(),
+        tuple(meta["origin"]),
+        float(meta["resolution"]),
+        float(meta["frequency_hz"]),
+        list(meta["channels"]),
+        meta,
+    )
 
 
 def read_noise_resistance(path) -> Tensor:
@@ -64,7 +72,11 @@ def read_noise_resistance(path) -> Tensor:
 def transmit_b1(em: EMMaps, drive: Tensor | None = None) -> Tensor:
     """(nx, ny, nz) complex B1+ [T] of the drive sum_c w_c channel_c (default all 1):
     conj(sum_c w_c minus_c) / 2."""
-    w = torch.ones(em.minus.shape[0], dtype=torch.complex128) if drive is None else torch.as_tensor(drive).to(torch.complex128)
+    w = (
+        torch.ones(em.minus.shape[0], dtype=torch.complex128)
+        if drive is None
+        else torch.as_tensor(drive).to(torch.complex128)
+    )
     return torch.conj(torch.einsum("c,c...->...", w, em.minus)) / 2
 
 
@@ -91,8 +103,14 @@ def _fill(volume: Tensor, mask: Tensor) -> Tensor:
     return volume[(..., *[torch.from_numpy(i) for i in idx])]
 
 
-def field_maps(transmit: EMMaps | None = None, receive: EMMaps | None = None, *, drive: Tensor | None = None,
-               reference: str | tuple = "median", coil_scale: float | None = None) -> FieldMaps:
+def field_maps(
+    transmit: EMMaps | None = None,
+    receive: EMMaps | None = None,
+    *,
+    drive: Tensor | None = None,
+    reference: str | tuple = "median",
+    coil_scale: float | None = None,
+) -> FieldMaps:
     """``FieldMaps`` (arrays (z, y, x)) from a transmit and / or a receive map set on one grid.
 
     ``b1`` = |B1+| / reference, with ``reference`` "median" (the median |B1+| over the body, the
@@ -125,5 +143,12 @@ def field_maps(transmit: EMMaps | None = None, receive: EMMaps | None = None, *,
     return FieldMaps(ref.origin, (h, h, h), b1=b1, coils=coils)
 
 
-__all__ = ["EMMaps", "field_maps", "quadrature_drive", "read_mariepy_maps", "read_noise_resistance",
-           "receive_weights", "transmit_b1"]
+__all__ = [
+    "EMMaps",
+    "field_maps",
+    "quadrature_drive",
+    "read_mariepy_maps",
+    "read_noise_resistance",
+    "receive_weights",
+    "transmit_b1",
+]

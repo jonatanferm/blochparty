@@ -66,8 +66,9 @@ class _Driver:
         if path.exists():
             return path.read_bytes()
         prog = ctypes.c_void_p()
-        self._nvrtc_check(self.nvrtc.nvrtcCreateProgram(ctypes.byref(prog), source.encode(), f"{name}.cu".encode(),
-                                                        0, None, None))
+        self._nvrtc_check(
+            self.nvrtc.nvrtcCreateProgram(ctypes.byref(prog), source.encode(), f"{name}.cu".encode(), 0, None, None)
+        )
         try:
             opts = (ctypes.c_char_p * len(options))(*[o.encode() for o in options])
             code = self.nvrtc.nvrtcCompileProgram(prog, len(options), opts)

@@ -20,16 +20,28 @@ f64 = torch.float64
 
 def spins(pos, **kw):
     n = pos.shape[0]
-    return bp.Phantom(pos=pos, pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
-                      t2=torch.full((n,), 1e6, dtype=f64), db0=torch.zeros(n, dtype=f64), **kw)
+    return bp.Phantom(
+        pos=pos,
+        pd=torch.ones(n, dtype=f64),
+        t1=torch.full((n,), 1e6, dtype=f64),
+        t2=torch.full((n,), 1e6, dtype=f64),
+        db0=torch.zeros(n, dtype=f64),
+        **kw,
+    )
 
 
 def test_phase_contrast_exact():
     v = torch.tensor([[0.3, 0.0, 0.0], [-0.5, 0.1, 0.0], [0.0, 0.0, 0.0]], dtype=f64)
     ph = spins(torch.tensor([[0.01, 0, 0], [-0.02, 0.01, 0], [0.0, 0, 0]], dtype=f64), motion=bp.Motion(velocity=v))
     g, tau = 2e5, 2e-3
-    seq = (bp.SequenceBuilder().rf(1e-6, flip_deg=90.0).delay(tau, grad=(g, 0, 0)).delay(tau, grad=(-g, 0, 0))
-           .readout(1, 2e-6).build())
+    seq = (
+        bp.SequenceBuilder()
+        .rf(1e-6, flip_deg=90.0)
+        .delay(tau, grad=(g, 0, 0))
+        .delay(tau, grad=(-g, 0, 0))
+        .readout(1, 2e-6)
+        .build()
+    )
     m = bp.simulate(ph, seq).m
     phase = torch.atan2(m[:, 1], m[:, 0]) - math.pi / 2
     assert torch.allclose(phase, 2 * math.pi * g * v[:, 0] * tau**2, atol=1e-12)
@@ -53,12 +65,16 @@ def test_translation_between_k_space_halves():
     seq = bp.gre_2d(n, n_dummy=0)
     t_line = float(seq.duration) / n
     shift = np.array([0.02, -0.01, 0.0])
-    rig = bp.Motion(rigid=lambda t: (np.broadcast_to(np.eye(3), (len(t), 3, 3)),
-                                     np.where((t >= n // 2 * t_line)[:, None], shift[None], 0.0)))
+    rig = bp.Motion(
+        rigid=lambda t: (
+            np.broadcast_to(np.eye(3), (len(t), 3, 3)),
+            np.where((t >= n // 2 * t_line)[:, None], shift[None], 0.0),
+        )
+    )
     moving = bp.simulate(replace(ph, motion=rig), seq).signal[0].reshape(n, n)
     static = bp.simulate(ph, seq).signal[0].reshape(n, n)
     shifted = bp.simulate(replace(ph, pos=ph.pos + torch.as_tensor(shift)), seq).signal[0].reshape(n, n)
-    ref = torch.cat([static[: n // 2], shifted[n // 2:]])
+    ref = torch.cat([static[: n // 2], shifted[n // 2 :]])
     assert torch.allclose(moving, ref, atol=1e-9 * float(ref.abs().max()))
     assert (shifted - static).abs().max() > 0.1 * static.abs().max()  # the shift matters
 
@@ -83,15 +99,18 @@ def test_inflow_time_of_flight(gpu, velocity):
     # the slice profile
     zp = torch.linspace(-8e-3, 8e-3, 3201, dtype=f64)
     one = bp.SequenceBuilder().sinc_pulse(math.degrees(alpha), 2e-3, slice_thickness=slab, time_bw_product=8)
-    prof = gpu.simulate(spins(torch.stack([torch.zeros_like(zp), torch.zeros_like(zp), zp], -1)),
-                                one.readout(1, 10e-6).build()).m.double()  # before the spoiler
+    prof = gpu.simulate(
+        spins(torch.stack([torch.zeros_like(zp), torch.zeros_like(zp), zp], -1)), one.readout(1, 10e-6).build()
+    ).m.double()  # before the spoiler
     T, L = torch.complex(prof[:, 0], prof[:, 1]).numpy(), prof[:, 2].numpy()
     # an upstream column long enough to feed the slice for the whole run
     dz = 50e-6
     z0 = torch.arange(-(velocity * n_tr * tr + 0.02), 0.01, dz, dtype=f64)
     n = len(z0)
-    ph = spins(torch.stack([torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64), z0], -1), motion=bp.Motion(
-        velocity=torch.tensor([0.0, 0.0, velocity], dtype=f64).expand(n, 3).contiguous()))
+    ph = spins(
+        torch.stack([torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64), z0], -1),
+        motion=bp.Motion(velocity=torch.tensor([0.0, 0.0, velocity], dtype=f64).expand(n, 3).contiguous()),
+    )
     ph = replace(ph, t1=torch.full((n,), t1, dtype=f64))
     sim = gpu.simulate(ph, seq).signal[0].abs().double().numpy()
     t_pulse = np.arange(n_tr) * tr + 1e-3 + float(seq.dt[0])  # pulse centres
@@ -100,7 +119,9 @@ def test_inflow_time_of_flight(gpu, velocity):
     e1 = math.exp(-tr / t1)
     for k in range(n_tr):
         zk = z0.numpy() + velocity * t_pulse[k]
-        tk = np.interp(zk, zp.numpy(), T.real, left=0, right=0) + 1j * np.interp(zk, zp.numpy(), T.imag, left=0, right=0)
+        tk = np.interp(zk, zp.numpy(), T.real, left=0, right=0) + 1j * np.interp(
+            zk, zp.numpy(), T.imag, left=0, right=0
+        )
         lk = np.interp(zk, zp.numpy(), L, left=1, right=1)
         ref.append(abs((mz * tk).sum()))
         mz = 1 + (mz * lk - 1) * e1
@@ -114,12 +135,15 @@ def test_gpu_matches_core_with_all_motion(gpu):
     g = torch.Generator().manual_seed(4)
     n = 1500
     pos = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.04
-    mot = bp.Motion(velocity=(torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.2,
-                    displacement=(torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.004,
-                    waveform=lambda t: np.sin(2 * np.pi * t / 0.05),
-                    rigid=lambda t: tuple(map(np.stack, zip(*[rotation_z(2.0 * x, (0.002, 0.0, 0.0)) for x in t]))))
-    ph = replace(spins(pos, motion=mot), t2=torch.full((n,), 0.08, dtype=f64),
-                 diffusion=torch.full((n,), 2e-9, dtype=f64))
+    mot = bp.Motion(
+        velocity=(torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.2,
+        displacement=(torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.004,
+        waveform=lambda t: np.sin(2 * np.pi * t / 0.05),
+        rigid=lambda t: tuple(map(np.stack, zip(*[rotation_z(2.0 * x, (0.002, 0.0, 0.0)) for x in t]))),
+    )
+    ph = replace(
+        spins(pos, motion=mot), t2=torch.full((n,), 0.08, dtype=f64), diffusion=torch.full((n,), 2e-9, dtype=f64)
+    )
     seq = bp.gre_2d(16, n_dummy=2)
     coils = bp.birdcage_sensitivities(pos, 4)
     for p in (ph, replace(ph, diffusion=None)):
@@ -140,7 +164,9 @@ def _field_chain_case():
     pos = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.2
     vel = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * 0.5
     one = torch.ones(n, dtype=f64)
-    ph = bp.Phantom(pos, one, 0.8 * one, 0.1 * one, torch.linspace(-30, 30, n, dtype=f64), motion=bp.Motion(velocity=vel))
+    ph = bp.Phantom(
+        pos, one, 0.8 * one, 0.1 * one, torch.linspace(-30, 30, n, dtype=f64), motion=bp.Motion(velocity=vel)
+    )
     _, seq = random_case(0)
     seq = with_readout(seq)
     return ph, replace(seq, grad=seq.grad * 20), bp.birdcage_sensitivities(pos, 4)
@@ -151,8 +177,11 @@ def _scanners():
 
     from cases import distortion
 
-    return {"nonlinearity": Scanner(nonlinearity=distortion()), "leading": Scanner(field_strength=0.55),
-            "exact + nonlinearity": Scanner(field_strength=0.55, concomitant="exact", nonlinearity=distortion())}
+    return {
+        "nonlinearity": Scanner(nonlinearity=distortion()),
+        "leading": Scanner(field_strength=0.55),
+        "exact + nonlinearity": Scanner(field_strength=0.55, concomitant="exact", nonlinearity=distortion()),
+    }
 
 
 def _static_chain(ph, seq, coils, scanner):
@@ -161,8 +190,17 @@ def _static_chain(ph, seq, coils, scanner):
     m, sig = None, []
     for s in range(len(seq)):
         one = slice(s, s + 1)
-        part = replace(seq, dt=seq.dt[one], rf=seq.rf[one], grad=seq.grad[one], adc_phase=seq.adc_phase[one],
-                       is_rf=seq.is_rf[one], adc=seq.adc[one], spoil=seq.spoil[one], meta={})
+        part = replace(
+            seq,
+            dt=seq.dt[one],
+            rf=seq.rf[one],
+            grad=seq.grad[one],
+            adc_phase=seq.adc_phase[one],
+            is_rf=seq.is_rf[one],
+            adc=seq.adc[one],
+            spoil=seq.spoil[one],
+            meta={},
+        )
         static = replace(ph, pos=ph.pos + ph.motion.velocity * t[s], motion=None)
         r = bp.simulate(static, part, coils, m_init=m, scanner=scanner)
         m = r.m
@@ -221,11 +259,13 @@ def test_tse_flow_void(gpu):
     def echo11(v, dz=25e-6):
         z = torch.arange(-(v * dur + 4e-3), 4e-3, dz, dtype=f64)
         n = len(z)
-        ph = spins(torch.stack([torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64), z], -1),
-                   motion=bp.Motion(velocity=torch.tensor([0., 0., v], dtype=f64).expand(n, 3).contiguous()))
-        ph = replace(ph, t1=torch.full((n,), 1.74, dtype=f64), t2=torch.full((n,), .275, dtype=f64))
+        ph = spins(
+            torch.stack([torch.zeros(n, dtype=f64), torch.zeros(n, dtype=f64), z], -1),
+            motion=bp.Motion(velocity=torch.tensor([0.0, 0.0, v], dtype=f64).expand(n, 3).contiguous()),
+        )
+        ph = replace(ph, t1=torch.full((n,), 1.74, dtype=f64), t2=torch.full((n,), 0.275, dtype=f64))
         return float(gpu.simulate(ph, seq).signal[0].abs().double().reshape(16, -1).mean(1)[10])
 
-    static = echo11(0.)
+    static = echo11(0.0)
     assert echo11(0.10) < 0.05 * static and echo11(0.20) < 0.05 * static
     assert 0.5 * static < echo11(0.005) < static  # slow flow loses only part

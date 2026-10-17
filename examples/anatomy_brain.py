@@ -41,16 +41,24 @@ def main():
     t0 = time.perf_counter()
     head = bp.load_brainweb(args.subject, args.root, voxel=(1e-3,) * 3)
     fields = bp.anatomy_field_maps(head, field_T=3.0)  # tissue susceptibility field, scanner shim
-    ph = bp.to_phantom(head, field_T=3.0, fov_region=(slice(args.z, args.z + 2), slice(None), slice(None)),
-                       spins_per_voxel=(2, 2, 2), field_maps=fields,
-                       variability={"t1": 0.05, "t2": 0.05, "pd": 0.02, "length": 0.01})
+    ph = bp.to_phantom(
+        head,
+        field_T=3.0,
+        fov_region=(slice(args.z, args.z + 2), slice(None), slice(None)),
+        spins_per_voxel=(2, 2, 2),
+        field_maps=fields,
+        variability={"t1": 0.05, "t2": 0.05, "pd": 0.02, "length": 0.01},
+    )
     ph.pos = ph.pos - ph.pos.mean(0)  # centre the slab in the field of view
-    print(f"{len(ph):,} spins, B0 {float(ph.db0.min()):.0f} to {float(ph.db0.max()):.0f} Hz "
-          f"({time.perf_counter() - t0:.1f} s)")
+    print(
+        f"{len(ph):,} spins, B0 {float(ph.db0.min()):.0f} to {float(ph.db0.max()):.0f} Hz "
+        f"({time.perf_counter() - t0:.1f} s)"
+    )
     fov = 0.24
     protocols = {
-        "T1w spoiled GRE (TR 20, TE 4.6 ms, 30 deg)": bp.gre_2d(args.n, fov, flip_deg=30.0, tr=20e-3, te=4.6e-3,
-                                                              n_dummy=60),
+        "T1w spoiled GRE (TR 20, TE 4.6 ms, 30 deg)": bp.gre_2d(
+            args.n, fov, flip_deg=30.0, tr=20e-3, te=4.6e-3, n_dummy=60
+        ),
         "T2w TSE (TR 4 s, ETL 8, ESP 12 ms)": bp.tse_2d(args.n, fov, etl=8, esp=12e-3, tr=4.0, n_dummy=1),
         "GRE TE 25 ms (TR 40 ms, 20 deg)": bp.gre_2d(args.n, fov, flip_deg=20.0, tr=40e-3, te=25e-3, n_dummy=40),
     }
@@ -69,8 +77,11 @@ def main():
         a.imshow(img[::-1], cmap="gray", vmax=np.percentile(img, 99.5))
         a.set_title(name, fontsize=10)
         a.axis("off")
-    fig.suptitle(f"BrainWeb subject {args.subject:02d}, 3 T, slab z = {args.z}-{args.z + 1} mm: chi -> B0 + 2nd-order "
-                 "shim, partial volume, tissue texture", fontsize=10)
+    fig.suptitle(
+        f"BrainWeb subject {args.subject:02d}, 3 T, slab z = {args.z}-{args.z + 1} mm: chi -> B0 + 2nd-order "
+        "shim, partial volume, tissue texture",
+        fontsize=10,
+    )
     plt.tight_layout()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(args.out, dpi=80)

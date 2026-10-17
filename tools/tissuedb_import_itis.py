@@ -20,6 +20,7 @@ in src/blochparty/anatomy/tissuedb/itis_import_log.csv, with the SHA-256 of the 
     uv run python tools/tissuedb_import_itis.py            # download and rewrite the IT'IS rows
     uv run python tools/tissuedb_import_itis.py --relax a.json --water b.json   # from saved files
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,77 +44,194 @@ FIELDS = (1.5, 3.0, 7.0)
 
 # IT'IS name -> (tissue id, region). Names not listed are skipped (lumens: air or gut contents).
 TISSUES = {
-    "Adrenal Gland": ("adrenal_gland", ""), "Bile": ("gallbladder.bile", ""), "Blood": ("blood", ""),
-    "Blood Plasma": ("blood.plasma", ""), "Blood Serum": ("blood.serum", ""),
-    "Blood Vessel Wall": ("vessel_wall", ""), "Bone (Cancellous)": ("bone.cancellous", ""),
-    "Bone (Cortical)": ("bone.cortical", ""), "Bone Marrow (Red)": ("bone_marrow.red", ""),
-    "Bone Marrow (Yellow)": ("bone_marrow.yellow", ""), "Brain": ("brain", "whole brain"),
-    "Brain (Grey Matter)": ("brain.gm", ""), "Brain (White Matter)": ("brain.wm", ""),
-    "Breast Fat": ("breast.fat", ""), "Breast Gland": ("breast.fibroglandular", ""),
-    "Bronchi": ("bronchi", "bronchial wall"), "Cartilage": ("cartilage", ""),
-    "Cerebellum": ("brain.cerebellum", ""), "Cerebrospinal Fluid": ("csf", ""), "Cervix": ("uterus.cervix", ""),
+    "Adrenal Gland": ("adrenal_gland", ""),
+    "Bile": ("gallbladder.bile", ""),
+    "Blood": ("blood", ""),
+    "Blood Plasma": ("blood.plasma", ""),
+    "Blood Serum": ("blood.serum", ""),
+    "Blood Vessel Wall": ("vessel_wall", ""),
+    "Bone (Cancellous)": ("bone.cancellous", ""),
+    "Bone (Cortical)": ("bone.cortical", ""),
+    "Bone Marrow (Red)": ("bone_marrow.red", ""),
+    "Bone Marrow (Yellow)": ("bone_marrow.yellow", ""),
+    "Brain": ("brain", "whole brain"),
+    "Brain (Grey Matter)": ("brain.gm", ""),
+    "Brain (White Matter)": ("brain.wm", ""),
+    "Breast Fat": ("breast.fat", ""),
+    "Breast Gland": ("breast.fibroglandular", ""),
+    "Bronchi": ("bronchi", "bronchial wall"),
+    "Cartilage": ("cartilage", ""),
+    "Cerebellum": ("brain.cerebellum", ""),
+    "Cerebrospinal Fluid": ("csf", ""),
+    "Cervix": ("uterus.cervix", ""),
     "Commissura Anterior": ("brain.wm", "commissura anterior"),
-    "Commissura Posterior": ("brain.wm", "commissura posterior"), "Connective Tissue": ("connective", ""),
-    "Diaphragm": ("muscle.skeletal", "diaphragm"), "Ductus Deferens": ("ductus_deferens", ""),
-    "Dura": ("dura", ""), "Epididymis": ("epididymis", ""), "Esophagus": ("esophagus", ""),
-    "Extracellular Fluids": ("extracellular_fluid", ""), "Eye (Aqueous Humor)": ("eye.aqueous", ""),
-    "Eye (Choroid)": ("eye.choroid", ""), "Eye (Ciliary Body)": ("eye.ciliary_body", ""),
-    "Eye (Cornea)": ("eye.cornea", ""), "Eye (Iris)": ("eye.iris", ""), "Eye (Lens)": ("eye.lens", ""),
-    "Eye (Retina)": ("eye.retina", ""), "Eye (Sclera)": ("eye.sclera", ""),
-    "Eye (Vitreous Humor)": ("eye.vitreous", ""), "Eye Lens (Cortex)": ("eye.lens", "lens cortex"),
-    "Eye Lens (Nucleus)": ("eye.lens", "lens nucleus"), "Fat": ("fat", ""),
-    "Fat (Average Infiltrated)": ("fat", "average infiltrated"), "Fat (Not Infiltrated)": ("fat", "not infiltrated"),
-    "Gallbladder": ("gallbladder", "wall"), "Heart Lumen": ("blood", "heart lumen"),
-    "Heart Muscle": ("heart.myocardium", ""), "Hippocampus": ("brain.gm.hippocampus", ""),
-    "Hypophysis": ("pituitary", ""), "Hypothalamus": ("brain.gm.deep.hypothalamus", ""),
-    "Intervertebral Disc": ("intervertebral_disc", ""), "Kidney": ("kidney", ""),
-    "Kidney (Cortex)": ("kidney.cortex", ""), "Kidney (Medulla)": ("kidney.medulla", ""),
-    "Large Intestine": ("colon", "wall"), "Larynx": ("larynx", ""), "Liver": ("liver", ""),
-    "Lung": ("lung", ""), "Lung (Deflated)": ("lung", "deflated"), "Lung (Inflated)": ("lung", "inflated"),
-    "Lymph": ("lymph", ""), "Lymphnode": ("lymph_node", ""), "Mandible": ("bone.cortical", "mandible"),
-    "Medulla Oblongata": ("brain.brainstem", "medulla oblongata"), "Meniscus": ("meniscus", ""),
-    "Midbrain": ("brain.brainstem", "midbrain"), "Mucous Membrane": ("mucosa", ""),
-    "Muscle": ("muscle.skeletal", ""), "Nerve": ("nerve", ""), "Ovary": ("ovary", ""),
-    "Pancreas": ("pancreas", ""), "Penis": ("penis", ""), "Pineal Body": ("pineal", ""),
-    "Placenta": ("placenta", ""), "Pons": ("brain.brainstem", "pons"), "Prostate": ("prostate", ""),
-    "Salivary Gland": ("salivary_gland", ""), "SAT (Subcutaneous Fat)": ("fat.subcutaneous", ""),
-    "Scalp": ("scalp", ""), "Seminal vesicle": ("seminal_vesicle", ""), "Skin": ("skin", ""),
-    "Skull": ("bone.skull", ""), "Skull (Cancellous)": ("bone.cancellous", "skull"),
-    "Skull (Cortical)": ("bone.cortical", "skull (cortical)"), "Small Intestine": ("small_intestine", "wall"),
-    "Spinal Cord": ("spinal_cord", ""), "Spleen": ("spleen", ""), "Stomach": ("stomach", "wall"),
-    "Tendon\\Ligament": ("tendon", "tendon/ligament"), "Testis": ("testis", ""),
-    "Thalamus": ("brain.gm.deep.thalamus", ""), "Thymus": ("thymus", ""), "Thyroid Gland": ("thyroid", ""),
-    "Tongue": ("tongue", ""), "Tooth": ("tooth", ""), "Tooth (Dentine)": ("tooth.dentin", ""),
-    "Tooth (Enamel)": ("tooth.enamel", ""), "Trachea": ("trachea", "wall"),
-    "Ureter\\Urethra": ("urethra", "ureter/urethra"), "Urinary Bladder Wall": ("bladder.wall", ""),
-    "Urine": ("bladder.urine", ""), "Uterus": ("uterus", ""), "Vagina": ("vagina", ""),
-    "Vertebrae": ("bone", "vertebrae"), "Water": ("water", ""),
+    "Commissura Posterior": ("brain.wm", "commissura posterior"),
+    "Connective Tissue": ("connective", ""),
+    "Diaphragm": ("muscle.skeletal", "diaphragm"),
+    "Ductus Deferens": ("ductus_deferens", ""),
+    "Dura": ("dura", ""),
+    "Epididymis": ("epididymis", ""),
+    "Esophagus": ("esophagus", ""),
+    "Extracellular Fluids": ("extracellular_fluid", ""),
+    "Eye (Aqueous Humor)": ("eye.aqueous", ""),
+    "Eye (Choroid)": ("eye.choroid", ""),
+    "Eye (Ciliary Body)": ("eye.ciliary_body", ""),
+    "Eye (Cornea)": ("eye.cornea", ""),
+    "Eye (Iris)": ("eye.iris", ""),
+    "Eye (Lens)": ("eye.lens", ""),
+    "Eye (Retina)": ("eye.retina", ""),
+    "Eye (Sclera)": ("eye.sclera", ""),
+    "Eye (Vitreous Humor)": ("eye.vitreous", ""),
+    "Eye Lens (Cortex)": ("eye.lens", "lens cortex"),
+    "Eye Lens (Nucleus)": ("eye.lens", "lens nucleus"),
+    "Fat": ("fat", ""),
+    "Fat (Average Infiltrated)": ("fat", "average infiltrated"),
+    "Fat (Not Infiltrated)": ("fat", "not infiltrated"),
+    "Gallbladder": ("gallbladder", "wall"),
+    "Heart Lumen": ("blood", "heart lumen"),
+    "Heart Muscle": ("heart.myocardium", ""),
+    "Hippocampus": ("brain.gm.hippocampus", ""),
+    "Hypophysis": ("pituitary", ""),
+    "Hypothalamus": ("brain.gm.deep.hypothalamus", ""),
+    "Intervertebral Disc": ("intervertebral_disc", ""),
+    "Kidney": ("kidney", ""),
+    "Kidney (Cortex)": ("kidney.cortex", ""),
+    "Kidney (Medulla)": ("kidney.medulla", ""),
+    "Large Intestine": ("colon", "wall"),
+    "Larynx": ("larynx", ""),
+    "Liver": ("liver", ""),
+    "Lung": ("lung", ""),
+    "Lung (Deflated)": ("lung", "deflated"),
+    "Lung (Inflated)": ("lung", "inflated"),
+    "Lymph": ("lymph", ""),
+    "Lymphnode": ("lymph_node", ""),
+    "Mandible": ("bone.cortical", "mandible"),
+    "Medulla Oblongata": ("brain.brainstem", "medulla oblongata"),
+    "Meniscus": ("meniscus", ""),
+    "Midbrain": ("brain.brainstem", "midbrain"),
+    "Mucous Membrane": ("mucosa", ""),
+    "Muscle": ("muscle.skeletal", ""),
+    "Nerve": ("nerve", ""),
+    "Ovary": ("ovary", ""),
+    "Pancreas": ("pancreas", ""),
+    "Penis": ("penis", ""),
+    "Pineal Body": ("pineal", ""),
+    "Placenta": ("placenta", ""),
+    "Pons": ("brain.brainstem", "pons"),
+    "Prostate": ("prostate", ""),
+    "Salivary Gland": ("salivary_gland", ""),
+    "SAT (Subcutaneous Fat)": ("fat.subcutaneous", ""),
+    "Scalp": ("scalp", ""),
+    "Seminal vesicle": ("seminal_vesicle", ""),
+    "Skin": ("skin", ""),
+    "Skull": ("bone.skull", ""),
+    "Skull (Cancellous)": ("bone.cancellous", "skull"),
+    "Skull (Cortical)": ("bone.cortical", "skull (cortical)"),
+    "Small Intestine": ("small_intestine", "wall"),
+    "Spinal Cord": ("spinal_cord", ""),
+    "Spleen": ("spleen", ""),
+    "Stomach": ("stomach", "wall"),
+    "Tendon\\Ligament": ("tendon", "tendon/ligament"),
+    "Testis": ("testis", ""),
+    "Thalamus": ("brain.gm.deep.thalamus", ""),
+    "Thymus": ("thymus", ""),
+    "Thyroid Gland": ("thyroid", ""),
+    "Tongue": ("tongue", ""),
+    "Tooth": ("tooth", ""),
+    "Tooth (Dentine)": ("tooth.dentin", ""),
+    "Tooth (Enamel)": ("tooth.enamel", ""),
+    "Trachea": ("trachea", "wall"),
+    "Ureter\\Urethra": ("urethra", "ureter/urethra"),
+    "Urinary Bladder Wall": ("bladder.wall", ""),
+    "Urine": ("bladder.urine", ""),
+    "Uterus": ("uterus", ""),
+    "Vagina": ("vagina", ""),
+    "Vertebrae": ("bone", "vertebrae"),
+    "Water": ("water", ""),
 }
 # Names whose values are their own when other names carry a copy, per table (checked against the
 # duplicate groups in the 2024-06-04 / 2025-08-21 files; a group without an owner is dropped entirely).
 # Dielectric owners are tissues with their own parameter set in Gabriel et al. 1996 (Part III).
 OWNERS = {
-    "relax": {"Blood", "Brain (Grey Matter)", "Brain (White Matter)", "Cartilage", "Cerebrospinal Fluid",
-              "Muscle", "Prostate", "Breast Fat", "Pons"},
-    "dielectric": {"Blood", "Brain (Grey Matter)", "Brain (White Matter)", "Brain", "Cartilage",
-                   "Cerebrospinal Fluid", "Muscle", "Bone (Cortical)", "Bone (Cancellous)", "Fat", "Skin",
-                   "Blood Vessel Wall", "Trachea", "Thyroid Gland", "Tendon\\Ligament", "Kidney",
-                   "Lung (Inflated)", "Eye Lens (Nucleus)", "Nerve", "Stomach", "Large Intestine", "Testis"},
-    "water": {"Blood", "Brain (Grey Matter)", "Brain (White Matter)", "Bone (Cortical)", "Bone (Cancellous)",
-              "Fat", "Cartilage", "Muscle", "Skin"},
+    "relax": {
+        "Blood",
+        "Brain (Grey Matter)",
+        "Brain (White Matter)",
+        "Cartilage",
+        "Cerebrospinal Fluid",
+        "Muscle",
+        "Prostate",
+        "Breast Fat",
+        "Pons",
+    },
+    "dielectric": {
+        "Blood",
+        "Brain (Grey Matter)",
+        "Brain (White Matter)",
+        "Brain",
+        "Cartilage",
+        "Cerebrospinal Fluid",
+        "Muscle",
+        "Bone (Cortical)",
+        "Bone (Cancellous)",
+        "Fat",
+        "Skin",
+        "Blood Vessel Wall",
+        "Trachea",
+        "Thyroid Gland",
+        "Tendon\\Ligament",
+        "Kidney",
+        "Lung (Inflated)",
+        "Eye Lens (Nucleus)",
+        "Nerve",
+        "Stomach",
+        "Large Intestine",
+        "Testis",
+    },
+    "water": {
+        "Blood",
+        "Brain (Grey Matter)",
+        "Brain (White Matter)",
+        "Bone (Cortical)",
+        "Bone (Cancellous)",
+        "Fat",
+        "Cartilage",
+        "Muscle",
+        "Skin",
+    },
 }
 # Blocks that are not proxies but are not usable as labelled.
-EXCLUDE = {("Lung", "water_content_mass"): "27.2 % (also Lung (Inflated)) is not a plausible mass fraction "
-                                           "of lung tissue (deflated lung: 80.3 %); an air-diluted value",
-           ("Lung (Inflated)", "water_content_mass"): "as Lung"}
+EXCLUDE = {
+    ("Lung", "water_content_mass"): "27.2 % (also Lung (Inflated)) is not a plausible mass fraction "
+    "of lung tissue (deflated lung: 80.3 %); an air-diluted value",
+    ("Lung (Inflated)", "water_content_mass"): "as Lung",
+}
 # Caveats appended to the note of an IT'IS name's relaxation rows.
-CAVEATS = {"Breast Fat": "; caution: T1 0.89-0.99 s is far above adipose T1 (0.37-0.42 s at 3 T in Edden et al. 2010), "
-                         "so these IT'IS values probably describe breast tissue rather than pure fat",
-           "Lung": "; lung parenchyma T2 depends strongly on echo spacing (susceptibility of alveolar air)"}
+CAVEATS = {
+    "Breast Fat": "; caution: T1 0.89-0.99 s is far above adipose T1 (0.37-0.42 s at 3 T in Edden et al. 2010), "
+    "so these IT'IS values probably describe breast tissue rather than pure fat",
+    "Lung": "; lung parenchyma T2 depends strongly on echo spacing (susceptibility of alveolar air)",
+}
 RELAX = {("t1", 1.5): "BZ", ("t2", 1.5): "CE", ("t1", 3.0): "CJ", ("t2", 3.0): "CO"}
 COLE = ["AB", "AC", "AD", "AE", "AF", "AG", "AH", "AI", "AJ", "AK", "AL", "AM", "AN", "AO"]
-HEADER = ["tissue", "region", "property", "field_T", "value", "sd", "sd_kind", "n", "unit", "species", "state",
-          "temperature_C", "method", "source", "location", "note"]
+HEADER = [
+    "tissue",
+    "region",
+    "property",
+    "field_T",
+    "value",
+    "sd",
+    "sd_kind",
+    "n",
+    "unit",
+    "species",
+    "state",
+    "temperature_C",
+    "method",
+    "source",
+    "location",
+    "note",
+]
 
 
 def col(name: str, offset: int = 0) -> str:
@@ -166,8 +284,9 @@ def main(argv=None):
             blocks.append((name, r, prop, field, tuple(relax.get(f"{col(c0, k)}{r}") for k in range(5)), "relax"))
         blocks.append((name, r, "dielectric", None, tuple(relax.get(f"{c}{r}") for c in COLE), "relax"))
     for r in rows_of(water):
-        blocks.append((water[f"B{r}"], r, "water_content_mass", None,
-                       tuple(water.get(f"{c}{r}") for c in "CDEFG"), "water"))
+        blocks.append(
+            (water[f"B{r}"], r, "water_content_mass", None, tuple(water.get(f"{c}{r}") for c in "CDEFG"), "water")
+        )
     seen = defaultdict(list)
     for name, r, prop, field, values, _ in blocks:
         if any(isinstance(v, (int, float)) and v != 0 for v in values):
@@ -175,9 +294,19 @@ def main(argv=None):
 
     out, log = [], []
     for name, r, prop, field, values, table in blocks:
+
         def skip(reason):
-            log.append(dict(itis_name=name, xls_row=r, block=prop + ("" if field is None else f" {field:g} T"),
-                            decision="skip", reason=reason, tissue=TISSUES.get(name, ("", ""))[0]))
+            log.append(
+                dict(
+                    itis_name=name,
+                    xls_row=r,
+                    block=prop + ("" if field is None else f" {field:g} T"),
+                    decision="skip",
+                    reason=reason,
+                    tissue=TISSUES.get(name, ("", ""))[0],
+                )
+            )
+
         if name not in TISSUES:
             skip("not mapped (lumen content or air)")
             continue
@@ -191,8 +320,11 @@ def main(argv=None):
         owners = OWNERS["dielectric" if prop == "dielectric" else table]
         if len(sharers) > 1 and name not in owners:
             owner = [s for s in sharers if s in owners]
-            skip(("proxy: copy of " + owner[0]) if owner else
-                 "duplicate of " + ", ".join(s for s in sharers if s != name) + " with no owner")
+            skip(
+                ("proxy: copy of " + owner[0])
+                if owner
+                else "duplicate of " + ", ".join(s for s in sharers if s != name) + " with no owner"
+            )
             continue
         if (name, prop) in EXCLUDE:
             skip(EXCLUDE[name, prop])
@@ -203,12 +335,25 @@ def main(argv=None):
         if prop in ("t1", "t2"):
             mean, sd, n, lo, hi = values
             c0 = RELAX[prop, field]
-            out.append(base | dict(property=prop, field_T=fmt(field), value=fmt(mean / 1000),
-                       sd=fmt(sd / 1000) if n >= 2 else "", sd_kind="across_studies" if n >= 2 else "", n=int(n),
-                       unit="s", method="literature compilation", source=RELAX_KEY,
-                       location=f"{RELAX_FILE} row {r} ({name}), cols {c0}-{col(c0, 4)}",
-                       note=f"IT'IS '{name}': mean {mean:.6g} ms" + (f", SD across studies {sd:.4g} ms" if n >= 2 else "")
-                       + f", {int(n)} {'study' if n == 1 else 'studies'}, range {lo:g}-{hi:g} ms" + CAVEATS.get(name, "")))
+            out.append(
+                base
+                | dict(
+                    property=prop,
+                    field_T=fmt(field),
+                    value=fmt(mean / 1000),
+                    sd=fmt(sd / 1000) if n >= 2 else "",
+                    sd_kind="across_studies" if n >= 2 else "",
+                    n=int(n),
+                    unit="s",
+                    method="literature compilation",
+                    source=RELAX_KEY,
+                    location=f"{RELAX_FILE} row {r} ({name}), cols {c0}-{col(c0, 4)}",
+                    note=f"IT'IS '{name}': mean {mean:.6g} ms"
+                    + (f", SD across studies {sd:.4g} ms" if n >= 2 else "")
+                    + f", {int(n)} {'study' if n == 1 else 'studies'}, range {lo:g}-{hi:g} ms"
+                    + CAVEATS.get(name, ""),
+                )
+            )
         elif prop == "dielectric":
             if any(not isinstance(v, (int, float)) for v in values):
                 skip("incomplete Cole-Cole parameters")
@@ -217,22 +362,54 @@ def main(argv=None):
                 f = GAMMA_BAR * field_T
                 eps, sigma = cole_cole(values, f)
                 for p, v, unit in (("permittivity_rel", eps, "1"), ("conductivity", sigma, "S/m")):
-                    out.append(base | dict(property=p, field_T=fmt(field_T), value=format(v, ".4g"), sd="",
-                               sd_kind="", n="", unit=unit, method="Gabriel 4-term Cole-Cole model, parameters from IT'IS",
-                               source=RELAX_KEY, location=f"{RELAX_FILE} row {r} ({name}), cols AB-AO",
-                               note=f"derived: Cole-Cole model (Gabriel et al. 1996, Phys Med Biol 41:2271) evaluated at "
-                                    f"the Larmor frequency {f / 1e6:.2f} MHz; parameters ef..alf4 = "
-                                    + " ".join(format(x, "g") for x in values)))
+                    out.append(
+                        base
+                        | dict(
+                            property=p,
+                            field_T=fmt(field_T),
+                            value=format(v, ".4g"),
+                            sd="",
+                            sd_kind="",
+                            n="",
+                            unit=unit,
+                            method="Gabriel 4-term Cole-Cole model, parameters from IT'IS",
+                            source=RELAX_KEY,
+                            location=f"{RELAX_FILE} row {r} ({name}), cols AB-AO",
+                            note=f"derived: Cole-Cole model (Gabriel et al. 1996, Phys Med Biol 41:2271) evaluated at "
+                            f"the Larmor frequency {f / 1e6:.2f} MHz; parameters ef..alf4 = "
+                            + " ".join(format(x, "g") for x in values),
+                        )
+                    )
         else:
             mean, sd, n, lo, hi = values
-            out.append(base | dict(property=prop, field_T="", value=fmt(mean / 100),
-                       sd=fmt(sd / 100) if n >= 2 and sd else "", sd_kind="across_studies" if n >= 2 and sd else "",
-                       n=int(n), unit="1", method="literature compilation (mass fraction)", source=WATER_KEY,
-                       location=f"{WATER_FILE} row {r} ({name}), cols C-G",
-                       note=f"IT'IS '{name}': {mean:.6g} % by mass" + (f", SD {sd:.4g} %" if n >= 2 and sd else "")
-                       + f", n = {int(n)}, range {lo:g}-{hi:g} %"))
-        log.append(dict(itis_name=name, xls_row=r, block=prop + ("" if field is None else f" {field:g} T"),
-                        decision="take", reason="", tissue=tissue))
+            out.append(
+                base
+                | dict(
+                    property=prop,
+                    field_T="",
+                    value=fmt(mean / 100),
+                    sd=fmt(sd / 100) if n >= 2 and sd else "",
+                    sd_kind="across_studies" if n >= 2 and sd else "",
+                    n=int(n),
+                    unit="1",
+                    method="literature compilation (mass fraction)",
+                    source=WATER_KEY,
+                    location=f"{WATER_FILE} row {r} ({name}), cols C-G",
+                    note=f"IT'IS '{name}': {mean:.6g} % by mass"
+                    + (f", SD {sd:.4g} %" if n >= 2 and sd else "")
+                    + f", n = {int(n)}, range {lo:g}-{hi:g} %",
+                )
+            )
+        log.append(
+            dict(
+                itis_name=name,
+                xls_row=r,
+                block=prop + ("" if field is None else f" {field:g} T"),
+                decision="take",
+                reason="",
+                tissue=tissue,
+            )
+        )
 
     path = DB / "measurements.csv"
     kept = []

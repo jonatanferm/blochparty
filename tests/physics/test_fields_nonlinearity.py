@@ -86,6 +86,7 @@ def test_basis_is_harmonic():
     # Laplacian of every basis field (to n = 10) vanishes; second derivatives by autograd
     n_max = 10
     for p in points(6, seed=1, extent=0.15):
+
         def field(q):
             c, s = solid_harmonics(q[None], n_max, R0)
             return torch.cat([c.reshape(-1), s.reshape(-1)])
@@ -132,8 +133,15 @@ def test_coefficient_files(tmp_path):
     a = GradientNonlinearity.from_file(tmp_path / "a.grad")
     b = GradientNonlinearity.from_file(tmp_path / "b.coef", r0=0.25)
     assert a.r0 == 0.25 and a.alpha.shape == (3, 6, 6)
-    expect = {("alpha", 2, 3, 0): -0.01, ("alpha", 2, 5, 0): 0.02, ("alpha", 0, 3, 1): 0.01, ("alpha", 0, 3, 3): -0.02,
-              ("alpha", 0, 5, 1): 0.03, ("beta", 1, 3, 1): 0.01, ("beta", 1, 5, 3): -0.04}
+    expect = {
+        ("alpha", 2, 3, 0): -0.01,
+        ("alpha", 2, 5, 0): 0.02,
+        ("alpha", 0, 3, 1): 0.01,
+        ("alpha", 0, 3, 3): -0.02,
+        ("alpha", 0, 5, 1): 0.03,
+        ("beta", 1, 3, 1): 0.01,
+        ("beta", 1, 5, 3): -0.04,
+    }
     for model in (a, b):
         full = {"alpha": model.alpha, "beta": model.beta}
         assert sum(int((t != 0).sum()) for t in full.values()) == len(expect)
@@ -177,7 +185,9 @@ def peaks(image, guesses, fov, n, up=8):
     w = torch.hann_window(n, periodic=True, dtype=torch.float64)
     k = k * w[:, None] * w[None, :]
     pad = (n * up - n) // 2
-    big = torch.fft.fftshift(torch.fft.ifft2(torch.fft.ifftshift(torch.nn.functional.pad(k, (pad, pad, pad, pad))))).abs()
+    big = torch.fft.fftshift(
+        torch.fft.ifft2(torch.fft.ifftshift(torch.nn.functional.pad(k, (pad, pad, pad, pad))))
+    ).abs()
     m = n * up
     out = []
     for gx, gy in guesses:

@@ -48,8 +48,9 @@ def random_case(seed: int):
 def random_phantom(n=50, seed=0):
     g = torch.Generator().manual_seed(seed)
     rnd = lambda *s: torch.rand(*s, generator=g, dtype=torch.float64)
-    return Phantom(pos=(rnd(n, 3) - 0.5) * 0.2, pd=0.5 + rnd(n), t1=0.2 + rnd(n),
-                   t2=0.02 + 0.1 * rnd(n), db0=(rnd(n) - 0.5) * 200)
+    return Phantom(
+        pos=(rnd(n, 3) - 0.5) * 0.2, pd=0.5 + rnd(n), t1=0.2 + rnd(n), t2=0.02 + 0.1 * rnd(n), db0=(rnd(n) - 0.5) * 200
+    )
 
 
 def busy_sequence(amp, gx, seed=0):
@@ -73,18 +74,32 @@ def bm_case(seed: int, shape: str):
     g = torch.Generator().manual_seed(seed)
     rnd = lambda *s: torch.rand(*s, generator=g, dtype=f64)
     n = 5
-    ph = Phantom(pos=(rnd(n, 3) - 0.5) * 0.2, pd=0.5 + rnd(n), t1=0.5 + rnd(n), t2=0.02 + 0.08 * rnd(n),
-                 db0=(rnd(n) - 0.5) * 200,
-                 bound=BoundPool(f=0.1 + 0.1 * rnd(n), k=20 + 40 * rnd(n), t1=torch.ones(n, dtype=f64),
-                                 t2=(8 + 6 * rnd(n)) * 1e-6, dw=(rnd(n) - 0.5) * 600, lineshape=shape))
+    ph = Phantom(
+        pos=(rnd(n, 3) - 0.5) * 0.2,
+        pd=0.5 + rnd(n),
+        t1=0.5 + rnd(n),
+        t2=0.02 + 0.08 * rnd(n),
+        db0=(rnd(n) - 0.5) * 200,
+        bound=BoundPool(
+            f=0.1 + 0.1 * rnd(n),
+            k=20 + 40 * rnd(n),
+            t1=torch.ones(n, dtype=f64),
+            t2=(8 + 6 * rnd(n)) * 1e-6,
+            dw=(rnd(n) - 0.5) * 600,
+            lineshape=shape,
+        ),
+    )
     b = SequenceBuilder()
     for _ in range(3):
         kk, dt = 40, 10e-6
         t = (torch.arange(kk, dtype=f64) + 0.5) * dt
         f_off = (rnd(()) - 0.5) * 8000  # off-resonant saturation-like pulse: a phase ramp
         amp = 300 + 1500 * rnd(kk)
-        b.rf_waveform(torch.stack([amp * torch.cos(-2 * math.pi * f_off * t), amp * torch.sin(-2 * math.pi * f_off * t)], -1),
-                      dt, grad=(rnd(3) - 0.5) * 2000)
+        b.rf_waveform(
+            torch.stack([amp * torch.cos(-2 * math.pi * f_off * t), amp * torch.sin(-2 * math.pi * f_off * t)], -1),
+            dt,
+            grad=(rnd(3) - 0.5) * 2000,
+        )
         b.delay(rnd(()) * 3e-3, grad=(rnd(3) - 0.5) * 4000)
         b.rf(100e-6, flip_deg=180 * rnd(()), phase=2 * math.pi * rnd(()))
         b.delay(rnd(()) * 3e-3)
@@ -98,20 +113,35 @@ def pool_case(seed, with_bound=True):
     ph, seq = bm_case(seed, "superlorentzian")
     g = torch.Generator().manual_seed(seed + 5)
     rnd = lambda: torch.rand(len(ph), generator=g, dtype=f64)
-    amide = ExchangePool(f=0.01 + 0.02 * rnd(), k=50 + 200 * rnd(), t1=torch.ones(len(ph), dtype=f64),
-                         t2=0.02 + 0.08 * rnd(), dw=3.5e-6 * 3 * bp.GAMMA_BAR + 100 * rnd())
-    myelin = ExchangePool(f=0.15 + 0.05 * rnd(), k=5 + 10 * rnd(), t1=0.4 + 0.2 * rnd(), t2=0.008 + 0.01 * rnd(),
-                          dw=10 * rnd())
+    amide = ExchangePool(
+        f=0.01 + 0.02 * rnd(),
+        k=50 + 200 * rnd(),
+        t1=torch.ones(len(ph), dtype=f64),
+        t2=0.02 + 0.08 * rnd(),
+        dw=3.5e-6 * 3 * bp.GAMMA_BAR + 100 * rnd(),
+    )
+    myelin = ExchangePool(
+        f=0.15 + 0.05 * rnd(), k=5 + 10 * rnd(), t1=0.4 + 0.2 * rnd(), t2=0.008 + 0.01 * rnd(), dw=10 * rnd()
+    )
     return replace(ph, pools=(amide, myelin), bound=ph.bound if with_bound else None), seq
 
 
 def _maps_for(ph):
-    zz, yy, xx = torch.meshgrid(torch.linspace(-0.2, 0.2, 5, dtype=f64), torch.linspace(-0.3, 0.3, 7, dtype=f64),
-                                torch.linspace(-0.3, 0.3, 7, dtype=f64), indexing="ij")
-    coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.05) * torch.exp(1j * 2 * yy),
-                         torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.05) * torch.exp(-1j * xx)])
-    return bp.FieldMaps((-0.3, -0.3, -0.2), (0.1, 0.1, 0.1), b0=40 * xx**2 - 20 * yy + 10 * zz, b1=1 + 0.3 * xx,
-                        coils=coils)
+    zz, yy, xx = torch.meshgrid(
+        torch.linspace(-0.2, 0.2, 5, dtype=f64),
+        torch.linspace(-0.3, 0.3, 7, dtype=f64),
+        torch.linspace(-0.3, 0.3, 7, dtype=f64),
+        indexing="ij",
+    )
+    coils = torch.stack(
+        [
+            torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.05) * torch.exp(1j * 2 * yy),
+            torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.05) * torch.exp(-1j * xx),
+        ]
+    )
+    return bp.FieldMaps(
+        (-0.3, -0.3, -0.2), (0.1, 0.1, 0.1), b0=40 * xx**2 - 20 * yy + 10 * zz, b1=1 + 0.3 * xx, coils=coils
+    )
 
 
 def pgse(g, readout=1):
@@ -152,8 +182,7 @@ def partial_volume(inside, grids, h, sub=4):
 def coordinates(shape, voxel, origin=None):
     if origin is None:
         origin = tuple(-(n - 1) * h / 2 for n, h in reversed(list(zip(shape, voxel))))
-    axes = [torch.arange(n, dtype=torch.float64) * h + o
-            for n, h, o in zip(shape, voxel, reversed(origin))]
+    axes = [torch.arange(n, dtype=torch.float64) * h + o for n, h, o in zip(shape, voxel, reversed(origin))]
     z, y, x = torch.meshgrid(*axes, indexing="ij")
     return torch.stack((x, y, z), -1)
 
@@ -162,7 +191,6 @@ def sphere(n=48):
     h, radius = 0.064 / n, 0.01
     pos = coordinates((n,) * 3, (h,) * 3)
     x, y, z = pos.unbind(-1)
-    chi = DCHI * partial_volume(lambda x, y, z: x*x + y*y + z*z <= radius**2,
-                               (x, y, z), h)
+    chi = DCHI * partial_volume(lambda x, y, z: x * x + y * y + z * z <= radius**2, (x, y, z), h)
     ref = b0_sphere(pos, (0, 0, 0), radius, DCHI, FIELD)
     return chi, pos, h, radius, ref

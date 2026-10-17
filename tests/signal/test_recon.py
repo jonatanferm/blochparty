@@ -13,7 +13,9 @@ c128 = torch.complex128
 
 def _rand(shape, seed):
     g = torch.Generator().manual_seed(seed)
-    return torch.complex(torch.randn(shape, generator=g, dtype=torch.float64), torch.randn(shape, generator=g, dtype=torch.float64))
+    return torch.complex(
+        torch.randn(shape, generator=g, dtype=torch.float64), torch.randn(shape, generator=g, dtype=torch.float64)
+    )
 
 
 def test_orthonormal_pair_is_unitary_and_matches_the_centred_fft():
@@ -43,10 +45,14 @@ def test_cg_sense_unfolds_twofold_undersampling():
     n = 32
     u = (torch.arange(n, dtype=torch.float64) - n / 2) / n
     yy, xx = torch.meshgrid(u, u, indexing="ij")
-    img = ((xx ** 2 + yy ** 2) < 0.3 ** 2).to(c128) * (1 + 0.5 * xx)
+    img = ((xx**2 + yy**2) < 0.3**2).to(c128) * (1 + 0.5 * xx)
     ang = torch.arange(8, dtype=torch.float64) * 2 * np.pi / 8
-    maps = torch.stack([torch.exp(-((xx - 0.6 * torch.cos(a)) ** 2 + (yy - 0.6 * torch.sin(a)) ** 2) / 0.2)
-                        * torch.exp(1j * a) for a in ang]).to(c128)
+    maps = torch.stack(
+        [
+            torch.exp(-((xx - 0.6 * torch.cos(a)) ** 2 + (yy - 0.6 * torch.sin(a)) ** 2) / 0.2) * torch.exp(1j * a)
+            for a in ang
+        ]
+    ).to(c128)
     mask = uniform_mask(n, n // 2 + 2, centre=4)
     k = fft2c(maps * img[None]) * mask[None, :, None]
     rec = cg_sense(k, maps, mask, iters=100, lam=1e-6)
@@ -61,14 +67,14 @@ def test_masks_take_the_lines_they_promise():
         for m in (uniform_mask(n, lines, centre), variable_density_mask(n, lines, centre, seed=3)):
             assert int(m.sum()) == lines
             lo = n // 2 - centre // 2
-            assert bool(m[lo:lo + centre].all())
+            assert bool(m[lo : lo + centre].all())
     a, b = variable_density_mask(64, 20, seed=1), variable_density_mask(64, 20, seed=1)
     assert torch.equal(a, b) and not torch.equal(a, variable_density_mask(64, 20, seed=2))
     # variable density: the central quarter is sampled more densely than the outer half
     hits = torch.stack([variable_density_mask(128, 40, seed=s) for s in range(50)]).double().mean(0)
     assert float(hits[48:80].mean()) > 2 * float(torch.cat([hits[:32], hits[96:]]).mean())
     r = random_mask(128, 4, 0.08, np.random.default_rng(0))
-    assert r.sum() == 128 // 4 and r[64 - 5:64 - 5 + 10].all()
+    assert r.sum() == 128 // 4 and r[64 - 5 : 64 - 5 + 10].all()
 
 
 def test_auc_and_bootstrap():

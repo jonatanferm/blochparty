@@ -19,11 +19,25 @@ c128 = torch.complex128
 
 def write_maps(path, plus, minus, mask, origin, resolution, frequency_hz=127.7e6):
     """A map file as mariepy's ``maps.write`` lays it out (single precision, JSON metadata)."""
-    meta = {"coil": "test", "channels": [f"ch{i}" for i in range(plus.shape[0])], "frequency_hz": frequency_hz,
-            "drive_unit": "1 A", "origin": list(origin), "resolution": resolution, "frame": "test",
-            "bodies": [], "mariepy_version": "0", "data_licence": "none"}
-    np.savez_compressed(path, plus=np.asarray(plus, np.complex64), minus=np.asarray(minus, np.complex64),
-                        mask=np.asarray(mask, bool), metadata=np.array(json.dumps(meta)))
+    meta = {
+        "coil": "test",
+        "channels": [f"ch{i}" for i in range(plus.shape[0])],
+        "frequency_hz": frequency_hz,
+        "drive_unit": "1 A",
+        "origin": list(origin),
+        "resolution": resolution,
+        "frame": "test",
+        "bodies": [],
+        "mariepy_version": "0",
+        "data_licence": "none",
+    }
+    np.savez_compressed(
+        path,
+        plus=np.asarray(plus, np.complex64),
+        minus=np.asarray(minus, np.complex64),
+        mask=np.asarray(mask, bool),
+        metadata=np.array(json.dumps(meta)),
+    )
 
 
 def rotating_field(phasor, t, f):
@@ -44,8 +58,15 @@ def test_transmit_is_the_clockwise_component_with_its_phase(tmp_path, phase):
     b1_frame = (torch.complex(lab[:, 0], lab[:, 1]) * torch.exp(1j * 2 * math.pi * f * t)).mean()
     ph = torch.stack([cw, ccw])  # two channels (phasors (C, 3)) at one voxel
     plus, minus = (ph[:, 0] + 1j * ph[:, 1]), (ph[:, 0] - 1j * ph[:, 1])
-    write_maps(tmp_path / "m.npz", plus[:, None, None, None], minus[:, None, None, None], np.ones((1, 1, 1)),
-               (0, 0, 0), 1e-3, f)
+    write_maps(
+        tmp_path / "m.npz",
+        plus[:, None, None, None],
+        minus[:, None, None, None],
+        np.ones((1, 1, 1)),
+        (0, 0, 0),
+        1e-3,
+        f,
+    )
     m = em.read_mariepy_maps(tmp_path / "m.npz")
     b1 = [em.transmit_b1(m, torch.tensor(d, dtype=c128))[0, 0, 0] for d in ([1, 0], [0, 1])]
     assert abs(b1[0] - b1_frame) < 1e-6 and abs(b1[0] - e.conjugate()) < 1e-6
@@ -66,8 +87,11 @@ def test_quadrature_drive_picks_the_co_rotating_mode(tmp_path):
 
 def test_quasi_static_limit_matches_loops(tmp_path):
     # real (in-phase) loop fields as phasors: em must reproduce loops.field_maps exactly
-    loops = [Loop((0.08, 0, 0), (-1, 0, 0), 0.04), Loop((0, 0.08, 0.01), (0, -1, 0), 0.04),
-             Loop((-0.06, -0.05, -0.01), (1, 1, 0), 0.035)]
+    loops = [
+        Loop((0.08, 0, 0), (-1, 0, 0), 0.04),
+        Loop((0, 0.08, 0.01), (0, -1, 0), 0.04),
+        Loop((-0.06, -0.05, -0.01), (1, 1, 0), 0.035),
+    ]
     origin, h, shape = (-0.03, -0.025, -0.02), 0.005, (9, 11, 13)  # (nz, ny, nx)
     ref = (0.0, 0.0, 0.0)
     expect = loop_maps(loops, origin, (h,) * 3, shape, reference=ref)

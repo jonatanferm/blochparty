@@ -35,11 +35,22 @@ def _num(x):
     return str(x)
 
 
-def design_report(seq: Sequence, phantom: Phantom | None = None, *, hardware: Hardware | None = None,
-                  coils: Tensor | None = None, masks: dict[str, Tensor] | None = None,
-                  contrast_pairs: list[tuple[str, str]] = (), noise_sigma: float | None = None,
-                  kspace_sigma: float | None = None, noise_cov: Tensor | None = None, psf: bool = True,
-                  psf_tissue: tuple[float, float] = (1.0, 0.1), simulate=None, max_items: int = 10) -> dict:
+def design_report(
+    seq: Sequence,
+    phantom: Phantom | None = None,
+    *,
+    hardware: Hardware | None = None,
+    coils: Tensor | None = None,
+    masks: dict[str, Tensor] | None = None,
+    contrast_pairs: list[tuple[str, str]] = (),
+    noise_sigma: float | None = None,
+    kspace_sigma: float | None = None,
+    noise_cov: Tensor | None = None,
+    psf: bool = True,
+    psf_tissue: tuple[float, float] = (1.0, 0.1),
+    simulate=None,
+    max_items: int = 10,
+) -> dict:
     """Machine-readable summary of ``seq``: timing, every constraint of ``hardware`` with
     its margin and specific violations, and (for Cartesian sequences) the PSF and, given a
     ``phantom`` and label ``masks`` on the image grid, per-tissue signal, contrast, CNR and
@@ -54,8 +65,11 @@ def design_report(seq: Sequence, phantom: Phantom | None = None, *, hardware: Ha
         duration = float(seq.duration)
         report = {
             "timing": {
-                "duration_s": duration, "n_segments": len(seq), "n_rf_segments": sum(seq.is_rf),
-                "n_adc": seq.n_adc, "n_spoils": sum(seq.spoil),
+                "duration_s": duration,
+                "n_segments": len(seq),
+                "n_rf_segments": sum(seq.is_rf),
+                "n_adc": seq.n_adc,
+                "n_spoils": sum(seq.spoil),
                 **{f"{k}_s": _num(seq.meta[k]) for k in ("tr", "te", "dwell") if k in seq.meta},
             },
             "hardware": asdict(hw),
@@ -66,19 +80,29 @@ def design_report(seq: Sequence, phantom: Phantom | None = None, *, hardware: Ha
             v = c.values.detach().double()
             peak = float(v.max()) if v.numel() else 0.0
             items = violations(c, seq, max_items)
-            entry = {"value": peak, "limit": c.limit, "unit": c.unit,
-                     "margin_pct": None if c.limit is None else 100.0 * (1.0 - peak / c.limit),
-                     "ok": c.limit is None or peak <= c.limit,
-                     "n_violating": 0 if c.limit is None else int((v > c.limit).sum()), "violations": items}
+            entry = {
+                "value": peak,
+                "limit": c.limit,
+                "unit": c.unit,
+                "margin_pct": None if c.limit is None else 100.0 * (1.0 - peak / c.limit),
+                "ok": c.limit is None or peak <= c.limit,
+                "n_violating": 0 if c.limit is None else int((v > c.limit).sum()),
+                "violations": items,
+            }
             if v.numel():
                 entry["at_segment"] = int(c.segments[int(v.argmax())])
             report["constraints"][c.name] = entry
             if items:  # one line per violated constraint: how often, and the worst place
                 n_ranges = len(items) - 1 + items[-1].get("n_more", 1)
-                where = "" if c.where == "sequence" else (
-                    f" at {entry['n_violating']} {'boundaries' if c.where == 'boundaries' else 'segments'}"
-                    f" ({n_ranges} ranges); worst")
-                worst = items[0]["message"][len(f"{c.name} exceeded "):]
+                where = (
+                    ""
+                    if c.where == "sequence"
+                    else (
+                        f" at {entry['n_violating']} {'boundaries' if c.where == 'boundaries' else 'segments'}"
+                        f" ({n_ranges} ranges); worst"
+                    )
+                )
+                worst = items[0]["message"][len(f"{c.name} exceeded ") :]
                 report["violations"].append(f"{c.name} exceeded{where} {worst}" if where else items[0]["message"])
         report["ok"] = not report["violations"]
 
@@ -94,8 +118,11 @@ def design_report(seq: Sequence, phantom: Phantom | None = None, *, hardware: Ha
             if sigma is None and kspace_sigma is not None:
                 any_mask = torch.stack(list(masks.values())).any(0)
                 recon = lambda s: magnitude_image(s, seq)
-                sigma = float(image_noise_sigma(sig, recon, kspace_sigma, noise_cov, any_mask,
-                                                generator=torch.Generator().manual_seed(0)))
+                sigma = float(
+                    image_noise_sigma(
+                        sig, recon, kspace_sigma, noise_cov, any_mask, generator=torch.Generator().manual_seed(0)
+                    )
+                )
             metrics = {"noise_sigma": sigma, "tissues": {}, "contrasts": {}}
             for name, m in masks.items():
                 if m.any():

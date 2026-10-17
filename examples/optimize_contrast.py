@@ -57,8 +57,9 @@ print(f"gradient descent: {flip.item():.3f} deg ({n_evals} evaluations, {time.pe
 # brute force on the analytic steady state
 angles = torch.linspace(1, 90, 89001, dtype=torch.float64)
 props = {name: (maps["pd"][m][0], maps["t1"][m][0], maps["t2"][m][0]) for name, m in (("wm", wm), ("gm", gm))}
-c = (spoiled_gre_signal(*props["wm"], TR, TE, torch.deg2rad(angles))
-     - spoiled_gre_signal(*props["gm"], TR, TE, torch.deg2rad(angles)))
+c = spoiled_gre_signal(*props["wm"], TR, TE, torch.deg2rad(angles)) - spoiled_gre_signal(
+    *props["gm"], TR, TE, torch.deg2rad(angles)
+)
 best = angles[c.argmax()].item()
 # +a and -a give identical magnitude images, so the optimizer may land on either
 found = abs(flip.item())

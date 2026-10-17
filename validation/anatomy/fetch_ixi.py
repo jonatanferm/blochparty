@@ -8,6 +8,7 @@ files yet (PD, added 2026-10-12: the first echo of the T2's dual-echo TSE, TE 8 
 
     uv run python validation/anatomy/fetch_ixi.py [--root validation/anatomy/data] [--offline]
 """
+
 import argparse
 import datetime
 import hashlib
@@ -49,8 +50,21 @@ def fetch(root, offline=False):
             for i in range(n):
                 part = out / f"{name}.{i}"
                 parts.append(part)
-                procs.append(subprocess.Popen(["curl", "-fsSL", "--retry", "3", "-r", f"{edges[i]}-{edges[i + 1] - 1}",
-                                               BASE + name, "-o", str(part)]))
+                procs.append(
+                    subprocess.Popen(
+                        [
+                            "curl",
+                            "-fsSL",
+                            "--retry",
+                            "3",
+                            "-r",
+                            f"{edges[i]}-{edges[i + 1] - 1}",
+                            BASE + name,
+                            "-o",
+                            str(part),
+                        ]
+                    )
+                )
             if any(p.wait() != 0 for p in procs):
                 raise RuntimeError(f"download failed: {name}")
             with tar.open("wb") as whole:
@@ -62,20 +76,31 @@ def fetch(root, offline=False):
             subprocess.run(["tar", "-x", "-f", str(tar), "-C", str(dest), "--include", f"*{SITE}*"], check=True)
             tar.unlink()
             if manifest is not None:  # a new contrast: pin its files, keep every existing pin
-                manifest["files"] |= {str(q.relative_to(out)): {"bytes": q.stat().st_size, "sha256": sha256(q)}
-                                      for q in sorted(dest.rglob("*")) if q.is_file()}
+                manifest["files"] |= {
+                    str(q.relative_to(out)): {"bytes": q.stat().st_size, "sha256": sha256(q)}
+                    for q in sorted(dest.rglob("*"))
+                    if q.is_file()
+                }
                 manifest["urls"][contrast] = BASE + name
                 manifest["archive_bytes"][contrast] = size
                 manifest_path.write_text(json.dumps(manifest, indent=1))
     sheet = out / SHEET[0]
     if manifest is None:
         subprocess.run(["curl", "-fsSL", "--retry", "2", BASE + SHEET[0], "-o", str(sheet)], check=True)
-        files = {str(p.relative_to(out)): {"bytes": p.stat().st_size, "sha256": sha256(p)}
-                 for p in sorted(out.rglob("*")) if p.is_file() and p.name != "manifest.json"}
-        manifest = {"schema": 1, "source": "IXI dataset, brain-development.org/ixi-dataset (CC BY-SA 3.0)",
-                    "urls": {k: BASE + v[0] for k, v in TARS.items()} | {"sheet": BASE + SHEET[0]},
-                    "archive_bytes": {k: v[1] for k, v in TARS.items()}, "site_filter": SITE,
-                    "fetched": datetime.date.today().isoformat(), "files": files}
+        files = {
+            str(p.relative_to(out)): {"bytes": p.stat().st_size, "sha256": sha256(p)}
+            for p in sorted(out.rglob("*"))
+            if p.is_file() and p.name != "manifest.json"
+        }
+        manifest = {
+            "schema": 1,
+            "source": "IXI dataset, brain-development.org/ixi-dataset (CC BY-SA 3.0)",
+            "urls": {k: BASE + v[0] for k, v in TARS.items()} | {"sheet": BASE + SHEET[0]},
+            "archive_bytes": {k: v[1] for k, v in TARS.items()},
+            "site_filter": SITE,
+            "fetched": datetime.date.today().isoformat(),
+            "files": files,
+        }
         manifest_path.write_text(json.dumps(manifest, indent=1))
     for rel, entry in manifest["files"].items():
         path = out / rel

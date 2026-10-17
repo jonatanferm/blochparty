@@ -105,10 +105,16 @@ def projected_128(throughput: float) -> float:
 
 def git_commit() -> str:
     try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True,
-                             cwd=Path(__file__).parent, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True,
-                               cwd=Path(__file__).parent).stdout.strip()
+        out = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent,
+            check=True,
+        ).stdout.strip()
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain"], capture_output=True, text=True, cwd=Path(__file__).parent
+        ).stdout.strip()
         return out + ("-dirty" if dirty else "")
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
@@ -119,8 +125,12 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
-    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "gpu", "metal", "cuda"],
-                   help="gpu: CUDA where an NVIDIA GPU is, else Metal")
+    p.add_argument(
+        "--backend",
+        default="torch",
+        choices=["torch", "chunked", "gpu", "metal", "cuda"],
+        help="gpu: CUDA where an NVIDIA GPU is, else Metal",
+    )
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
     p.add_argument("--checkpoint-every", type=int, default=None, help="gpu / metal / cuda --grad: checkpoint interval")
     p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
@@ -138,8 +148,12 @@ def main(argv=None):
         # compile the kernels (Metal: the library; CUDA: NVRTC or the disk cache) and run the first dispatch outside
         # the timed region (~80 ms of pipeline setup on Metal, otherwise charged to the first case)
         warm = bp.shepp_logan(8, dtype=torch.float32)
-        bp.simulate(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
-                    bp.birdcage_sensitivities(warm.pos, n_coils=8), engine=engine)
+        bp.simulate(
+            warm,
+            bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
+            bp.birdcage_sensitivities(warm.pos, n_coils=8),
+            engine=engine,
+        )
         simulate = functools.partial(bp.simulate, engine=engine, checkpoint_every=args.checkpoint_every)
         threads = "GPU"
         backend = "metal (Apple GPU)" if engine == "metal" else f"cuda ({torch.cuda.get_device_name()})"
@@ -147,28 +161,43 @@ def main(argv=None):
         if args.record:
             p.error("--record tracks forward runs only")
         backend += " | forward + backward"
-    print(f"blochparty {git_commit()} | torch {torch.__version__} | {platform.processor() or platform.machine()}"
-          f" | {args.device} {args.dtype} | {backend} | {threads} threads")
-    print(f"{'case':>7} {'spins':>9} {'segments':>9} {'time [s]':>9} {'spin-seg/s':>11} {'spin-smp/s':>11}"
-          + (f" {'fwd [s]':>8}" if args.grad else ""))
+    print(
+        f"blochparty {git_commit()} | torch {torch.__version__} | {platform.processor() or platform.machine()}"
+        f" | {args.device} {args.dtype} | {backend} | {threads} threads"
+    )
+    print(
+        f"{'case':>7} {'spins':>9} {'segments':>9} {'time [s]':>9} {'spin-seg/s':>11} {'spin-smp/s':>11}"
+        + (f" {'fwd [s]':>8}" if args.grad else "")
+    )
     results = []
     for name in args.cases:
         run = run_grad_case if args.grad else run_case
         r = min((run(name, dtype, args.device, simulate) for _ in range(args.repeat)), key=lambda r: r["seconds"])
         results.append(r)
-        print(f"{r['case']:>7} {r['spins']:>9} {r['segments']:>9} {r['seconds']:>9.2f}"
-              f" {r['spin_segments_per_s']:>11.2e} {r['spin_samples_per_s']:>11.2e}"
-              + (f" {r['forward_seconds']:>8.2f}" if args.grad else ""), flush=True)
+        print(
+            f"{r['case']:>7} {r['spins']:>9} {r['segments']:>9} {r['seconds']:>9.2f}"
+            f" {r['spin_segments_per_s']:>11.2e} {r['spin_samples_per_s']:>11.2e}"
+            + (f" {r['forward_seconds']:>8.2f}" if args.grad else ""),
+            flush=True,
+        )
     peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1 << 20 if sys.platform == "darwin" else 1 << 10)
     best = max(results, key=lambda r: r["spins"])
     proj = projected_128(best["spin_segments_per_s"])
     print(f"peak RSS {peak_mb:.0f} MB | projected 3D 128^3 at {best['case']} throughput: {proj / 60:.0f} min")
 
     if args.record:
-        entry = {"date": datetime.now(timezone.utc).isoformat(timespec="seconds"), "commit": git_commit(),
-                 "torch": torch.__version__, "machine": platform.machine(), "device": args.device,
-                 "dtype": args.dtype, "threads": threads, "peak_rss_mb": round(peak_mb),
-                 "projected_128_min": round(proj / 60, 1), "results": results}
+        entry = {
+            "date": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "commit": git_commit(),
+            "torch": torch.__version__,
+            "machine": platform.machine(),
+            "device": args.device,
+            "dtype": args.dtype,
+            "threads": threads,
+            "peak_rss_mb": round(peak_mb),
+            "projected_128_min": round(proj / 60, 1),
+            "results": results,
+        }
         if args.backend != "torch":
             entry.update(backend=engine if args.backend == "gpu" else args.backend)
         if args.repeat > 1:

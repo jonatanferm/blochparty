@@ -65,9 +65,19 @@ def first_trs(seq: bp.Sequence, n: int = 3) -> bp.Sequence:
     tr = [starts[0]] + [s for a, s in zip(starts[:-1], starts[1:]) if t[s] - t[a] > 1.0]
     e = tr[n]
     cut = lambda v: None if v is None else v[:e]
-    return replace(seq, dt=seq.dt[:e], rf=seq.rf[:e], grad=seq.grad[:e], adc_phase=seq.adc_phase[:e],
-                   is_rf=seq.is_rf[:e], adc=seq.adc[:e], spoil=seq.spoil[:e], b0_offset=cut(seq.b0_offset),
-                   rf_freq=cut(seq.rf_freq), meta={})
+    return replace(
+        seq,
+        dt=seq.dt[:e],
+        rf=seq.rf[:e],
+        grad=seq.grad[:e],
+        adc_phase=seq.adc_phase[:e],
+        is_rf=seq.is_rf[:e],
+        adc=seq.adc[:e],
+        spoil=seq.spoil[:e],
+        b0_offset=cut(seq.b0_offset),
+        rf_freq=cut(seq.rf_freq),
+        meta={},
+    )
 
 
 def echoes(seq, t1, t2, b1) -> np.ndarray:
@@ -78,8 +88,14 @@ def echoes(seq, t1, t2, b1) -> np.ndarray:
     rep = lambda v: torch.as_tensor(np.repeat(v, NZ), dtype=torch.float64)
     pos = torch.zeros(n, 3, dtype=torch.float64)
     pos[:, 2] = z.repeat(len(t2))
-    ph = bp.Phantom(pos=pos, pd=torch.ones(n, dtype=torch.float64), t1=rep(t1), t2=rep(t2),
-                    db0=torch.zeros(n, dtype=torch.float64), b1=rep(b1))
+    ph = bp.Phantom(
+        pos=pos,
+        pd=torch.ones(n, dtype=torch.float64),
+        t1=rep(t1),
+        t2=rep(t2),
+        db0=torch.zeros(n, dtype=torch.float64),
+        b1=rep(b1),
+    )
     coils = torch.zeros(n, len(t2), dtype=torch.complex64)
     coils[torch.arange(n), torch.arange(n) // NZ] = 1.0 / NZ
     run = functools.partial(bp.simulate, engine="gpu" if bp.engines.available("gpu") else "core")
@@ -114,15 +130,18 @@ def main():
     np.save(CACHE / "truth.npy", np.array(truth))
     dig_path = CACHE / "digital.npz"
     if not dig_path.exists():
-        subprocess.run([sys.executable, str(HERE / "spiral_tse_recon.py"), "digital", CACHE / "truth.npy", dig_path],
-                       check=True)
+        subprocess.run(
+            [sys.executable, str(HERE / "spiral_tse_recon.py"), "digital", CACHE / "truth.npy", dig_path], check=True
+        )
     dig = np.load(dig_path)
     floor = [residual(d, t[None])[0][0] for d, t in zip(dig["noisy"], truth)]
     clean = [residual(d, t[None])[0][0] for d, t in zip(dig["clean"], truth)]
     print("tube   mono T2 [ms]  mono resid | Bloch T2 [ms]  Bloch resid | method: noise-free, with noise")
     for j, ((T2m, mono, T2b, rb), fl, cl) in enumerate(zip(rows, floor, clean)):
-        print(f"{j + 1:4d}   {1e3 * T2m:9.1f}   {100 * mono:8.2f} % | {1e3 * T2b:10.1f}   {100 * rb:9.2f} % |"
-              f" {100 * cl:5.2f} %, {100 * fl:5.2f} %")
+        print(
+            f"{j + 1:4d}   {1e3 * T2m:9.1f}   {100 * mono:8.2f} % | {1e3 * T2b:10.1f}   {100 * rb:9.2f} % |"
+            f" {100 * cl:5.2f} %, {100 * fl:5.2f} %"
+        )
 
 
 if __name__ == "__main__":

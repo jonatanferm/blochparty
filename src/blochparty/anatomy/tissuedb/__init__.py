@@ -8,6 +8,7 @@ controlled vocabulary of dotted tissue ids and their BrainWeb class). ``load()``
 falling back to ``anatomy.DEFAULT_TISSUES`` per field. ``DEFAULT_TISSUES`` itself is not built from
 here: switching is a decision, and ``tissue_table`` returns a candidate.
 """
+
 from __future__ import annotations
 
 import csv
@@ -24,10 +25,25 @@ from ..tables import DEFAULT_TISSUES
 ROOT = Path(__file__).resolve().parent
 
 # property -> SI unit
-PROPERTIES = {"t1": "s", "t2": "s", "t2star": "s", "bound_t2": "s", "md": "m^2/s", "fa": "1",
-              "bound_fraction": "1", "exchange_rate": "1/s", "water_content_mass": "1", "pd": "1",
-              "fat_fraction": "1", "chi": "ppm", "chi_qsm": "ppm", "permittivity_rel": "1", "conductivity": "S/m",
-              "myelin_water_fraction": "1", "myelin_water_t2": "s"}
+PROPERTIES = {
+    "t1": "s",
+    "t2": "s",
+    "t2star": "s",
+    "bound_t2": "s",
+    "md": "m^2/s",
+    "fa": "1",
+    "bound_fraction": "1",
+    "exchange_rate": "1/s",
+    "water_content_mass": "1",
+    "pd": "1",
+    "fat_fraction": "1",
+    "chi": "ppm",
+    "chi_qsm": "ppm",
+    "permittivity_rel": "1",
+    "conductivity": "S/m",
+    "myelin_water_fraction": "1",
+    "myelin_water_t2": "s",
+}
 FRACTIONS = {"fa", "bound_fraction", "water_content_mass", "pd", "fat_fraction", "myelin_water_fraction"}
 FIELD_DEPENDENT = {"t1", "t2", "t2star", "permittivity_rel", "conductivity"}  # field_T required, no field fallback
 FIELD_PREFERRED = {"bound_fraction", "exchange_rate", "bound_t2"}  # other field allowed, marked assumed
@@ -35,10 +51,20 @@ SD_KINDS = {"between_subject", "within_subject", "specimen", "across_studies", "
 STATES = {"in_vivo", "ex_vivo", "in_vitro", "compilation", "physical"}
 KINDS = {"article", "abstract", "review", "database", "calibration"}
 # TissueProperties field -> database property
-TABLE_PROPERTIES = {"pd": "pd", "t1": "t1", "t2": "t2", "chi": "chi", "t2star": "t2star",
-                    "bound_fraction": "bound_fraction", "exchange_rate": "exchange_rate", "bound_t2": "bound_t2",
-                    "diffusivity": "md", "fat_fraction": "fat_fraction",
-                    "myelin_water_fraction": "myelin_water_fraction", "myelin_water_t2": "myelin_water_t2"}
+TABLE_PROPERTIES = {
+    "pd": "pd",
+    "t1": "t1",
+    "t2": "t2",
+    "chi": "chi",
+    "t2star": "t2star",
+    "bound_fraction": "bound_fraction",
+    "exchange_rate": "exchange_rate",
+    "bound_t2": "bound_t2",
+    "diffusivity": "md",
+    "fat_fraction": "fat_fraction",
+    "myelin_water_fraction": "myelin_water_fraction",
+    "myelin_water_t2": "myelin_water_t2",
+}
 _SCALE = {"chi": 1e-6}  # database ppm -> TissueProperties SI
 
 
@@ -114,14 +140,37 @@ def load(root: str | None = None) -> Database:
     """Read the three CSV files (from ``root``, default: the package directory)."""
     root = root or ROOT
     rows = _read(root, "measurements.csv")
-    sources = {r["key"]: Source(r["key"], r["authors"], int(r["year"]), r["title"], r["venue"], r["doi"],
-                                r["url"], r["kind"], r["note"]) for r in _read(root, "sources.csv")}
-    tissues = {r["id"]: Tissue(r["id"], r["name"], r["parent"], r["brainweb_class"], r["description"])
-               for r in _read(root, "tissues.csv")}
-    meas = tuple(Measurement(r["tissue"], r["region"], r["property"], _float(r["field_T"]), float(r["value"]),
-                             _float(r["sd"]), r["sd_kind"], int(r["n"]) if r["n"].strip() else None, r["unit"],
-                             r["species"], r["state"], _float(r["temperature_C"]), r["method"], r["source"],
-                             r["location"], r["note"]) for r in rows)
+    sources = {
+        r["key"]: Source(
+            r["key"], r["authors"], int(r["year"]), r["title"], r["venue"], r["doi"], r["url"], r["kind"], r["note"]
+        )
+        for r in _read(root, "sources.csv")
+    }
+    tissues = {
+        r["id"]: Tissue(r["id"], r["name"], r["parent"], r["brainweb_class"], r["description"])
+        for r in _read(root, "tissues.csv")
+    }
+    meas = tuple(
+        Measurement(
+            r["tissue"],
+            r["region"],
+            r["property"],
+            _float(r["field_T"]),
+            float(r["value"]),
+            _float(r["sd"]),
+            r["sd_kind"],
+            int(r["n"]) if r["n"].strip() else None,
+            r["unit"],
+            r["species"],
+            r["state"],
+            _float(r["temperature_C"]),
+            r["method"],
+            r["source"],
+            r["location"],
+            r["note"],
+        )
+        for r in rows
+    )
     return Database(meas, sources, tissues)
 
 
@@ -129,8 +178,15 @@ def _same_field(a, b):
     return a is not None and b is not None and abs(a - b) < 1e-6
 
 
-def query(tissue: str, property: str, field_T: float | None = None, *, db: Database | None = None,
-          descendants: bool = False, **filters) -> list[Measurement]:
+def query(
+    tissue: str,
+    property: str,
+    field_T: float | None = None,
+    *,
+    db: Database | None = None,
+    descendants: bool = False,
+    **filters,
+) -> list[Measurement]:
     """Rows of ``tissue`` (and its descendants if asked) and ``property``; ``field_T`` keeps rows at that
     field (rows without a field are kept for field-independent properties); ``filters`` match any other
     column exactly, e.g. ``species="human", state="in_vivo", source="stanisz2005"``."""
@@ -145,8 +201,11 @@ def query(tissue: str, property: str, field_T: float | None = None, *, db: Datab
     for m in db.measurements:
         if m.tissue not in ids or m.property != property:
             continue
-        if field_T is not None and not _same_field(m.field_T, field_T) and \
-                not (m.field_T is None and property not in FIELD_DEPENDENT | FIELD_PREFERRED):
+        if (
+            field_T is not None
+            and not _same_field(m.field_T, field_T)
+            and not (m.field_T is None and property not in FIELD_DEPENDENT | FIELD_PREFERRED)
+        ):
             continue
         if all(getattr(m, k) == v for k, v in filters.items()):
             out.append(m)
@@ -159,8 +218,16 @@ def _tier(m: Measurement, property: str, field_T):
     if not field_ok and property in FIELD_DEPENDENT:
         return None
     human = m.species == "human"
-    order = [(True, "in_vivo"), (True, "compilation"), (True, "ex_vivo"), (True, "in_vitro"), (None, "physical"),
-             (False, "in_vivo"), (False, "ex_vivo"), (False, "in_vitro")]
+    order = [
+        (True, "in_vivo"),
+        (True, "compilation"),
+        (True, "ex_vivo"),
+        (True, "in_vitro"),
+        (None, "physical"),
+        (False, "in_vivo"),
+        (False, "ex_vivo"),
+        (False, "in_vitro"),
+    ]
     for i, (h, state) in enumerate(order):
         if m.state == state and (h is None or h == human):
             return i + (0 if field_ok else len(order))
@@ -197,7 +264,7 @@ def combine(rows: list[Measurement]) -> tuple[float, float | None, list[str]]:
     else:
         between = abs(vals[0] - vals[-1]) / 2
     known = [s for s in sds if s is not None]
-    within = math.sqrt(sum(s * s for s in known) / len(known)) if known else 0.
+    within = math.sqrt(sum(s * s for s in known) / len(known)) if known else 0.0
     sd = math.hypot(within, between) if known or len(vals) > 1 else None
     return centre, sd, list(by_source)
 
@@ -208,11 +275,18 @@ def combine(rows: list[Measurement]) -> tuple[float, float | None, list[str]]:
 # its method's bias (docs/LESSONS.md) and is used only when a tier has no reference rows.
 _MODEL = r"MRF|fingerprint|SyMRI|QRAPMASTER|synthetic MRI|DESPOT|TOMROP|look[- ]locker"
 _REFERENCE = {
-    "t2": (re.compile(r"\b(SE|TSE|FSE|MEFSE|CPMG|GraSE|STEAM|TRUST)\b|spin[- ]echo|T2[- ]?prep", re.I),
-           re.compile(_MODEL + r"|GESFIDE", re.I)),
-    "t1": (re.compile(r"\b(IR|SE-IR|IR-SE|SIR|IR-TSE|SR)\b|inversion[- ]recovery|saturation[- ]recovery|"
-                      r"\bSE\b.*variable TR", re.I),
-           re.compile(_MODEL + r"|VFA|MOLLI|SASHA|MP2RAGE|MPRAGE|TFE|Deichmann", re.I)),
+    "t2": (
+        re.compile(r"\b(SE|TSE|FSE|MEFSE|CPMG|GraSE|STEAM|TRUST)\b|spin[- ]echo|T2[- ]?prep", re.I),
+        re.compile(_MODEL + r"|GESFIDE", re.I),
+    ),
+    "t1": (
+        re.compile(
+            r"\b(IR|SE-IR|IR-SE|SIR|IR-TSE|SR)\b|inversion[- ]recovery|saturation[- ]recovery|"
+            r"\bSE\b.*variable TR",
+            re.I,
+        ),
+        re.compile(_MODEL + r"|VFA|MOLLI|SASHA|MP2RAGE|MPRAGE|TFE|Deichmann", re.I),
+    ),
 }
 
 
@@ -238,12 +312,27 @@ def reference_method(m: Measurement) -> bool:
     return bool(ref.search(m.method)) and not model.search(m.method)
 
 
-_TIER_NAMES = ["human in vivo", "human compilation", "human ex vivo", "human in vitro", "physical",
-               "animal in vivo", "animal ex vivo", "animal in vitro"]
+_TIER_NAMES = [
+    "human in vivo",
+    "human compilation",
+    "human ex vivo",
+    "human in vitro",
+    "physical",
+    "animal in vivo",
+    "animal ex vivo",
+    "animal in vitro",
+]
 
 
-def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Database | None = None,
-           descendants: bool = False, **filters) -> Distribution | None:
+def pooled(
+    tissue: str,
+    property: str,
+    field_T: float | None = None,
+    *,
+    db: Database | None = None,
+    descendants: bool = False,
+    **filters,
+) -> Distribution | None:
     """Pool the best available rows into a Distribution (None if there are none): human in vivo at
     ``field_T`` if any (assumed=False); otherwise the first non-empty tier of human compilation, ex
     vivo, in vitro, physical, then animal (assumed=True). T1, T2, T2* and dielectric values never fall
@@ -279,19 +368,25 @@ def pooled(tissue: str, property: str, field_T: float | None = None, *, db: Data
         ref = [m for m in use if reference_method(m)]
         if ref:
             left = sorted({m.source for m in use} - {m.source for m in ref})
-            method_note = ("; reference methods only" + (f", left out: {', '.join(left)}" if left else "")
-                           if len(ref) < len(use) else "")
+            method_note = (
+                "; reference methods only" + (f", left out: {', '.join(left)}" if left else "")
+                if len(ref) < len(use)
+                else ""
+            )
             use = ref
         else:
             method_note = "; no reference-method rows"
     mean, sd, keys = combine(use)
     unit = PROPERTIES[property]
-    scale = _SCALE.get(property, 1.)
+    scale = _SCALE.get(property, 1.0)
     tier = _TIER_NAMES[best % len(_TIER_NAMES)] + ("" if best < len(_TIER_NAMES) else ", other field")
     where = ", ".join(f"{k} ({'; '.join(sorted({m.location for m in use if m.source == k}))})" for k in keys)
-    citation = (f"tissuedb pooled {tissue} {property}" + (f" at {field_T:g} T" if field_T is not None else "")
-                + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}"
-                + (f"; flagged rows left out: {', '.join(flagged)}" if flagged else ""))
+    citation = (
+        f"tissuedb pooled {tissue} {property}"
+        + (f" at {field_T:g} T" if field_T is not None else "")
+        + f" [{unit}] from {len(keys)} source(s), tier {tier}: {where}{method_note}"
+        + (f"; flagged rows left out: {', '.join(flagged)}" if flagged else "")
+    )
     return Distribution(mean * scale, None if sd is None else sd * scale, citation, best != 0 or bool(cal))
 
 
@@ -304,8 +399,11 @@ def _from_ancestor(t: Tissue, name: str, prop: str, field_T: float, db: Database
         if d is None and a.brainweb_class in base_table:
             d = getattr(base_table[a.brainweb_class], name)
         if d is not None:
-            return replace(d, citation=f"Assumption: {a.id} used for {t.id}: " + d.citation.removeprefix("Assumption: "),
-                           assumed=True)
+            return replace(
+                d,
+                citation=f"Assumption: {a.id} used for {t.id}: " + d.citation.removeprefix("Assumption: "),
+                assumed=True,
+            )
         a = db.tissues.get(a.parent)
     return None
 
@@ -343,13 +441,21 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
             continue
         f = values["bound_fraction"]
         if f is not None and f.mean > 0 and (values["exchange_rate"] is None or values["bound_t2"] is None):
-            values["bound_fraction"] = Distribution(0., None, f"Assumption: no exchange rate or bound T2 for {t.id}, "
-                                                    f"so its bound pool ({f.mean:.3g}; {f.citation}) is omitted", True)
+            values["bound_fraction"] = Distribution(
+                0.0,
+                None,
+                f"Assumption: no exchange rate or bound T2 for {t.id}, "
+                f"so its bound pool ({f.mean:.3g}; {f.citation}) is omitted",
+                True,
+            )
         # to_phantom(mt=True / diffusion=True) needs these for every signalling class: say so explicitly
         if values["pd"].mean > 0:
-            for key, what in (("bound_fraction", "no MT data, no semi-solid pool"), ("diffusivity", "no diffusion data, D = 0")):
+            for key, what in (
+                ("bound_fraction", "no MT data, no semi-solid pool"),
+                ("diffusivity", "no diffusion data, D = 0"),
+            ):
                 if values[key] is None:
-                    values[key] = Distribution(0., None, f"Assumption: tissuedb has {what} for {t.id}", True)
+                    values[key] = Distribution(0.0, None, f"Assumption: tissuedb has {what} for {t.id}", True)
         star, t2 = values["t2star"], values["t2"]
         if star is not None and star.mean > t2.mean:
             values["t2star"] = Distribution(t2.mean, None, "clipped to T2: " + star.citation, True)
@@ -357,5 +463,18 @@ def tissue_table(field_T: float, *, db: Database | None = None) -> dict[str, Tis
     return out
 
 
-__all__ = ["Database", "Measurement", "Source", "Tissue", "PROPERTIES", "load", "query", "pooled", "combine",
-           "reference_method", "is_lipid", "LIPIDS", "tissue_table"]
+__all__ = [
+    "Database",
+    "Measurement",
+    "Source",
+    "Tissue",
+    "PROPERTIES",
+    "load",
+    "query",
+    "pooled",
+    "combine",
+    "reference_method",
+    "is_lipid",
+    "LIPIDS",
+    "tissue_table",
+]

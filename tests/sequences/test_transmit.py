@@ -28,8 +28,13 @@ def test_saturation_lowers_the_flip_and_ampm_rotates_it():
     # a 90 deg hard pulse of amplitude 250 Hz: Rapp output and phase predict the excitation exactly
     t = 1e-3
     seq = bp.SequenceBuilder().rf(t, flip_deg=90.0, n_steps=10).build()
-    one = bp.Phantom(pos=torch.zeros(1, 3, dtype=f64), pd=torch.ones(1, dtype=f64), t1=torch.full((1,), 1e9, dtype=f64),
-                     t2=torch.full((1,), 1e9, dtype=f64), db0=torch.zeros(1, dtype=f64))
+    one = bp.Phantom(
+        pos=torch.zeros(1, 3, dtype=f64),
+        pd=torch.ones(1, dtype=f64),
+        t1=torch.full((1,), 1e9, dtype=f64),
+        t2=torch.full((1,), 1e9, dtype=f64),
+        db0=torch.zeros(1, dtype=f64),
+    )
     a_sat, p, phi = 300.0, 2.0, 0.4
     m = bp.simulate(one, amplifier(seq, a_sat=a_sat, p=p, phi_max=phi)).m[0]
     amp = rapp(torch.tensor(250.0, dtype=f64), 1.0, a_sat, p)

@@ -2,6 +2,7 @@
 one segment of the same duration, gradient moment and b0_offset integral gives the same signal
 for static spins (core in float64, Metal in float32), keeps RF and ADC segments bit for bit, and
 passes gradients to the original segments."""
+
 import pytest
 import torch
 
@@ -16,20 +17,38 @@ f64 = torch.float64
 def phantom(n=400, mt=True):
     g = torch.Generator().manual_seed(0)
     pos = (torch.rand(n, 3, generator=g, dtype=f64) - 0.5) * torch.tensor([0.2, 0.2, 0.008], dtype=f64)
-    ph = bp.Phantom(pos, torch.rand(n, generator=g, dtype=f64) + 0.5, torch.full((n,), 1.0, dtype=f64),
-                    torch.full((n,), 0.08, dtype=f64), (torch.rand(n, generator=g, dtype=f64) - 0.5) * 60)
+    ph = bp.Phantom(
+        pos,
+        torch.rand(n, generator=g, dtype=f64) + 0.5,
+        torch.full((n,), 1.0, dtype=f64),
+        torch.full((n,), 0.08, dtype=f64),
+        (torch.rand(n, generator=g, dtype=f64) - 0.5) * 60,
+    )
     if mt:
-        ph.bound = BoundPool(torch.full((n,), 0.15, dtype=f64), torch.full((n,), 19.0, dtype=f64), ph.t1,
-                             torch.full((n,), 9.7e-6, dtype=f64), model="rate")
+        ph.bound = BoundPool(
+            torch.full((n,), 0.15, dtype=f64),
+            torch.full((n,), 19.0, dtype=f64),
+            ph.t1,
+            torch.full((n,), 9.7e-6, dtype=f64),
+            model="rate",
+        )
     return ph
 
 
 CASES = {
-    "TSE, crushers, gradient spoiling": lambda: bp.tse_2d(16, etl=4, tr=0.5, slice_thickness=5e-3, spoiling="gradient",
-                                                          n_dummy=1),
+    "TSE, crushers, gradient spoiling": lambda: bp.tse_2d(
+        16, etl=4, tr=0.5, slice_thickness=5e-3, spoiling="gradient", n_dummy=1
+    ),
     "TSE, 5 slices (bound-only far pulses)": lambda: bp.tse_2d(
-        16, etl=4, tr=0.5, slice_thickness=5e-3, spoiling="gradient", n_dummy=1,
-        slice_order=[-0.01, 0.0, 0.01, -0.005, 0.005], bound_only_beyond=0.0075),
+        16,
+        etl=4,
+        tr=0.5,
+        slice_thickness=5e-3,
+        spoiling="gradient",
+        n_dummy=1,
+        slice_order=[-0.01, 0.0, 0.01, -0.005, 0.005],
+        bound_only_beyond=0.0075,
+    ),
     "GRE, RF spoiling, ramps": lambda: bp.gre_2d(16, ramps=True, spoiling="rf", slice_thickness=5e-3, n_dummy=2),
     "EPI (ADC on ramps)": lambda: bp.epi_2d(16, dwell=5e-6, slice_thickness=5e-3),
 }

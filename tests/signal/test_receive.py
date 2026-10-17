@@ -4,7 +4,6 @@ the filter's designed frequency response with no phase delay, the noise power th
 filter, the quantisation noise step^2 / 12 and clipping, an interference tone at the image
 column its frequency predicts."""
 
-
 import numpy as np
 import pytest
 import torch
@@ -18,8 +17,13 @@ f64 = torch.float64
 
 def tones(freqs):
     n = len(freqs)
-    return bp.Phantom(pos=torch.zeros(n, 3, dtype=f64), pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
-                      t2=torch.full((n,), 1e6, dtype=f64), db0=torch.as_tensor(freqs, dtype=f64))
+    return bp.Phantom(
+        pos=torch.zeros(n, 3, dtype=f64),
+        pd=torch.ones(n, dtype=f64),
+        t1=torch.full((n,), 1e6, dtype=f64),
+        t2=torch.full((n,), 1e6, dtype=f64),
+        db0=torch.as_tensor(freqs, dtype=f64),
+    )
 
 
 def test_decimation_has_the_designed_response_and_no_delay():
@@ -49,7 +53,9 @@ def test_noise_power_through_the_filter():
 
 def test_quantisation_noise_and_clipping():
     g = torch.Generator().manual_seed(1)
-    x = torch.complex(torch.rand(100000, generator=g, dtype=f64) - 0.5, torch.rand(100000, generator=g, dtype=f64) - 0.5)
+    x = torch.complex(
+        torch.rand(100000, generator=g, dtype=f64) - 0.5, torch.rand(100000, generator=g, dtype=f64) - 0.5
+    )
     bits, fs = 10, 1.0
     q = quantise(x[None], bits, fs)[0]
     step = fs / 2 ** (bits - 1)
@@ -82,6 +88,7 @@ def test_spikes_hit_isolated_samples():
     hit = (s.abs() > 0).any(0)
     assert 1 <= int(hit.sum()) <= 5 and torch.allclose(s.abs()[:, hit], torch.full_like(s.abs()[:, hit], 10.0))
 
+
 def test_coil_offset_puts_the_ring_behind_the_occiput():
     """A box head from y = -90 to +90 mm: the ring's back ``gap`` behind the head's back."""
     n, h = (40, 46, 40), 4e-3
@@ -95,17 +102,18 @@ def test_coil_offset_puts_the_ring_behind_the_occiput():
     assert coil_offset(an, np.array([0.0]), 0.01, radius=0.14, gap=0.025) == pytest.approx(off - 0.01)
 
 
-
 def test_normalised_sensitivities_flatten_a_smooth_profile():
     """The scanner's prescan normalisation divides by a smooth estimate of the array's RSS sensitivity: a profile that
     varies slowly against the smoothing comes out flat inside the object (the edges keep some excess, by design)."""
     g = torch.Generator().manual_seed(0)
-    pos = (torch.rand(40000, 3, generator=g, dtype=torch.float64) - 0.5) * torch.tensor([0.16, 0.16, 0.0], dtype=torch.float64)
-    pos = pos[(pos[:, :2] ** 2).sum(1) < 0.08 ** 2]
+    pos = (torch.rand(40000, 3, generator=g, dtype=torch.float64) - 0.5) * torch.tensor(
+        [0.16, 0.16, 0.0], dtype=torch.float64
+    )
+    pos = pos[(pos[:, :2] ** 2).sum(1) < 0.08**2]
     sens = torch.stack([torch.exp(pos[:, 0] / 0.1), 0.5 * torch.exp(-pos[:, 1] / 0.1)], 1).to(torch.complex128)
     out = normalised_sensitivities(sens, pos, smooth_mm=30.0)
     rss = out.abs().pow(2).sum(1).sqrt()
-    inner = (pos[:, :2] ** 2).sum(1) < 0.04 ** 2
+    inner = (pos[:, :2] ** 2).sum(1) < 0.04**2
     raw = sens.abs().pow(2).sum(1).sqrt()[inner]
     assert float(raw.max() / raw.min()) > 1.8  # the profile spans almost 2x over the inner disc
     assert float(rss[inner].max() / rss[inner].min()) < 1.15

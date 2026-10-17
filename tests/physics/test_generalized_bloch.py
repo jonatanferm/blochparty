@@ -28,8 +28,13 @@ def test_lorentzian_is_bloch_second_order():
         return [-x / T2 + wy * z, -y / T2 - wx * z, -wy * x + wx * y + r1 * (1 - z)]
 
     ref = solve_ivp(bloch, (0, trf), [0, 0, 1], method="DOP853", rtol=1e-12, atol=1e-14, max_step=trf / 2000).y[2, -1]
-    err = [abs(gb.simulate_pulse(gb.rectangular(alpha, trf, h, delta), h, t2s=T2, shape="lorentzian", r1s=r1)["zs"][-1]
-               - ref) for h in (0.4e-6, 0.2e-6, 0.1e-6)]
+    err = [
+        abs(
+            gb.simulate_pulse(gb.rectangular(alpha, trf, h, delta), h, t2s=T2, shape="lorentzian", r1s=r1)["zs"][-1]
+            - ref
+        )
+        for h in (0.4e-6, 0.2e-6, 0.1e-6)
+    ]
     assert err[-1] < 2e-5  # a 20 us pi pulse: w1 = 1.6e5 rad/s, h = 0.1 us
     assert 3.5 < err[0] / err[1] < 5 and 3.5 < err[1] / err[2] < 5, err
 
@@ -48,8 +53,11 @@ def test_continuous_wave_reaches_henkelman(shape):
     zs = gb.simulate_pulse(gb.rectangular(w1 * t, t, h, delta), h, t2s=T2, shape=shape, r1s=r1)["zs"][-1]
     hz, t2 = torch.tensor(delta / (2 * math.pi), dtype=torch.float64), torch.tensor(T2, dtype=torch.float64)
     x = T2 * delta
-    pig = {"lorentzian": float(lorentzian(hz, t2)), "gaussian": T2 * math.sqrt(math.pi / 2) * math.exp(-x * x / 2),
-           "superlorentzian": float(superlorentzian(hz, t2, cutoff=1e-9))}[shape]
+    pig = {
+        "lorentzian": float(lorentzian(hz, t2)),
+        "gaussian": T2 * math.sqrt(math.pi / 2) * math.exp(-x * x / 2),
+        "superlorentzian": float(superlorentzian(hz, t2, cutoff=1e-9)),
+    }[shape]
     assert zs == pytest.approx(r1 / (r1 + w1**2 * pig), abs=2e-4)
 
 
@@ -59,18 +67,26 @@ def test_free_pool_coupling_matches_two_pool_ode():
     alpha, trf, h = math.pi / 2, 200e-6, 0.1e-6
     w = gb.rectangular(alpha, trf, h)
     w1 = alpha / trf
-    out = gb.simulate_pulse(w, h, t2s=T2, shape="lorentzian", r1s=r1s, m0s=m0s, k=k,
-                            free=dict(m0=m0f, r1=r1f, r2=r2f, dw=2 * math.pi * 50))
+    out = gb.simulate_pulse(
+        w, h, t2s=T2, shape="lorentzian", r1s=r1s, m0s=m0s, k=k, free=dict(m0=m0f, r1=r1f, r2=r2f, dw=2 * math.pi * 50)
+    )
     kf = k * m0s / m0f
 
     def rhs(_, m):
         xf, yf, zf, xs, ys, zs = m
         dw = 2 * math.pi * 50
-        return [yf * dw - r2f * xf, zf * w1 - xf * dw - r2f * yf, -yf * w1 - r1f * (zf - m0f) - kf * zf + k * zs,
-                -xs / T2, -ys / T2 - w1 * zs, w1 * ys + r1s * (m0s - zs) + kf * zf - k * zs]
+        return [
+            yf * dw - r2f * xf,
+            zf * w1 - xf * dw - r2f * yf,
+            -yf * w1 - r1f * (zf - m0f) - kf * zf + k * zs,
+            -xs / T2,
+            -ys / T2 - w1 * zs,
+            w1 * ys + r1s * (m0s - zs) + kf * zf - k * zs,
+        ]
 
-    ref = solve_ivp(rhs, (0, trf), [0, 0, m0f, 0, 0, m0s], method="DOP853", rtol=1e-12, atol=1e-14,
-                    max_step=trf / 4000).y[:, -1]
+    ref = solve_ivp(
+        rhs, (0, trf), [0, 0, m0f, 0, 0, m0s], method="DOP853", rtol=1e-12, atol=1e-14, max_step=trf / 4000
+    ).y[:, -1]
     assert np.abs(out["free"][-1] - ref[:3]).max() < 1e-6
     assert abs(out["zs"][-1] - ref[5]) < 1e-6
 
@@ -81,8 +97,14 @@ def test_free_pool_coupling_matches_two_pool_ode():
 def single_pool(shape, **kw):
     one = lambda v: torch.full((1,), v, dtype=torch.float64)
     pool = dict(f=1.0, k=0.0, t1=1.0, t2=12e-6, lineshape=shape, model="generalized") | kw
-    return bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=one(1.0), t1=one(1.0), t2=one(0.05),
-                      db0=one(0.0), bound=bp.BoundPool(**pool))
+    return bp.Phantom(
+        pos=torch.zeros(1, 3, dtype=torch.float64),
+        pd=one(1.0),
+        t1=one(1.0),
+        t2=one(0.05),
+        db0=one(0.0),
+        bound=bp.BoundPool(**pool),
+    )
 
 
 @pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
@@ -103,11 +125,21 @@ def test_engine_matches_reference_solver(shape, alpha, t_rf, monkeypatch):
 def test_engine_converges_second_order():
     ph = single_pool("superlorentzian", f=0.15, k=30.0)
     ph = bp.Phantom(ph.pos, ph.pd, ph.t1, ph.t2, torch.full((1,), 120.0, dtype=torch.float64), bound=ph.bound)
-    seq = bp.SequenceBuilder().rf(200e-6, flip_deg=150.0, n_steps=10).delay(1e-3).rf(50e-6, flip_deg=90.0, n_steps=5).build()
+    seq = (
+        bp.SequenceBuilder()
+        .rf(200e-6, flip_deg=150.0, n_steps=10)
+        .delay(1e-3)
+        .rf(50e-6, flip_deg=90.0, n_steps=5)
+        .build()
+    )
     run = lambda k: bp.simulate(ph, seq.subdivide_rf(k))
     ref = run(256)
-    err = [float(torch.cat([run(k).m.flatten(), run(k).m_bound]).sub(torch.cat([ref.m.flatten(), ref.m_bound])).abs().max())
-           for k in (4, 8, 16)]
+    err = [
+        float(
+            torch.cat([run(k).m.flatten(), run(k).m_bound]).sub(torch.cat([ref.m.flatten(), ref.m_bound])).abs().max()
+        )
+        for k in (4, 8, 16)
+    ]
     assert 3.5 < err[0] / err[1] < 5 and 3.5 < err[1] / err[2] < 5, err
 
 
@@ -118,8 +150,14 @@ def test_off_resonant_saturation_agrees_with_rate_model(offset):
     # lineshape differs from the cut one by < 1 % there)
     def z(model):
         one = lambda v: torch.full((1,), v, dtype=torch.float64)
-        ph = bp.Phantom(pos=torch.zeros(1, 3, dtype=torch.float64), pd=one(1.0), t1=one(1.0), t2=one(0.05),
-                        db0=one(-offset), bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model))
+        ph = bp.Phantom(
+            pos=torch.zeros(1, 3, dtype=torch.float64),
+            pd=one(1.0),
+            t1=one(1.0),
+            t2=one(0.05),
+            db0=one(-offset),
+            bound=bp.BoundPool(f=0.15, k=30.0, t1=1.0, t2=12e-6, model=model),
+        )
         seq = bp.SequenceBuilder().rf(0.5, amplitude=64.0, n_steps=5000).build()  # 100 us: sub-stepped
         return float(bp.simulate(ph, seq).m[0, 2])
 
@@ -129,7 +167,13 @@ def test_off_resonant_saturation_agrees_with_rate_model(offset):
 @pytest.mark.slow
 def test_engine_gradients():
     ph = single_pool("superlorentzian", f=0.15, k=30.0)
-    seq = bp.SequenceBuilder().rf(100e-6, flip_deg=120.0, n_steps=8).delay(2e-3).rf(60e-6, flip_deg=70.0, n_steps=4).build()
+    seq = (
+        bp.SequenceBuilder()
+        .rf(100e-6, flip_deg=120.0, n_steps=8)
+        .delay(2e-3)
+        .rf(60e-6, flip_deg=70.0, n_steps=4)
+        .build()
+    )
 
     def fn(f, k, t2b_us, rf):
         from dataclasses import replace
@@ -138,8 +182,12 @@ def test_engine_gradients():
         r = bp.simulate(p, replace(seq, rf=rf))
         return r.m, r.m_bound
 
-    args = [torch.tensor([0.15], dtype=torch.float64, requires_grad=True), torch.tensor([30.0], dtype=torch.float64, requires_grad=True),
-            torch.tensor([12.0], dtype=torch.float64, requires_grad=True), seq.rf.clone().requires_grad_()]
+    args = [
+        torch.tensor([0.15], dtype=torch.float64, requires_grad=True),
+        torch.tensor([30.0], dtype=torch.float64, requires_grad=True),
+        torch.tensor([12.0], dtype=torch.float64, requires_grad=True),
+        seq.rf.clone().requires_grad_(),
+    ]
     assert torch.autograd.gradcheck(fn, args, eps=1e-6, atol=1e-7, rtol=1e-4)
 
 

@@ -125,8 +125,9 @@ def start_offsets(res: Restriction, seed: int, idx, like: Tensor) -> Tensor:
     return r[:, None] * torch.stack([sz * torch.cos(th), sz * torch.sin(th), cz], -1)
 
 
-def walk_segment(r: Tensor, centre: Tensor, sqrt_d: Tensor, res: Restriction, dt: Tensor, segment: int, nsub: int,
-                 seed: int, idx) -> tuple[Tensor, Tensor]:
+def walk_segment(
+    r: Tensor, centre: Tensor, sqrt_d: Tensor, res: Restriction, dt: Tensor, segment: int, nsub: int, seed: int, idx
+) -> tuple[Tensor, Tensor]:
     """Effective position over a segment and the end position of restricted walkers."""
     h = dt / nsub
     acc = torch.zeros_like(r)

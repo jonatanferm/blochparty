@@ -39,8 +39,20 @@ ROOT = Path(__file__).resolve().parents[1] / "anatomy" / "data"
 # blochparty's BrainWeb classes -> labels of mariepy's brainweb_tissues.csv (Gabriel 1996 via IFAC).
 # Assumptions where the table has no class: marrow as fat, vessels as muscle (blood: sigma ~1.2 S/m,
 # between grey matter and CSF at 128 MHz).
-LABELS = {"background": 0, "csf": 1, "gm": 2, "wm": 3, "fat": 4, "muscle": 5, "skin": 5, "skull": 7,
-          "marrow": 4, "vessels": 5, "connective": 9, "dura": 9}
+LABELS = {
+    "background": 0,
+    "csf": 1,
+    "gm": 2,
+    "wm": 3,
+    "fat": 4,
+    "muscle": 5,
+    "skin": 5,
+    "skull": 7,
+    "marrow": 4,
+    "vessels": 5,
+    "connective": 9,
+    "dura": 9,
+}
 
 
 def say(text):
@@ -63,8 +75,9 @@ def ring_loops(body, count, clearance, height):
     centre = (sel.min(0).values + sel.max(0).values) / 2
     semi = (sel.max(0).values - sel.min(0).values)[:2] / 2 + clearance
     a = 2 * math.pi * torch.arange(count, dtype=torch.float64) / count
-    centres = torch.stack([centre[0] + semi[0] * torch.cos(a), centre[1] + semi[1] * torch.sin(a),
-                           torch.full_like(a, height)], 1)
+    centres = torch.stack(
+        [centre[0] + semi[0] * torch.cos(a), centre[1] + semi[1] * torch.sin(a), torch.full_like(a, height)], 1
+    )
     normals = torch.stack([torch.cos(a) / semi[0], torch.sin(a) / semi[1], torch.zeros_like(a)], 1)
     normals = -normals / normals.norm(dim=1, keepdim=True)
     radius = 0.45 * 2 * math.pi * float(semi.mean()) / count
@@ -73,11 +86,21 @@ def ring_loops(body, count, clearance, height):
 
 def write(path, name, drives, body, medium, channels, drive_unit):
     plus, minus = fields.circular_components(medium, drives)
-    maps.write(path, plus, minus, body.mask, coil=name, channels=channels, frequency_hz=medium.frequency,
-               drive_unit=drive_unit, origin=body.origin, resolution=body.resolution,
-               frame="blochparty anatomy frame: x right, y anterior, z superior, metres; B0 along +z",
-               bodies=["BrainWeb subject 04 fuzzy model (do not redistribute)"],
-               data_licence="BrainWeb's terms of use (https://brainweb.bic.mni.mcgill.ca/)")
+    maps.write(
+        path,
+        plus,
+        minus,
+        body.mask,
+        coil=name,
+        channels=channels,
+        frequency_hz=medium.frequency,
+        drive_unit=drive_unit,
+        origin=body.origin,
+        resolution=body.resolution,
+        frame="blochparty anatomy frame: x right, y anterior, z superior, metres; B0 along +z",
+        bodies=["BrainWeb subject 04 fuzzy model (do not redistribute)"],
+        data_licence="BrainWeb's terms of use (https://brainweb.bic.mni.mcgill.ca/)",
+    )
 
 
 def main():
@@ -94,33 +117,64 @@ def main():
     fr, origin = head_fractions(args.step)
     built = tissue.mix(fr, tissue.read_table(args.tissues), medium, args.step, origin=tuple(origin))
     body = built.body
-    say(f"head: {body.n_voxels} voxels of {args.step * 1e3:.0f} mm, grid {tuple(body.shape)}, "
-        f"{medium.frequency / 1e6:.2f} MHz")
+    say(
+        f"head: {body.n_voxels} voxels of {args.step * 1e3:.0f} mm, grid {tuple(body.shape)}, "
+        f"{medium.frequency / 1e6:.2f} MHz"
+    )
     centres, normals, radius, centre = ring_loops(body, 8, 0.02, 0.02)
     say("birdcage: two modes")
-    modes = [incident.birdcage(body, medium, angle=a, axis=(float(centre[0]), float(centre[1])), linear=True)
-             for a in (0.0, math.pi / 2)]
-    drives = solve_incident(body, medium, torch.stack([e for e, _ in modes]), torch.stack([h for _, h in modes]),
-                            tol=args.tol, linear=True)
-    write(args.out / "body.npz", "body", drives, body, medium, ["body-I", "body-Q"],
-          "the birdcage mode whose flux density on its axis in free space is 1 uT")
+    modes = [
+        incident.birdcage(body, medium, angle=a, axis=(float(centre[0]), float(centre[1])), linear=True)
+        for a in (0.0, math.pi / 2)
+    ]
+    drives = solve_incident(
+        body, medium, torch.stack([e for e, _ in modes]), torch.stack([h for _, h in modes]), tol=args.tol, linear=True
+    )
+    write(
+        args.out / "body.npz",
+        "body",
+        drives,
+        body,
+        medium,
+        ["body-I", "body-Q"],
+        "the birdcage mode whose flux density on its axis in free space is 1 uT",
+    )
     say(f"birdcage done ({time.time() - t0:.0f} s); head8: loop radius {radius * 1e3:.0f} mm")
     coil = WireCoil.loops(centres, normals, radius, max(12, math.ceil(2 * math.pi * radius / (1.5 * args.step))))
     res = solve(body, coil, medium, tol=args.tol, linear=True)
     loops = fields.combine(res.fields, res.impedance)  # 1 A into each port, others open
-    write(args.out / "head8.npz", "head8", loops, body, medium, [f"head8-{i + 1}" for i in range(8)],
-          "1 A into the channel's port, every other port open")
+    write(
+        args.out / "head8.npz",
+        "head8",
+        loops,
+        body,
+        medium,
+        [f"head8-{i + 1}" for i in range(8)],
+        "1 A into the channel's port, every other port open",
+    )
     e = fields.at_centres(loops.electric).to(torch.complex128)  # (C, 3, n1, n2, n3)
     w = (body.conductivity * args.step**3 * body.mask).to(torch.complex128)
     r = torch.einsum("cxijk,dxijk,ijk->cd", e, e.conj(), w)
     exact = 2 * fields.absorbed_power(res.operator, loops).reshape(-1).double()  # |I| = 1 A
     scale = torch.sqrt(exact / r.diagonal().real)
     r = r * scale[:, None] * scale[None, :]
-    np.savez(args.out / "head8_noise.npz", resistance=r.numpy(), centre_sampled_diagonal_ratio=(1 / scale**2).numpy(),
-             metadata=json.dumps({"coil": "head8", "frequency_hz": medium.frequency, "unit": "Ohm",
-                                  "definition": "R_ij = int sigma E_i . conj(E_j) dV, 1 A per port"}))
-    say(f"head8 done ({time.time() - t0:.0f} s); R diagonal {np.round(r.diagonal().real.numpy(), 3)} Ohm; "
-        f"centre-sampled / exact diagonal {np.round((1 / scale**2).numpy(), 3)}")
+    np.savez(
+        args.out / "head8_noise.npz",
+        resistance=r.numpy(),
+        centre_sampled_diagonal_ratio=(1 / scale**2).numpy(),
+        metadata=json.dumps(
+            {
+                "coil": "head8",
+                "frequency_hz": medium.frequency,
+                "unit": "Ohm",
+                "definition": "R_ij = int sigma E_i . conj(E_j) dV, 1 A per port",
+            }
+        ),
+    )
+    say(
+        f"head8 done ({time.time() - t0:.0f} s); R diagonal {np.round(r.diagonal().real.numpy(), 3)} Ohm; "
+        f"centre-sampled / exact diagonal {np.round((1 / scale**2).numpy(), 3)}"
+    )
 
 
 if __name__ == "__main__":
