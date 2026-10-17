@@ -2650,3 +2650,13 @@ controls).
   (Adam 3e-4 from scratch, batch-norm statistics from batches of 8) wrecked it; at 50 / 30 / 20 % the start was
   already at chance. Fixed: the joint phase keeps batch-norm and dropout fixed and moves the net at 3e-5
   (`--net-lr`), the loss is logged as a 20-batch mean; rerunning C at 100 % and 50 % (`queue3.sh` -> design5_rss_f*).
+- **Why the TE 60 ms GRE reads the lesion better than the TSE (closed-form check against the simulated slab):** with the
+  table's 3 T values (WM T1 0.89 s / T2* 48 ms / PD 0.70; GM 1.45 / 58 / 0.83; CSF 4.28 / 204 / 1.0) and the task's
+  lesion (T1 1.64 s, T2 200 ms, T2* 160 ms assumed as 0.8 x T2, PD 0.85), the spoiled-GRE signal equation at 15 deg /
+  TE 60 / TR 70 ms gives, relative to WM: GM 1.25, CSF 1.74, lesion 2.35 — the lesion is the brightest tissue in the
+  brain, because the short TR saturates CSF (T1 4.3 s) while TE 60 ms keeps the lesion's long T2*. The spin-echo
+  equation at TE 113 / TR 6000 ms gives GM 1.44, lesion 3.24, CSF 4.9: the lesion sits far below the CSF it has to be
+  told from. The simulated smoke slab agrees: lesion peak / brain 90th percentile 1.31 (GRE) against 0.94 (TSE), lesion
+  mean / brain median 1.49 against 1.21 (partial volume at 3.4 mm pulls both down from the closed form). So the
+  machinery found the contrast that fits *this* lesion's assumed T2*; whether a real lesion is T2*-long is a question
+  for the literature (recorded as assumed in lesion_slabs), not a claim of this experiment.
