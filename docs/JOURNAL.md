@@ -79,3 +79,7 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-17 [Refactor: the journal and the lessons split (plan phase 9, documents)](journal/2026-10-17-04-refactor-the-journal-and-lessons-split.md)
 - 2026-10-17 [Refactor: tests in area folders, shared cases, one GPU fixture, the tautology audit (plan phase 2)](journal/2026-10-17-05-refactor-tests-in-area-folders.md)
 - 2026-10-17 [Refactor: GPU device code as files, one driver for Metal and CUDA (plan phase 1)](journal/2026-10-17-06-refactor-gpu-sources-as-files-one-driver.md)
+- 2026-10-17 [Lesion design: variable-density lines at 50 % and 30 % (design5, design6)](journal/2026-10-17-07-lesion-design-variable-density-lines.md)
+- 2026-10-17 [Refactor: one entry point, bp.simulate(..., engine=) (plan phase 3)](journal/2026-10-17-08-refactor-one-entry-point-engine.md)
+- 2026-10-17 [Refactor: the anatomy package (plan phase 5)](journal/2026-10-17-09-refactor-the-anatomy-package.md)
+- 2026-10-17 [Refactor: the sequences package (plan phase 7)](journal/2026-10-17-10-refactor-the-sequences-package.md)

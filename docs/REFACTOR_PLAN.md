@@ -12,8 +12,11 @@ changes, no public-API renames (one addition: `bp.simulate(..., engine=)`, phase
 
 | phase | state | commits |
 |---|---|---|
-| 1. GPU sources as files, one driver | done 2026-10-17 | `461cf04` `8ee7ac3` and docs |
+| 1. GPU sources as files, one driver | done 2026-10-17 | `461cf04` `8ee7ac3` `d2ceac7` |
 | 2. tests in area folders | done 2026-10-17 | `f3ca1b2` … `58b326a`, `eaae460` |
+| 3. `bp.simulate(..., engine=)` | done 2026-10-17 | `07b8d5e` `0011a8e` `17b1905` |
+| 5. `anatomy/` | done 2026-10-17 | `40fac53` `d0a634a` `a4d2e0a` |
+| 7. `sequences/` | done 2026-10-17 | `02d6fac` `0f4e3a8` `b3b26a3` `a336632` |
 | 9. docs and tooling | journal and lessons split done (`68d91e3`); ruff, CI, layout check to do | |
 
 ## 0. What changed since the first version
