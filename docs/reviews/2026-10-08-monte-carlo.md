@@ -60,7 +60,7 @@ Reproduction from the repository root:
 
 The script calls the existing NIST estimators and sampler, the existing phantom builder, and
 the existing Philox implementation. Numerical output is saved in
-[`validation/monte_carlo/monte_carlo_audit_results.json`](../validation/monte_carlo/monte_carlo_audit_results.json).
+[`validation/monte_carlo/monte_carlo_audit_results.json`](../../validation/monte_carlo/monte_carlo_audit_results.json).
 Environment: PyTorch 2.14.1, SciPy 1.18.1, NumPy 2.5.3. MPS was unavailable to this execution
 environment, so no new Apple-GPU throughput or real-scanner benchmark is claimed. Previously
 recorded GPU results below are historical project evidence.
@@ -89,7 +89,7 @@ The spatial rejection weights are also correct in principle: rejected points con
 to a fixed-domain quadrature. Do not divide by the number of accepted points; that would
 silently change volume normalization.
 
-Historical evidence in [`validation/real/RESULTS.md`](../validation/real/RESULTS.md), under
+Historical evidence in [`validation/real/RESULTS.md`](../../validation/real/RESULTS.md), under
 "Monte Carlo estimation", supports the current direction: the water-patch study reports
 roughly N^-0.75 Sobol error over its tested range and about 12× fewer spins than stratified
 sampling for a particular error level. Those are empirical, workload-specific results. They

@@ -353,7 +353,7 @@
   The latter operations introduce bias. In 200,000 four-seed Gaussian experiments with
   mean-component SD 1, a true zero becomes 0.524 on average; true amplitude 2 becomes 1.696.
   Retain complex means and unclipped power and calibrate the downstream estimator at nulls.
-  Derivation and reproduction: [MONTE_CARLO_REVIEW.md](../MONTE_CARLO_REVIEW.md),
+  Derivation and reproduction: [the Monte Carlo review](../reviews/2026-10-08-monte-carlo.md),
   `validation/monte_carlo/monte_carlo_audit.py`.
 
 - **Jackknife the statistic that is reported.** Both NIST drivers combine marginal sphere

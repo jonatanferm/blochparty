@@ -1,7 +1,7 @@
 """Monte Carlo estimators for simulations repeated over independent random seeds (spin positions, walks): the
 debiased power and magnitude of K complex-image estimates, the leave-one-seed-out jackknife of any statistic, and
 scrambled Sobol points for quasi-Monte-Carlo spin placement. From the NIST benchmarks (validation/real/nist.py),
-which use them for their error bars; their review is docs/MONTE_CARLO_REVIEW.md."""
+which use them for their error bars; their review is docs/reviews/2026-10-08-monte-carlo.md."""
 
 from __future__ import annotations
 

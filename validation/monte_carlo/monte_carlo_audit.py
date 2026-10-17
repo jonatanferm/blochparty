@@ -1,4 +1,4 @@
-"""Reproduce small, CPU-only diagnostics in docs/MONTE_CARLO_REVIEW.md.
+"""Reproduce small, CPU-only diagnostics in docs/reviews/2026-10-08-monte-carlo.md.
 
 Run: .venv/bin/python validation/monte_carlo/monte_carlo_audit.py
 These are estimator/analytic-integral experiments, not scanner throughput benchmarks.
