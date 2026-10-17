@@ -12,8 +12,8 @@ import argparse
 import ast
 import hashlib
 import json
-from pathlib import Path
 import urllib.request
+from pathlib import Path
 
 import numpy as np
 import torch

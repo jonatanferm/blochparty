@@ -15,8 +15,7 @@ import torch
 from torch import Tensor
 
 from ..constants import PULSEQ_GAMMA_BAR
-from ..sequence import Sequence, _AXES, _T_TOL
-
+from ..sequence import _AXES, _T_TOL, Sequence
 
 # --- hardware limits and events --------------------------------------------------------
 

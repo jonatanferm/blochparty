@@ -14,12 +14,20 @@ import pytest
 import torch
 
 from blochparty import tissuedb
-from blochparty.anatomy import DEEP_GREY, DEFAULT_TISSUES, Anatomy, Distribution, TissueProperties, to_phantom
+from blochparty.anatomy import (
+    DEEP_GREY,
+    DEFAULT_TISSUES,
+    GENERATED,  # classes the head generator adds (dermis, eye, lesion)
+    Anatomy,
+    Distribution,
+    TissueProperties,
+    to_phantom,
+)
 from blochparty.tissuedb import FIELD_DEPENDENT, FRACTIONS, PROPERTIES, load, pooled, query, tissue_table
 
 DB = load()
 CLASSES = ("background", "csf", "gm", "wm", "fat", "muscle", "skin", "skull", "vessels", "connective", "dura", "marrow")
-from blochparty.anatomy import GENERATED  # classes the head generator adds (dermis, eye, lesion)
+
 HEADER = ["tissue", "region", "property", "field_T", "value", "sd", "sd_kind", "n", "unit", "species", "state",
           "temperature_C", "method", "source", "location", "note"]
 

@@ -13,9 +13,9 @@ import torch
 from torch import Tensor
 
 from ... import exchange
-from ...result import SimResult
 from ...fields import spin_fields
 from ...phantom import Phantom
+from ...result import SimResult
 from ...sequence import Sequence
 from ..prepare import prepare
 

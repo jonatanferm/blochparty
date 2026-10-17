@@ -17,12 +17,12 @@ import blochparty as bp
 from blochparty import SequenceBuilder, simulate
 from blochparty import design as d
 from blochparty.constants import PULSEQ_GAMMA_BAR
+from blochparty.design.problems import contrast_tr, despot1
+from blochparty.design.problems import tse_flips as tse
 from blochparty.phantom import LABELS
 from blochparty.reference import spoiled_gre_signal
 from blochparty.sequences.builder import System
 
-from blochparty.design.problems import contrast_tr, despot1
-from blochparty.design.problems import tse_flips as tse
 from helpers import rel
 
 G = d.GAMMA_BAR

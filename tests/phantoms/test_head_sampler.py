@@ -2,17 +2,27 @@
 deformation (exact shifts, partition of unity, Jacobian > 0), tissue draws (means and SDs of the
 table over 100 subjects) and sample_head's determinism on BrainWeb subject 04 (skipped without
 the data)."""
-from dataclasses import fields
 import json
 import math
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
 import torch
 
-from blochparty.anatomy import (DEFAULT_TISSUES, Anatomy, DigitalPhantom, _bspline_weights, deform,
-                                deformation_jacobian, draw_tissues, random_deformation, sample_head, sulcal_width,
-                                to_phantom)
+from blochparty.anatomy import (
+    DEFAULT_TISSUES,
+    Anatomy,
+    DigitalPhantom,
+    _bspline_weights,
+    deform,
+    deformation_jacobian,
+    draw_tissues,
+    random_deformation,
+    sample_head,
+    sulcal_width,
+    to_phantom,
+)
 
 DATA = Path(__file__).parents[2] / "validation" / "anatomy" / "data"
 
@@ -224,6 +234,7 @@ def test_pitch_tips_the_face_down_and_keeps_volumes():
     """pitch=(20, 0): nose down, so the face's most anterior point rises to the forehead and moves
     back; the pose records the angle; tissue volumes are kept (a rotation); no pitch draws nothing."""
     import numpy as np
+
     from blochparty.anatomy import _head_mask
 
     kw = dict(subject=4, root=DATA, voxel=(2e-3,) * 3, magnitude=0., size="anthropometric")

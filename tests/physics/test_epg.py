@@ -13,8 +13,7 @@ import pytest
 import torch
 
 from blochparty import Phantom, SequenceBuilder, simulate
-from blochparty.epg import (epg_bssfp, epg_cpmg, epg_grad, epg_init, epg_relax, epg_rf, epg_spoiled_gre,
-                            rf_spoil_phases)
+from blochparty.epg import epg_bssfp, epg_cpmg, epg_grad, epg_init, epg_relax, epg_rf, epg_spoiled_gre, rf_spoil_phases
 from blochparty.reference import spoiled_gre_signal
 
 f64 = lambda v: torch.tensor(v, dtype=torch.float64)

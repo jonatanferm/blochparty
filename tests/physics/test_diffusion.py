@@ -11,6 +11,7 @@ import torch
 
 import blochparty as bp
 from blochparty.rng import normals, philox
+
 from cases import DELTA_BIG, DELTA_SMALL, pgse
 
 f64 = torch.float64

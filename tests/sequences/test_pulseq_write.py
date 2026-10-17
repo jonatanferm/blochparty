@@ -13,6 +13,7 @@ import torch
 import blochparty as bp
 from blochparty.pulseq import flip_angle, read_pulseq, write_pulseq
 from blochparty.sequence import kspace_trajectory
+
 from helpers import rel
 
 pp = pytest.importorskip("pypulseq")

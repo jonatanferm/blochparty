@@ -22,10 +22,11 @@ import argparse
 import json
 from pathlib import Path
 
-from blochparty import generate  # noqa: E402
 import realism as R  # noqa: E402
 import score as SC  # noqa: E402
 import simulate_heads as SH  # noqa: E402
+
+from blochparty import generate  # noqa: E402
 
 
 def main():

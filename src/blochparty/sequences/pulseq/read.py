@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ...sequence import Sequence, _T_TOL
+from ...sequence import _T_TOL, Sequence
 from ..builder import MAX_RF_STEP, _subdivide
 from .write import _fingerprint
 

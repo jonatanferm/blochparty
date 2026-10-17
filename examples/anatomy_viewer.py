@@ -74,11 +74,14 @@ def build(ROOT, z0=60):
     mask=sample(torch.tensor(inside)[None].double(),torch.tensor(head1.origin,dtype=torch.float64),torch.tensor(head1.voxel[::-1],dtype=torch.float64),pts)[:,0].numpy().reshape(n,n)>.5
     def png(a):
         import io
+
         from PIL import Image
         buf=io.BytesIO(); Image.fromarray(a).save(buf,format="PNG"); return "data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
     def gray(im):
         v=np.clip(im/np.percentile(im,99.5),0,1); a=(v*255).astype(np.uint8); return np.dstack([a,a,a,np.where(im>0.04*im.max(),255,0).astype(np.uint8)])
-    import matplotlib; matplotlib.use("Agg"); import matplotlib.cm as cm
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.cm as cm
     b=np.clip(b0/150,-1,1); rgba=(cm.RdBu_r((b+1)/2)*255).astype(np.uint8); rgba[...,3]=np.where(mask,255,0)
     images={"t2w":png(gray(imgs["t2w"])),"t1w":png(gray(imgs["t1w"])),"b0":png(rgba)}
     data={"lo":lo.tolist(),"hi":hi.tolist(),"centre":centre.tolist(),"meshes":meshes,

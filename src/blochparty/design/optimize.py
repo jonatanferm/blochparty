@@ -7,8 +7,6 @@ from typing import Callable
 import torch
 from torch import Tensor
 
-
-
 # --- constrained optimisation ---------------------------------------------------------------
 
 

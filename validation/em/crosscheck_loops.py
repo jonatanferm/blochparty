@@ -13,7 +13,6 @@ plus = Bx + j By, minus = Bx - j By).
 
 
 import torch
-
 from mariepy.body import VoxelBody
 from mariepy.constants import Medium
 from mariepy.fields import circular_components, combine

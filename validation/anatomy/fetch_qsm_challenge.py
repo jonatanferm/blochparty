@@ -6,8 +6,8 @@ licence is asserted: keep downloaded data ignored and cite the challenge papers.
 """
 import argparse
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 from blochparty.anatomy import _file_sha256, load_qsm2
 

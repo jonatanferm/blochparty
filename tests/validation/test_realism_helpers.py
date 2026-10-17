@@ -4,12 +4,8 @@ import math
 
 import numpy as np
 import pytest
-import torch
-
-import blochparty as bp
 
 pytest.importorskip("nibabel")  # prepare_ixi reads NIfTI: the optional anatomy extra
-import simulate_heads as SH  # noqa: E402
 import prepare_ixi as P  # noqa: E402
 
 

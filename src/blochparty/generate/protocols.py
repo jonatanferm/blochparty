@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 
 import blochparty as bp
-from ..sequences.builder import System
 
+from ..sequences.builder import System
 
 FOV, THICKNESS, SLICES = 0.22, 5e-3, 16  # [m], [m], the stack
 

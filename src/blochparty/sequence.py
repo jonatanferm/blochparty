@@ -21,7 +21,6 @@ import numpy as np
 import torch
 from torch import Tensor
 
-
 _T_TOL = 1e-11  # [s] event times closer than this are the same breakpoint
 _AXES = {"x": 0, "y": 1, "z": 2}
 

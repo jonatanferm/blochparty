@@ -8,9 +8,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ...sequence import Sequence, _T_TOL, flip_angle
+from ...sequence import _T_TOL, Sequence, flip_angle
 from ..builder import SequenceBuilder, System, Trapezoid, block_duration
-
 
 # --- export ---------------------------------------------------------------------------------
 #

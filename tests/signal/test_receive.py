@@ -11,8 +11,7 @@ import torch
 
 import blochparty as bp
 from blochparty.coils import coil_offset, normalised_sensitivities
-from blochparty.receive import (ReceiveChain, decimate, fir, oversample, quantise, response, spikes,
-                                thermal_noise)
+from blochparty.receive import ReceiveChain, decimate, fir, oversample, quantise, response, spikes, thermal_noise
 
 f64 = torch.float64
 

@@ -43,11 +43,11 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from nist import CENTRE, PIXEL, SLICE, WATER_T1, WATER_T2, coarsen_rf, shape_error
 from scipy import ndimage
 
 import blochparty as bp
 from blochparty.pulseq import read_pulseq
-from nist import CENTRE, PIXEL, SLICE, WATER_T1, WATER_T2, coarsen_rf, shape_error
 
 HERE = Path(__file__).parent
 
@@ -497,8 +497,7 @@ class Full:
 def scores(full: Full, imgs: np.ndarray) -> dict:
     """Shape (with jackknife SE) and absolute errors (uniform receive, and the water-fill receive
     profile) of seed images, spheres 1-10."""
-    from nist import jackknife, mc_errors, mc_magnitude, receive_profile, roi_means
-    from nist import absolute_error
+    from nist import absolute_error, jackknife, mc_errors, mc_magnitude, receive_profile, roi_means
 
     sh = mc_errors(imgs, full.rois, full.real)
     prof = receive_profile(full.m0_image, full.water_mask)

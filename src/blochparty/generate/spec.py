@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import copy
 
-
 DEFAULT_SPEC = {
     "anatomy": {"source": "ixi", "prepared": None, "subject": None, "lesions": None, "deform_mm": 3.0},
     "protocol": {"family": "fastmri_t2w", "manifest": None,

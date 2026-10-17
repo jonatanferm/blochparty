@@ -15,7 +15,6 @@ from ..recon import reconstruct, rss
 from ..sequence import Sequence
 from .hardware import AXES
 
-
 # --- image-quality metrics ------------------------------------------------------------------
 
 

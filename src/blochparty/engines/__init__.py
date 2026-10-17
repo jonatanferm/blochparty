@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from torch import Tensor
 
-from ..result import SimResult
-from .chunked import simulate_chunked as _chunked
-from .core import simulate as _core
 from ..fields import Scanner
 from ..maps import FieldMaps
 from ..phantom import Phantom
+from ..result import SimResult
 from ..sequence import Sequence
+from .chunked import simulate_chunked as _chunked
+from .core import simulate as _core
 
 ENGINES = ("core", "chunked", "gpu", "metal", "cuda")
 GPU_OPTIONS = ("chunk", "group", "mma", "readouts", "nufft_width", "nufft_terms", "pulses")

@@ -14,6 +14,7 @@ from scipy.special import j1
 
 import blochparty as bp
 from blochparty.restriction import Restriction, n_sub, start_offsets, tau_max, walk_segment
+
 from cases import sgp
 
 f64 = torch.float64

@@ -30,13 +30,32 @@ from pathlib import Path
 import numpy as np
 import scipy.io as sio
 import torch
+from nist import (
+    PIXEL,
+    T2_MNCL2,
+    WATER_T1,
+    WATER_T2,
+    N,
+    coarsen_rf,
+    fill_mask,
+    fill_phantom,
+    fill_phantom_qmc,
+    mc_errors,
+    phantom,
+    phantom_qmc,
+    print_mc_table,
+    recon,
+    recon_complex,
+    roi_means,
+    shape_error,
+    slice_positions,
+    sphere_radius,
+    t1_of_mncl2,
+)
 from scipy import ndimage
 
 import blochparty as bp
 from blochparty.pulseq import read_pulseq
-from nist import (N, PIXEL, T2_MNCL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, mc_errors,
-                  phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_positions,
-                  sphere_radius, t1_of_mncl2)
 
 # BLOCHPARTY_BACKEND=core: the float64 reference (slow at this size); default the GPU (float32: Metal, or CUDA on an
 # NVIDIA machine); until 2026-10-09 the fused CPU kernel, with the same tables
@@ -250,7 +269,7 @@ def main(argv=None):
         rows.append((f"Bloch + B1+ {b:.3f} (fit on even spheres; odd ones scored)", err, s))
         print(f"held-out odd spheres 1-9: {100 * err[odd].mean():.2f} %")
 
-    print(f"\n| model | spheres 1–10 | odd 1–9 | per sphere 1..14 [%] |\n|---|---|---|---|")
+    print("\n| model | spheres 1–10 | odd 1–9 | per sphere 1..14 [%] |\n|---|---|---|---|")
     for name, err, _ in rows:
         print(f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err[[0, 2, 4, 6, 8]].mean():.2f} % | "
               f"{' '.join(f'{v:.1f}' for v in 100 * err)} |")

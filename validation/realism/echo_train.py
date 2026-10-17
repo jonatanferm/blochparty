@@ -13,13 +13,12 @@ it, so 396 lines over 21 echoes (19 shots), ky = 0 in echo 11; the headers' echo
 simulate_heads.py's ``--train header`` plays this train; the fitted one was 16 echoes at TE / 9 (12.6 ms, 25 shots).
 """
 import argparse
-from pathlib import Path
 import re
+from pathlib import Path
 
 import numpy as np
-from scipy import ndimage, signal
-
 import realism as R  # noqa: E402
+from scipy import ndimage, signal
 
 
 def line_energy(paths, slices=range(1, 8)):

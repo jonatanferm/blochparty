@@ -23,8 +23,19 @@ from torch import Tensor
 
 from ..recon import ifftnc, kspace_grid
 from ..sequence import _T_TOL, Sequence
-from .builder import (ADC, RFPulse, SequenceBuilder, System, Trapezoid, _ceil_to, _vector, block_duration, block_pulse,
-                      sinc_pulse, trapezoid)
+from .builder import (
+    ADC,
+    RFPulse,
+    SequenceBuilder,
+    System,
+    Trapezoid,
+    _ceil_to,
+    _vector,
+    block_duration,
+    block_pulse,
+    sinc_pulse,
+    trapezoid,
+)
 
 SPOILING = ("ideal", "gradient", "rf")
 

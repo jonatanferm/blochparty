@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .grid import AIR_CHI, Distribution, TissueProperties, WATER_CHI
+from .grid import AIR_CHI, WATER_CHI, Distribution, TissueProperties
 
 # Every fallback explicitly says it is an assumption. These are simulation priors,
 # not a normative human atlas. No values in phantom.TISSUES are changed.

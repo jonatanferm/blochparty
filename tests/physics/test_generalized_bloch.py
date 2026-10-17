@@ -11,6 +11,7 @@ import pytest
 import torch
 from scipy.integrate import solve_ivp
 
+import blochparty as bp
 from blochparty import generalized_bloch as gb
 from blochparty.exchange import lorentzian, superlorentzian
 
@@ -75,8 +76,6 @@ def test_free_pool_coupling_matches_two_pool_ode():
 
 
 # ---------------------------------------------------------------- the engine (modes of G)
-
-import blochparty as bp
 
 
 def single_pool(shape, **kw):

@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields, replace
 import math
 import os
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 
 import numpy as np
@@ -15,9 +15,25 @@ from torch import Tensor
 from ..phantom import Phantom
 from .brainweb import load_brainweb
 from .deformation import deform, deformation_jacobian, random_deformation
-from .edits import (DEEP_GREY, GENERATED, SCALP_LAYERS, SCALP_LAYERS_SD, add_dermis, add_falx, add_lesions,
-                    gather_cortical_csf, label_deep_grey, layer_scalp, open_sulci, sulcal_widening, sulcal_width,
-                    ventricle_displacement, ventricle_factor, ventricle_mask, ventricle_offset)
+from .edits import (
+    DEEP_GREY,
+    GENERATED,
+    SCALP_LAYERS,
+    SCALP_LAYERS_SD,
+    add_dermis,
+    add_falx,
+    add_lesions,
+    gather_cortical_csf,
+    label_deep_grey,
+    layer_scalp,
+    open_sulci,
+    sulcal_widening,
+    sulcal_width,
+    ventricle_displacement,
+    ventricle_factor,
+    ventricle_mask,
+    ventricle_offset,
+)
 from .grid import Anatomy, Distribution, TissueProperties, _resample
 from .ixi import ixi_subjects, load_ixi
 from .phantom import anatomy_field_maps, to_phantom

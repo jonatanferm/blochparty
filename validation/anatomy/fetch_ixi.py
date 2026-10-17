@@ -12,8 +12,8 @@ import argparse
 import datetime
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 BASE = "https://biomedic.doc.ic.ac.uk/brain-development/downloads/IXI/"

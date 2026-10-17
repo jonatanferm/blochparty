@@ -7,11 +7,10 @@ import pytest
 import torch
 
 import blochparty as bp
+from blochparty.engines.gpu import driver  # the GPU engines' shared driver (_readout_runs, _reused_pulses)
 from blochparty.exchange import BoundPool
 
-from blochparty.engines.gpu import driver  # the GPU engines' shared driver (_readout_runs, _reused_pulses)
 from helpers import rel
-
 
 f32, f64 = torch.float32, torch.float64
 

@@ -21,7 +21,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-import blochparty as bp
 from blochparty import tissuedb
 from blochparty.anatomy import DigitalPhantom, add_lesions, load_ixi
 
@@ -79,6 +78,7 @@ def main():
         ids = [int(s) for s in args.subjects.split(",")]
     test = set(ids[-args.test_subjects:]) if args.test_subjects > 0 else set()
     from dataclasses import replace
+
     from blochparty.anatomy import Distribution
     table = tissuedb.tissue_table(3.0)
     les = table["lesion"]

@@ -18,7 +18,8 @@ import torch
 import blochparty as bp
 from blochparty import Phantom, simulate
 from blochparty.fields import GradientNonlinearity, Scanner, solid_harmonics
-from cases import busy_sequence, distortion, R0, random_phantom
+
+from cases import R0, busy_sequence, distortion, random_phantom
 from helpers import rel
 
 SIMS = {"core": simulate}

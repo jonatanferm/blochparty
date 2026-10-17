@@ -18,8 +18,8 @@ prediction.
 
 from __future__ import annotations
 
-import glob
 import functools
+import glob
 import math
 from pathlib import Path
 
@@ -147,8 +147,9 @@ def rf_frame(seq):
     db0 - f. A change of rotating frame, so exact; pools see the same RF-minus-spin offsets
     (``Sequence.rf_freq`` derived from the now constant phase is 0). f from the phase slope of the
     RF samples (a pulse turning as exp(-i 2 pi f t) is resonant at offset f)."""
-    import torch
     from dataclasses import replace
+
+    import torch
 
     t = torch.cumsum(seq.dt, 0) - seq.dt / 2
     c = torch.complex(seq.rf[:, 0], seq.rf[:, 1])

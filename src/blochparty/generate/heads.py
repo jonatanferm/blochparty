@@ -13,9 +13,9 @@ import torch
 from scipy import ndimage
 
 import blochparty as bp
+
 from ..anatomy import Distribution
 from .protocols import SLICES
-
 
 PROTOCOL_SPACING = 5e-3  # contiguous 5 mm slices
 

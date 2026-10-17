@@ -6,8 +6,8 @@ Source: 10.21942/uva.19646364.v3 (CC BY 4.0). These are brain templates at
 import argparse
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 
 import nibabel as nib
 import numpy as np

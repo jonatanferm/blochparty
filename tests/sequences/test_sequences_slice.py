@@ -23,7 +23,10 @@ def spins(z):
     return bp.Phantom(pos=pos, pd=full(1.0), t1=full(1e9), t2=full(1e9), db0=full(0.0))
 
 
-def excite(flip, z, z0=0.0, system=System(), rephase=None):
+SYSTEM = System()
+
+
+def excite(flip, z, z0=0.0, system=SYSTEM, rephase=None):
     """Mxy, Mz along z after the slice-select block and its rephasing lobe."""
     rf, gz, reph = sinc_pulse(flip, DUR, slice_thickness=THK, slice_offset=z0, system=system)
     b = SequenceBuilder(system=system).block(gz, rf=rf)

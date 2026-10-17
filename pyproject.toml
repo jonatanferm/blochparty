@@ -27,3 +27,23 @@ markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m
 addopts = "-m 'not crosscheck' --import-mode=importlib"
 # helpers.py and cases.py (tests/), and the example and validation scripts the tests import
 pythonpath = ["tests", "validation/mrzero", "validation/real", "validation/realism", "validation/anatomy"]
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["validation/real/data", "validation/anatomy/data", "outputs"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B"]
+ignore = [
+    "E501",          # long lines: the formatter sets the code's width; long strings, URLs and table rows stay whole
+    "E701", "E702",  # several short statements on one line where they read as one step (x = 1; y = 2)
+    "E731",          # one-line lambdas assigned to names, the codebase's local helpers
+    "E741",          # l, I, O as names where the mathematics uses them
+    "B007",          # loop variables kept for the reader although unused
+    "B023",          # closures defined in a loop are called within that iteration (every case checked, 2026-10-17)
+    "B905",          # zip without strict=: the lengths are equal by construction
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["blochparty"]
+known-local-folder = ["cases", "helpers"]

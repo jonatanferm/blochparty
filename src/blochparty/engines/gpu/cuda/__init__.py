@@ -29,8 +29,8 @@ from __future__ import annotations
 
 import torch
 
-from ....result import SimResult
 from ....phantom import Phantom
+from ....result import SimResult
 from ....sequence import Sequence
 from .. import _simulate
 from .rtc import _Driver

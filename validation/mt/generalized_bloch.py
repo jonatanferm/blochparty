@@ -10,7 +10,6 @@ Isolated bound pool, super-Lorentzian, T2s = 12 us, R1s = 1/s. Rate model: z_s =
 
 import math
 
-import numpy as np
 import torch
 
 from blochparty import generalized_bloch as gb

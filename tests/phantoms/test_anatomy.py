@@ -3,21 +3,30 @@
 All unit fixtures are synthetic; real BrainWeb checks and throughput live in
 validation/anatomy/anatomy_brainweb.py and validation/anatomy/RESULTS.md.
 """
-from dataclasses import replace, fields
 import gzip
 import hashlib
 import json
 import math
+from dataclasses import fields, replace
 
 import numpy as np
 import pytest
 import torch
 
 import blochparty as bp
-from blochparty.anatomy import (AIR_CHI, Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES,
-    Distribution, anatomy_field_maps, load_brainweb, to_phantom)
+from blochparty.anatomy import (
+    AIR_CHI,
+    BRAINWEB_TISSUES,
+    DEFAULT_TISSUES,
+    Anatomy,
+    Distribution,
+    anatomy_field_maps,
+    load_brainweb,
+    to_phantom,
+)
 from blochparty.maps import sample
 from blochparty.phantom import b0_sphere
+
 from cases import sphere
 
 

@@ -147,9 +147,9 @@ def _field_chain_case():
 
 
 def _scanners():
-    from cases import distortion
-
     from blochparty.fields import Scanner
+
+    from cases import distortion
 
     return {"nonlinearity": Scanner(nonlinearity=distortion()), "leading": Scanner(field_strength=0.55),
             "exact + nonlinearity": Scanner(field_strength=0.55, concomitant="exact", nonlinearity=distortion())}

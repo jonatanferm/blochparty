@@ -34,13 +34,32 @@ from pathlib import Path
 import numpy as np
 import scipy.io as sio
 import torch
+from nist import (
+    PIXEL,
+    T1_NICL2,
+    WATER_T1,
+    WATER_T2,
+    N,
+    coarsen_rf,
+    fill_mask,
+    fill_phantom,
+    fill_phantom_qmc,
+    mc_errors,
+    phantom,
+    phantom_qmc,
+    print_mc_table,
+    recon,
+    recon_complex,
+    roi_means,
+    shape_error,
+    slice_position,
+    sphere_radius,
+    t2_of_nicl2,
+)
 from scipy import ndimage
 
 import blochparty as bp
 from blochparty.pulseq import read_pulseq
-from nist import (N, PIXEL, T1_NICL2, WATER_T1, WATER_T2, coarsen_rf, fill_mask, fill_phantom, fill_phantom_qmc, mc_errors,
-                  phantom, phantom_qmc, print_mc_table, recon, recon_complex, roi_means, shape_error, slice_position,
-                  sphere_radius, t2_of_nicl2)
 
 # BLOCHPARTY_BACKEND=core: the float64 reference (slow at this size); default the GPU (float32: Metal, or CUDA on an
 # NVIDIA machine); until 2026-10-09 the fused CPU kernel, with the same tables
@@ -236,7 +255,7 @@ def main(argv=None):
             rows.append((f"Bloch + B1 {b1:.3f} (fit on 5 TIs, scored on 5), T1 {ver}", shape_error(sim_b, real, test),
                          sim_b))
 
-    lines = [f"| model | spheres 1–10 | 1–14 | per sphere 1..14 [%] |", "|---|---|---|---|"]
+    lines = ["| model | spheres 1–10 | 1–14 | per sphere 1..14 [%] |", "|---|---|---|---|"]
     for name, err, _ in rows:
         lines.append(f"| {name} | {100 * err[:10].mean():.2f} % | {100 * err.mean():.2f} % | "
                      f"{' '.join(f'{v:.1f}' for v in 100 * err)} |")

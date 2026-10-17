@@ -5,7 +5,6 @@ other)."""
 
 import numpy as np
 import torch
-
 from nist import CENTRE, N, absolute_error, receive_profile
 from nist_twin import R_B1, b1_field
 

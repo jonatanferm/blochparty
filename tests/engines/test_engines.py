@@ -31,6 +31,7 @@ from blochparty.chunked import simulate_chunked
 from blochparty.fields import Scanner
 from blochparty.girf import GIRF, EddyCurrents, apply_girf
 from blochparty.motion import rotation_z
+
 from cases import bm_case, distortion, pgse, pool_case, random_case, sgp
 from helpers import rel, with_readout
 

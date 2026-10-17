@@ -21,7 +21,8 @@ import torch
 from blochparty.constants import GAMMA_BAR
 from blochparty.phantom import b0_cylinder, b0_shim
 from blochparty.susceptibility import shim, susceptibility_to_b0
-from cases import coordinates, DCHI, FIELD, partial_volume, sphere
+
+from cases import DCHI, FIELD, coordinates, partial_volume, sphere
 
 SCALE = GAMMA_BAR * FIELD * DCHI
 

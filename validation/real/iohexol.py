@@ -137,7 +137,6 @@ def sat_pulse(step: float = 100e-6):
     sign s such that pulse k carries the phase k * s * 2 pi f T in the frame of an offset f [Hz])."""
     import pypulseq as pp
     import torch
-
     from magma import rf_frame
 
     from blochparty.pulseq import read_pulseq

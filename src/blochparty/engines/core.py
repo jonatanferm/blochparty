@@ -33,13 +33,13 @@ from torch import Tensor
 from torch.utils.checkpoint import checkpoint
 
 from ..exchange import BoundPool, _bm_matrix, pool_modes, rf_frequency, saturation_rate, z_exchange
-from ..fields import (Scanner, concomitant_coefficients, exact_excess, gradient_monomials, transverse_coefficients)
+from ..fields import Scanner, concomitant_coefficients, exact_excess, gradient_monomials, transverse_coefficients
 from ..maps import FieldMaps, sample
 from ..motion import positions
-from ..restriction import n_sub, start_offsets, tau_max, walk_segment
-from ..rng import normals
 from ..phantom import Phantom
+from ..restriction import n_sub, start_offsets, tau_max, walk_segment
 from ..result import SimResult
+from ..rng import normals
 from ..sequence import Sequence
 from .capabilities import check
 from .prepare import prepare

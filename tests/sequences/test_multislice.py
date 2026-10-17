@@ -9,6 +9,7 @@ import blochparty as bp
 from blochparty.exchange import BoundPool
 from blochparty.pulseq import write_pulseq
 from blochparty.sequences.builder import System
+
 from helpers import rel
 
 f64 = torch.float64

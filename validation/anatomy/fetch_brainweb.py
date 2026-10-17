@@ -8,12 +8,12 @@ the ignored data directory. See README.md for access and manual-download details
 --record deliberately creates a new local snapshot; review its manifest before use.
 """
 import argparse
-from datetime import date
 import gzip
 import hashlib
 import json
-from pathlib import Path
 import subprocess
+from datetime import date
+from pathlib import Path
 from urllib.parse import urlencode
 
 HERE = Path(__file__).resolve().parent

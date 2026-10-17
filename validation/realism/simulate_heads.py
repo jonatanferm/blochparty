@@ -41,27 +41,46 @@ from __future__ import annotations
 
 import argparse
 import gc
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import realism as R  # noqa: E402
 import torch
 
 import blochparty as bp
-import realism as R  # noqa: E402
 from blochparty.anatomy import Distribution
 
 ROOT = Path(__file__).resolve().parents[2] / "validation" / "anatomy" / "data"
 # the realism preset's building blocks live in blochparty.generate (imported here for this script's command line
 # and for the scripts that use them through this module)
 from blochparty.coils import coil_offset, normalised_sensitivities  # noqa: E402,F401
-from blochparty.generate.heads import (MONRO_BELOW_BODIES, PROTOCOL_SPACING, b1_plus, centre, drop_detached,  # noqa: E402,F401
-                                       flow_void, stack, thin_convexity_csf, trace_sulci, turn)
-from blochparty.generate.protocols import (ACQUIRED_LINES, FOV, QUALITY, REAL_ETL, SLICES, THICKNESS,  # noqa: E402,F401
-                                           interleaved, real_protocols, sequence)
+from blochparty.generate.heads import (  # noqa: E402,F401
+    MONRO_BELOW_BODIES,
+    PROTOCOL_SPACING,
+    b1_plus,
+    centre,
+    drop_detached,
+    flow_void,
+    stack,
+    thin_convexity_csf,
+    trace_sulci,
+    turn,
+)
+from blochparty.generate.protocols import (  # noqa: E402,F401
+    ACQUIRED_LINES,
+    FOV,
+    QUALITY,
+    REAL_ETL,
+    SLICES,
+    THICKNESS,
+    interleaved,
+    real_protocols,
+    sequence,
+)
 from blochparty.generate.sample import kspace_on_fov, simulate, to_real_orientation  # noqa: E402,F401
 
 
@@ -284,12 +303,12 @@ def main():
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os,
                            proto["refocus_deg"] if args.refocus == "protocol" else 180., args.ordering,
                            **(dict(etl=REAL_ETL, esp=proto["esp"]) if args.train == "header" else {}))
-            k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
+            k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])  # noqa: F821 (head, fields: this loop's, del'd at its end)
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
-            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
+            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,  # noqa: F821 (head, fields: this loop's, del'd at its end)
                                  mt=args.mt)
             if args.b1 == "birdcage":
-                ph.b1 = b1_plus(head, ph.pos, ROOT).to(ph.pos.dtype)
+                ph.b1 = b1_plus(head, ph.pos, ROOT).to(ph.pos.dtype)  # noqa: F821 (head, fields: this loop's, del'd at its end)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP

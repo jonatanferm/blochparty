@@ -16,8 +16,9 @@ import pytest
 import torch
 
 import blochparty as bp
-from blochparty import Phantom, SequenceBuilder, Sequence, simulate, trapezoid
+from blochparty import Phantom, Sequence, SequenceBuilder, simulate, trapezoid
 from blochparty.girf import GIRF, EddyCurrents, _linear_scan, apply_girf
+
 from cases import random_phantom
 from helpers import rel
 

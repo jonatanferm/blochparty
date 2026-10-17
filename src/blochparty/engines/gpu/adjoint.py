@@ -13,11 +13,11 @@ import torch
 from torch.autograd.function import once_differentiable
 
 from ... import exchange
-from ...result import SimResult
 from ...phantom import Phantom
+from ...result import SimResult
 from ...sequence import Sequence
-from .driver import ADJOINT_COILS, _forward
 from ..prepare import prepare
+from .driver import ADJOINT_COILS, _forward
 
 
 def default_checkpoint_every(n_segments: int) -> int:

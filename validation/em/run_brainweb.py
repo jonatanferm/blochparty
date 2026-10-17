@@ -28,12 +28,12 @@ from pathlib import Path
 
 import numpy as np
 import torch
-
-import blochparty as bp
 from mariepy import fields, incident, maps, tissue
 from mariepy.constants import Medium
 from mariepy.solver import solve, solve_incident
 from mariepy.wire import WireCoil
+
+import blochparty as bp
 
 ROOT = Path(__file__).resolve().parents[1] / "anatomy" / "data"
 # blochparty's BrainWeb classes -> labels of mariepy's brainweb_tissues.csv (Gabriel 1996 via IFAC).

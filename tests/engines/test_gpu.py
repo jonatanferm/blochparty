@@ -7,8 +7,8 @@ import pytest
 import torch
 
 import blochparty as bp
-from cases import random_case
 
+from cases import random_case
 from helpers import rel
 
 
@@ -72,9 +72,9 @@ def test_hard_pulse_flip_angle_and_fid(gpu):
 @pytest.mark.parametrize("concomitant", [None, "leading", "exact"])
 def test_scanner_field_model(gpu, concomitant):
     # gradient nonlinearity (encoding positions) and concomitant fields at 0.55 T, where they are large
-    from cases import distortion
-
     from blochparty.fields import Scanner
+
+    from cases import distortion
 
     ph = bp.shepp_logan(24)
     seq = bp.gre_2d(24, n_dummy=4)
@@ -172,8 +172,8 @@ def _pools_case(n_pools, with_bound, seed=0):
     """pool_case's random RF / gradient / off-resonance sequence with 1-3 free pools, B1+ and a readout."""
     from dataclasses import replace
 
-    from helpers import with_readout
     from cases import pool_case
+    from helpers import with_readout
 
     ph, seq = pool_case(seed, with_bound)
     n = len(ph)
@@ -239,9 +239,9 @@ def test_free_pools_cest_spectrum(gpu):
 def test_free_pools_scanner_field_model(gpu):
     from dataclasses import replace
 
-    from cases import distortion
-
     from blochparty.fields import Scanner
+
+    from cases import distortion
 
     ph, seq = _pools_case(2, True)
     seq = replace(seq, grad=seq.grad * 30)  # ~3 mT/m: concomitant fields of a few Hz at 0.55 T

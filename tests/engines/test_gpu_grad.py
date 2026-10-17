@@ -9,8 +9,12 @@ import pytest
 import torch
 
 import blochparty as bp
+
 from cases import random_case
-from helpers import compare_gradients as compare, input_gradients as gradients, rel, weighted_loss as loss, with_readout
+from helpers import compare_gradients as compare
+from helpers import input_gradients as gradients
+from helpers import rel, with_readout
+from helpers import weighted_loss as loss
 
 f64 = torch.float64
 
@@ -53,9 +57,9 @@ def test_rate_model_bound_pool(gpu, shape):
 @pytest.mark.parametrize("concomitant", ["leading", "exact"])
 def test_scanner_field_model(gpu, concomitant):
     # through the encoding positions and concomitant coefficients to the hardware parameters
-    from cases import distortion
-
     from blochparty.fields import Scanner
+
+    from cases import distortion
 
     ph, seq = random_case(1)
     seq = with_readout(seq)

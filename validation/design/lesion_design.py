@@ -41,9 +41,19 @@ from torch import nn
 
 import blochparty as bp
 from blochparty.design import auc
+from blochparty.design.parameters import (  # noqa: F401
+    DWELL,
+    FOV,
+    N_DUMMY,
+    NX,
+    RF_DURATION,
+    T_ECHO,
+    T_READ,
+    T_TAIL,
+    Design,
+    learnable_gre,
+)
 from blochparty.recon import cg_sense, uniform_mask, variable_density_mask
-from blochparty.design.parameters import (DWELL, FOV, N_DUMMY, NX, RF_DURATION, T_ECHO, T_READ, T_TAIL,  # noqa: F401
-                                        Design, learnable_gre)
 
 simulate_metal = functools.partial(bp.simulate, engine="gpu")  # Metal, or CUDA on an NVIDIA machine
 
@@ -309,7 +319,7 @@ def main():
         best = max(trials, key=lambda t: t["train_auc"])  # chosen on the training set, never on the test set
         results["G_starts"] = [{k: t[k] for k in ("start", "auc", "train_auc", "scan_s")} for t in trials]
         design, k_gre, ky0 = best["design"], best["k"], best["ky"]
-        print(f"G starts (test AUC / train AUC): " + ", ".join(f"{t['start']}: {t['auc']:.3f} / {t['train_auc']:.3f}" for t in trials)
+        print("G starts (test AUC / train AUC): " + ", ".join(f"{t['start']}: {t['auc']:.3f} / {t['train_auc']:.3f}" for t in trials)
               + f"; best on the training set {best['start']}", flush=True)
         if args.seeds > 1:
             results["G_gre_" + args.front], nets_g = fit("G", lambda r, g: front_input(args.front, add_noise(k_gre[r["file"]], sigma[r["file"]], g), ky0))

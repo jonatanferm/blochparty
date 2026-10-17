@@ -19,11 +19,10 @@ import json
 from pathlib import Path
 
 import numpy as np
-from scipy import ndimage
-
 import realism as R  # noqa: E402
 import score as S  # noqa: E402
 import simulate_heads as SH  # noqa: E402
+from scipy import ndimage
 
 IXI = Path(__file__).resolve().parents[1] / "anatomy" / "data" / "ixi" / "T2"
 N = 64

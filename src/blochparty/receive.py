@@ -79,7 +79,6 @@ def oversample(seq: Sequence, os: int) -> tuple[Sequence, OversampleInfo]:
         new_psi.append(np.interp(new_t[-1], ti, ps) if n > 1 else np.full(n * os, ps[0]))
     new_t, new_psi = np.concatenate(new_t), np.concatenate(new_psi)
     # split segments at the new sample times; an ADC flag at each
-    starts = ends - dt
     cut = np.unique(np.concatenate([ends, new_t]))
     seg_of = np.searchsorted(ends, cut - 1e-15, side="left")  # the segment containing each piece's end
     seg_of = np.minimum(seg_of, len(dt) - 1)

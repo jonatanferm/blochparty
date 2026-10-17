@@ -11,9 +11,16 @@ from torch import Tensor
 from ..phantom import Phantom
 from ..sequence import Sequence
 from .hardware import Hardware, check_hardware, violations
-from .metrics import (_default_simulate, contrast, image_noise_sigma, magnitude_image, point_spread_function,
-                      psf_metrics, snr, tissue_mean)
-
+from .metrics import (
+    _default_simulate,
+    contrast,
+    image_noise_sigma,
+    magnitude_image,
+    point_spread_function,
+    psf_metrics,
+    snr,
+    tissue_mean,
+)
 
 # --- design report -------------------------------------------------------------------------
 

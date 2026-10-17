@@ -8,8 +8,8 @@ import torch
 
 import blochparty as bp
 from blochparty import generate
-from blochparty.generate.protocols import REAL_ETL, interleaved, sequence
 from blochparty.generate.heads import turn
+from blochparty.generate.protocols import REAL_ETL, interleaved, sequence
 from blochparty.generate.sample import kspace_on_fov, rss_image, to_real_orientation, unit_floor
 
 

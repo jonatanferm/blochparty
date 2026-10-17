@@ -24,14 +24,13 @@ import json
 from pathlib import Path
 
 import numpy as np
+import realism as R  # noqa: E402
+import simulate_heads as SH  # noqa: E402
 import torch
 from torch import nn
 
 from blochparty.design import auc, bootstrap  # noqa: F401 (gap.py uses them as score.auc, score.bootstrap)
 from blochparty.generate.sample import unit_floor  # noqa: F401 (moved there; gap.py uses score.unit_floor)
-
-import realism as R  # noqa: E402
-import simulate_heads as SH  # noqa: E402
 
 SLICES = range(13)
 CORNER = 12

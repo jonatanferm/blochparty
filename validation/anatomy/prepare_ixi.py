@@ -27,9 +27,9 @@ from pathlib import Path
 
 import nibabel as nib
 import numpy as np
-from scipy import ndimage
 import torch
 import torch.nn.functional as Fn
+from scipy import ndimage
 
 import blochparty as bp
 

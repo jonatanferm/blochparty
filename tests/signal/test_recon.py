@@ -6,7 +6,7 @@ import torch
 
 import blochparty as bp
 from blochparty.design import auc, bootstrap
-from blochparty.recon import (cg_sense, fft2c, ifft2c_ortho, random_mask, uniform_mask, variable_density_mask)
+from blochparty.recon import cg_sense, fft2c, ifft2c_ortho, random_mask, uniform_mask, variable_density_mask
 
 c128 = torch.complex128
 

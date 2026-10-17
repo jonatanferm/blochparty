@@ -22,11 +22,10 @@ import math
 
 import finufft
 import h5py
+import iohexol as I  # noqa: E402  (numpy-only parts)
 import numpy as np
 from scipy import ndimage
 from scipy.optimize import least_squares
-
-import iohexol as I  # noqa: E402  (numpy-only parts)
 
 H5 = I.DATA / "meas_MID00123_FID56962_IR_LL_SOS.h5"
 N, FLIP, TR, T_START = 128, 6.0, 5.01e-3, 0.15

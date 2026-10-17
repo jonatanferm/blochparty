@@ -23,19 +23,19 @@ import dataclasses
 import importlib.metadata
 import json
 import math
-from pathlib import Path
 import platform
 import subprocess
 import tempfile
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch import Tensor
 
 from .. import sequence as _sequence
-from ..sequences import builder as _events
 from ..constants import GAMMA_BAR
 from ..sequence import Sequence, kspace_trajectory
+from ..sequences import builder as _events
 
 TICK = 2.5e-3  # [s] ISMRMRD time-stamp unit
 _ARRAYS = ("dt", "rf", "grad", "adc_phase", "b0_offset", "rf_freq")

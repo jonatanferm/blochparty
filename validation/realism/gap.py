@@ -30,8 +30,8 @@ import json
 from pathlib import Path
 
 import numpy as np
-from scipy import ndimage as ndi, stats
-
+from scipy import ndimage as ndi
+from scipy import stats
 
 BANDS = [(0.05, 0.15), (0.15, 0.3), (0.3, 0.45), (0.45, 0.6), (0.6, 0.8), (0.8, 1.0)]
 SECTORS = {"posterior": range(-6, 7), "right": range(12, 25), "anterior": range(30, 43), "left": range(48, 61)}
@@ -127,6 +127,7 @@ def composition(samples: Path, score: Path | None, n_files: int = 120):
     21 % skull: the real scalp + skull is ~4 mm thicker at the back, the dark valley one band further out."""
     import glob
     import json as _json
+
     import h5py
     files = sorted(glob.glob(str(samples / "sample_*.h5")))[:n_files]
     r = np.linspace(0, 1.15, 40)
@@ -255,9 +256,9 @@ def main():
                   + f" | {c['n_per_1000']:5.1f} {c['mean_size']:5.1f} {c['bright_frac']:.3f} | {np.mean([x[2] for x in g]):.3f}")
 
     elif args.mode == "controls":
-        import torch
         import realism as RL
         import score as SC
+        import torch
         device = "mps" if torch.backends.mps.is_available() else "cpu"
         root = args.fastmri or RL.FASTMRI
         man = json.loads((root / "manifest.json").read_text())

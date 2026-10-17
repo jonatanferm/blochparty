@@ -9,7 +9,17 @@ checks the optimizer against the reference.
 
 from __future__ import annotations
 
-from blochparty.design.problems.tse_flips import ESP, FRACTION, N_ECHO, T1, T2, TARGET, epg_echoes, optimize, slsqp_on_epg
+from blochparty.design.problems.tse_flips import (
+    ESP,
+    FRACTION,
+    N_ECHO,
+    T1,
+    T2,
+    TARGET,
+    epg_echoes,
+    optimize,
+    slsqp_on_epg,
+)
 
 
 def main():

@@ -1,25 +1,71 @@
 """Bloch Party: a differentiable MRI simulator in PyTorch."""
 
 from . import design, epg, exchange, reference
-from .anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, DigitalPhantom, Distribution, TissueProperties,
-                      anatomy_field_maps, deform, draw_tissues, random_deformation, sample_head, layer_scalp, add_dermis, label_deep_grey, add_falx, open_sulci, sulcal_width, sulcal_widening, gather_cortical_csf, head_dimensions, anthropometric_scaling, gaussian_random_field, load_ahead, estimate_macroscopic_r2prime, load_brainweb, load_ixi, ixi_subjects, load_qsm2,
-                      to_phantom)
-from .result import SimResult
-from .sequences.library import (bssfp_2d, cartesian_kspace, cartesian_recon, epi_2d, gre_2d, gre_3d, gre_cartesian,
-                       readout_bandwidth_per_pixel, se_2d, tse_2d)
-from .engines.chunked import simulate_chunked
-from .engines import simulate  # engine= picks the core (default), the chunked core or a GPU engine
+from .anatomy import (
+                      BRAINWEB_TISSUES,
+                      DEFAULT_TISSUES,
+                      Anatomy,
+                      DigitalPhantom,
+                      Distribution,
+                      TissueProperties,
+                      add_dermis,
+                      add_falx,
+                      anatomy_field_maps,
+                      anthropometric_scaling,
+                      deform,
+                      draw_tissues,
+                      estimate_macroscopic_r2prime,
+                      gather_cortical_csf,
+                      gaussian_random_field,
+                      head_dimensions,
+                      ixi_subjects,
+                      label_deep_grey,
+                      layer_scalp,
+                      load_ahead,
+                      load_brainweb,
+                      load_ixi,
+                      load_qsm2,
+                      open_sulci,
+                      random_deformation,
+                      sample_head,
+                      sulcal_widening,
+                      sulcal_width,
+                      to_phantom,
+)
 from .coils import add_noise, birdcage_b1, birdcage_sensitivities
 from .constants import GAMMA_BAR
+from .engines import simulate  # engine= picks the core (default), the chunked core or a GPU engine
+from .engines.chunked import simulate_chunked
 from .exchange import BoundPool, ExchangePool
 from .maps import FieldMaps
 from .motion import Motion
-from .restriction import Restriction
-from .phantom import (Phantom, b0_cylinder, b0_shim, b0_sphere, grid_positions, phantom_from_maps, shepp_logan,
-                      shepp_logan_maps)
+from .phantom import (
+                      Phantom,
+                      b0_cylinder,
+                      b0_shim,
+                      b0_sphere,
+                      grid_positions,
+                      phantom_from_maps,
+                      shepp_logan,
+                      shepp_logan_maps,
+)
 from .recon import coil_combine, ifft2c, ifft3c, ifftnc, kspace_grid, reconstruct, rss
+from .restriction import Restriction
+from .result import SimResult
 from .sequence import Sequence
 from .sequences.builder import SequenceBuilder, System, block_pulse, gradient_waveform, sinc_pulse, trapezoid
+from .sequences.library import (
+                      bssfp_2d,
+                      cartesian_kspace,
+                      cartesian_recon,
+                      epi_2d,
+                      gre_2d,
+                      gre_3d,
+                      gre_cartesian,
+                      readout_bandwidth_per_pixel,
+                      se_2d,
+                      tse_2d,
+)
 from .susceptibility import shim, susceptibility_to_b0
 
 __all__ = [

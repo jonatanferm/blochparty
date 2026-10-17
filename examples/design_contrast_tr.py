@@ -8,7 +8,7 @@ checks the optimizer against the reference.
 
 from __future__ import annotations
 
-from blochparty.design.problems.contrast_tr import N, N_DUMMY, grid_optimum, optimize
+from blochparty.design.problems.contrast_tr import N_DUMMY, N, grid_optimum, optimize
 
 
 def main():

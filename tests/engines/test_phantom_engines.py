@@ -6,13 +6,14 @@ they were built from)."""
 from dataclasses import replace
 
 import torch
-from helpers import compare_gradients, rel
 
 import blochparty as bp
 from blochparty import simulate
 from blochparty.chunked import simulate_chunked
 from blochparty.coils import birdcage_b1
 from blochparty.phantom import b0_shim, b0_sphere
+
+from helpers import compare_gradients, rel
 
 TOL_GRAD = 2e-4  # the float32 adjoint against float64 autograd (test_gpu_grad.py)
 

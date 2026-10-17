@@ -13,11 +13,13 @@ import numpy as np
 import torch
 
 import blochparty as bp
+
 from ..coils import coil_offset, normalised_sensitivities
 from ..io import write_dataset
 from .heads import MONRO_BELOW_BODIES, b1_plus, centre, head_for, stack, turn
 from .protocols import FOV, REAL_ETL, THICKNESS, interleaved, sequence
-from .spec import merged, span as _span
+from .spec import merged
+from .spec import span as _span
 
 
 def centred_fft(x, axes):

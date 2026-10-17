@@ -8,14 +8,15 @@ from dataclasses import replace
 
 import pytest
 import torch
-from cases import random_case
-from helpers import rel, with_readout
 
 import blochparty as bp
 from blochparty import Phantom, SequenceBuilder, simulate
 from blochparty.chunked import simulate_chunked
 from blochparty.coils import birdcage_b1
 from blochparty.reference import signal_equation, spoiled_gre_signal
+
+from cases import random_case
+from helpers import rel, with_readout
 
 SIMS = {"core": simulate, "chunked": lambda *a, **k: simulate_chunked(*a, spin_chunk=7, **k)}
 

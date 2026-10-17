@@ -13,6 +13,7 @@ import torch
 from scipy.integrate import solve_ivp
 
 from blochparty import Phantom, simulate
+
 from cases import random_case
 
 

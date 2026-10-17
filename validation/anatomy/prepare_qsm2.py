@@ -5,8 +5,8 @@ proof that arbitrary local files are the official release. Review qsm2.json befo
 using it. The access-restricted collection is doi:10.34973/m20r-jt17, version 1.
 """
 import argparse
-from datetime import date
 import json
+from datetime import date
 from pathlib import Path
 
 from blochparty.anatomy import _file_sha256, load_qsm2

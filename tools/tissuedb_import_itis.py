@@ -23,7 +23,6 @@ in src/blochparty/anatomy/tissuedb/itis_import_log.csv, with the SHA-256 of the 
 from __future__ import annotations
 
 import argparse
-import cmath
 import csv
 import hashlib
 import json

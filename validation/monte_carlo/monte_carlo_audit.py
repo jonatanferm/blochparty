@@ -13,10 +13,9 @@ import scipy
 import torch
 from scipy.stats import qmc
 
+import blochparty as bp
 from blochparty.montecarlo import jackknife, mc_magnitude
 from blochparty.montecarlo import sobol_points as _sobol_points
-
-import blochparty as bp
 from blochparty.rng import normals
 
 

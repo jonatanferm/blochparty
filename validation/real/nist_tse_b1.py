@@ -13,15 +13,15 @@ constrain |B1+ - 1|, which the results reflect.
 import sys
 import time
 
+import nist_tse as t
 import numpy as np
 import torch
+from nist import CENTRE, PIXEL, coarsen_rf, phantom, roi_means
 from scipy.interpolate import CubicSpline
 from scipy.ndimage import center_of_mass
 from scipy.optimize import minimize
 
-import nist_tse as t
 from blochparty.pulseq import read_pulseq
-from nist import CENTRE, PIXEL, coarsen_rf, phantom, roi_means
 
 
 def scan(path):

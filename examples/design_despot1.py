@@ -14,7 +14,16 @@ import math
 import torch
 
 import blochparty as bp
-from blochparty.design.problems.despot1 import METAL_STEP, T1, TR, closed_form_cov, ernst_fraction, f64, grid_optimum, optimize
+from blochparty.design.problems.despot1 import (
+    METAL_STEP,
+    T1,
+    TR,
+    closed_form_cov,
+    ernst_fraction,
+    f64,
+    grid_optimum,
+    optimize,
+)
 
 
 def main():

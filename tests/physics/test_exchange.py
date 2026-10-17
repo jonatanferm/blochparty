@@ -12,8 +12,17 @@ import torch
 from scipy.integrate import quad, solve_ivp
 
 from blochparty import Phantom, SequenceBuilder, simulate
-from blochparty.exchange import (BoundPool, lineshape, lorentzian, modes_lineshape, pool_modes, rf_frequency,
-                                 superlorentzian, z_exchange)
+from blochparty.exchange import (
+    BoundPool,
+    lineshape,
+    lorentzian,
+    modes_lineshape,
+    pool_modes,
+    rf_frequency,
+    superlorentzian,
+    z_exchange,
+)
+
 from cases import bm_case
 
 f64 = torch.float64

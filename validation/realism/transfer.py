@@ -20,12 +20,11 @@ import json
 from pathlib import Path
 
 import numpy as np
+import realism as R  # noqa: E402
 import torch
 from torch import nn
 
 import blochparty as bp
-
-import realism as R  # noqa: E402
 
 
 def undersample(k: np.ndarray, accel: int, centre: float, rng) -> np.ndarray:

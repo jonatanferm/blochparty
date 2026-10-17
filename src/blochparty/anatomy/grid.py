@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import math
+from dataclasses import dataclass, field
 
 import torch
 from torch import Tensor
-
 
 AIR_CHI = 0.36e-6  # Jordan et al., JMRI 2013, doi:10.1002/jmri.23762, Theory.
 WATER_CHI = -9.05e-6  # Same source, 37 C; absolute SI, not ppm.

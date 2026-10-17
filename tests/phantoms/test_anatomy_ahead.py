@@ -57,5 +57,5 @@ def test_ahead_resampling_and_checksum(tmp_path):
     vol = lambda a: float(a.maps["M0"].sum()) * np.prod(a.voxel)
     assert vol(coarse) == pytest.approx(vol(native), rel=1e-12)
     (tmp_path / "r1.nii.gz").write_bytes(b"")
-    with pytest.raises(Exception):
+    with pytest.raises(ValueError, match="checksum mismatch"):
         bp.load_ahead(tmp_path)

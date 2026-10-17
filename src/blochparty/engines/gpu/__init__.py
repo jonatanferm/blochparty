@@ -23,8 +23,8 @@ from importlib.resources import files
 import torch
 from torch import Tensor
 
-from ...result import SimResult
 from ...phantom import Phantom
+from ...result import SimResult
 from ...sequence import Sequence
 from ..capabilities import check, features
 from .adjoint import _simulate_grad

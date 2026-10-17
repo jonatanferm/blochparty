@@ -21,6 +21,7 @@ import torch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))  # for cases.random_case
 
 import blochparty as bp  # noqa: E402
+
 from cases import random_case  # noqa: E402
 
 

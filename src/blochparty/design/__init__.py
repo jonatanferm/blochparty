@@ -25,14 +25,41 @@ refocusing trains), each with its reference optimum.
 """
 
 from ..constants import GAMMA_BAR
-from .hardware import (AXES, Check, Hardware, b1_uT, boundary_times, check_hardware, grad_mT_m, gradient_steps,
-                       hinge2, penalties, pns, rf_energy, rf_power, sar_proxy, slew_rate, violations)
-from .metrics import (auc, bootstrap, cnr, contrast, image_noise_sigma, magnitude_image, point_spread_function,
-                      psf_metrics, snr, snr_efficiency, tissue_mean)
 from .estimation import crb, fisher_information, jacobian
+from .hardware import (
+                       AXES,
+                       Check,
+                       Hardware,
+                       b1_uT,
+                       boundary_times,
+                       check_hardware,
+                       grad_mT_m,
+                       gradient_steps,
+                       hinge2,
+                       penalties,
+                       pns,
+                       rf_energy,
+                       rf_power,
+                       sar_proxy,
+                       slew_rate,
+                       violations,
+)
+from .metrics import (
+                       auc,
+                       bootstrap,
+                       cnr,
+                       contrast,
+                       image_noise_sigma,
+                       magnitude_image,
+                       point_spread_function,
+                       psf_metrics,
+                       snr,
+                       snr_efficiency,
+                       tissue_mean,
+)
 from .optimize import minimize
-from .report import design_report
 from .parameters import Design, learnable_gre
+from .report import design_report
 
 __all__ = ['AXES', 'Check', 'GAMMA_BAR', 'Hardware', 'auc', 'b1_uT', 'bootstrap', 'boundary_times', 'check_hardware',
            'cnr', 'contrast', 'crb', 'design_report', 'fisher_information', 'grad_mT_m', 'gradient_steps', 'hinge2',

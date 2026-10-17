@@ -14,7 +14,8 @@ from scipy.integrate import solve_ivp
 import blochparty as bp
 from blochparty import ExchangePool, Phantom, simulate
 from blochparty.exchange import lineshape, rf_frequency
-from cases import bm_case, _maps_for, pool_case
+
+from cases import _maps_for, bm_case, pool_case
 from helpers import with_readout
 
 f64 = torch.float64

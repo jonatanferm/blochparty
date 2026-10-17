@@ -16,21 +16,28 @@ ratio reference: field strength and population differ. No universal in-vivo
 contrast ratio is claimed. See RESULTS.md for that limitation.
 """
 import argparse
-from dataclasses import replace
 import gzip
 import hashlib
 import json
 import math
-from pathlib import Path
 import resource
 import time
+from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import torch
 
 import blochparty as bp
-from blochparty.anatomy import (Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES, Distribution,
-                               anatomy_field_maps, load_brainweb, to_phantom)
+from blochparty.anatomy import (
+    BRAINWEB_TISSUES,
+    DEFAULT_TISSUES,
+    Anatomy,
+    Distribution,
+    anatomy_field_maps,
+    load_brainweb,
+    to_phantom,
+)
 
 ROOT = Path(__file__).parent/"data"
 

@@ -54,13 +54,21 @@ from __future__ import annotations
 import torch
 from torch import Tensor
 
-from ....result import SimResult
 from ....phantom import Phantom
+from ....result import SimResult
 from ....sequence import Sequence
 from .. import _simulate, source
 from ..adjoint import N_SPIN_GRADS, default_checkpoint_every  # noqa: F401 (public names of blochparty.metal)
-from ..driver import (ADJOINT_COILS, MAX_COILS, MAX_POOLS, MMA_MIN_COILS, NU_HEAD, NUFFT_MIN_SAMPLES,  # noqa: F401
-                      NUFFT_WMAX, PULSE_MEMORY)
+from ..driver import (  # noqa: F401
+    ADJOINT_COILS,
+    MAX_COILS,
+    MAX_POOLS,
+    MMA_MIN_COILS,
+    NU_HEAD,
+    NUFFT_MIN_SAMPLES,
+    NUFFT_WMAX,
+    PULSE_MEMORY,
+)
 
 # the device code (../shaders, shared with CUDA) and the Metal kernels, templated by @SUFFIX@, @V@, @DIFF@, @NP@, @NC@
 _SOURCE = source("shaders/common.metal")

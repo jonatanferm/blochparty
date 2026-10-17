@@ -14,7 +14,6 @@ import torch
 
 from .translate import kernel_source
 
-
 # ---------------------------------------------------------------- NVRTC and the driver API
 
 
