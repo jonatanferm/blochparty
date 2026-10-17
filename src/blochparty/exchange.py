@@ -21,7 +21,7 @@ absorption lineshape in BMCTool's normalisation (G = pi g, with g of unit area o
   T2b = 12 us, the order of the empirically calibrated G(0) = 2.0e-5 s (Soellinger et al.,
   ISMRM 2010: bSSFP qMT, postmortem in-situ brain at 3 T, 6-20 C). BMCTool's own cut is ~150 Hz, with a rectangle-rule
   integral outside it: near the pool (CEST offsets) the two conventions differ by up to 0.12
-  in Z (``validation/compare_bmctool.py``). The near-resonance super-Lorentzian is a model
+  in Z (``validation/bmctool/compare_bmctool.py``). The near-resonance super-Lorentzian is a model
   choice, not physics this model can settle.
 * ``cutoff=None``: no cut. G is then the half-line Fourier transform of the *tapered* Green's
   function of the generalized Bloch model (``generalized_bloch.green`` with ``memory``), finite on

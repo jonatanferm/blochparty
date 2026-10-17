@@ -1,6 +1,6 @@
 # Incidental magnetization transfer in multi-slice imaging
 
-    uv run python validation/incidental_mt.py
+    uv run python validation/mt/incidental_mt.py
 
 Against Shin, Gu & Yang, *Incidental magnetization transfer contrast by fat saturation
 preparation pulses in multi-slice Look-Locker EPI* (MRM 2009, [PMC2779549](https://pmc.ncbi.nlm.nih.gov/articles/PMC2779549)):

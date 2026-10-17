@@ -37,7 +37,7 @@ last column; combinations of features are checked only engine against engine.
 | B1+ (`Phantom.b1`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | flip b1·α, signal equation (`test_phantom_b1.py`) |
 | FieldMaps, static spins | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | linear maps = the same fields per spin (`test_maps.py`) |
 | FieldMaps, moving spins | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | motion through a linear B0 map = a gradient; moved object under mapped coils (`test_maps.py`) |
-| bound pool, rate model | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | matrix exponential, CW steady state, SciPy ODE (`test_exchange.py`); BMCTool (`validation/compare_bmctool.py`) |
+| bound pool, rate model | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | matrix exponential, CW steady state, SciPy ODE (`test_exchange.py`); BMCTool (`validation/bmctool/compare_bmctool.py`) |
 | bound pool, rate model without a cut (`cutoff=None`) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | the modes' sum of Lorentzians vs quadrature of the tapered Green's function's transform, rate model = generalized model for long pulses (`test_exchange.py`, `test_pools.py`) |
 | bound pool, generalized Bloch | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | reference solver, Henkelman CW limit, rate-model limit (`test_generalized_bloch.py`) |
 | free pools (`Phantom.pools`) | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | SciPy ODE of the full system, McConnell two-site exchange (`test_pools.py`); BMCTool |

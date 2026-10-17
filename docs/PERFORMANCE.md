@@ -279,7 +279,7 @@ spend fewer spins:
   rewound and the readout is balanced at the echo, so one spin per voxel in-plane may do. If
   this holds up, 8 jittered spins per voxel → 2 lattice spins at lower error: **4x on spins**.
   The check is the 27-spin reference and the EPG model of the same train
-  (`validation/RESULTS.md` already has the aliasing study).
+  (`validation/mrzero/RESULTS.md` already has the aliasing study).
 - **Allocation.** Neyman allocation puts spins where the signal variance is: proportional to
   PD × the voxel's dephased fraction, not uniform. Bone, scalp and partial-volume air are
   over-sampled today. Estimated 1.2-1.5x.
@@ -335,7 +335,7 @@ rotate each pool exactly about its own effective field (the fast part), and appl
 and exchange as the slow part in the interaction picture, where the transverse exchange coupling
 between pools at different frequencies oscillates and is averaged over the step (first-order
 Magnus; Blanes et al. 2009). One or two sub-steps instead of 80 for far-off-resonance spins, which
-also removes the need for the cost sort. Check: BMCTool (`validation/compare_bmctool.py`) and
+also removes the need for the cost sort. Check: BMCTool (`validation/bmctool/compare_bmctool.py`) and
 the core's matrix exponential. 5-10x on CEST spectra (niche for the current goals).
 
 ### 2.9 Hardware, for scale

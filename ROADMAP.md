@@ -53,8 +53,8 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
 
 - **Independent check first.** Name the reference before writing code: a closed form, the SciPy
   ODE (`tests/cases.py: random_case`), EPG (`src/blochparty/epg.py`), the signal
-  equation (`src/blochparty/reference.py`), BMCTool (`validation/compare_bmctool.py`), MRzero
-  (`validation/compare_mrzero.py`), or real data (`validation/real/`). A feature without a
+  equation (`src/blochparty/reference.py`), BMCTool (`validation/bmctool/compare_bmctool.py`), MRzero
+  (`validation/mrzero/compare_mrzero.py`), or real data (`validation/real/`). A feature without a
   reference is not done.
 - **Defaults stay bit-identical.** Before the change: `uv run python tools/snapshot.py save
   /tmp/before.pt`; after: `save /tmp/after.pt` and `compare`. New physics is opt-in (a `None`
@@ -148,7 +148,7 @@ and applies `matrix_exp(A dt)` to the state. Reproduce that on the GPU.
 
 Verify: `tests/engines/test_gpu.py`: two-pool and three-pool phantoms with and without a bound pool on
 a random RF / gradient / off-resonance sequence and on a CEST saturation + readout, vs the core
-≤ 1e-5 relative; the BMCTool comparison (`validation/compare_bmctool.py`) through Metal within
+≤ 1e-5 relative; the BMCTool comparison (`validation/bmctool/compare_bmctool.py`) through Metal within
 the float32 budget (the core is at 5.8e-7); benchmarks 8 and 9 reproduce their tables.
 
 ### M1b. Motion under gradient nonlinearity and concomitant fields — done 2026-10-08
@@ -590,7 +590,7 @@ core) or raises, and the engine matrix says which.
    fragments (strong-coupling Hamiltonian, hard pulses; tested against the analytic limits) and a triglyceride
    fragment model consistent with the six-peak spectrum. With one intrinsic T2 calibrated to CPMG at 8 ms (145 ms,
    Keene 2020), it predicts single-echo fat T2 222 ms against the 48-68 ms measured at 3 T, and a TSE / SE fat ratio of
-   1.13 against Henkelman's ~2 (`validation/jcoupling_fat.py`): the coupled chain ends are only part of the story, the
+   1.13 against Henkelman's ~2 (`validation/jcoupling/jcoupling_fat.py`): the coupled chain ends are only part of the story, the
    bulk methylene (half the signal, unmodulated here) and other mechanisms that fast refocusing suppresses carry the
    rest. Next: measured fat T2 against echo spacing at 3 T (intermediate spacings), or a methylene-chain model; until
    then the CPMG fat T2 stays (tissuedb LIPIDS), and at fastMRI's 10.26 ms the J part alone predicts fat ~3.5 % dimmer

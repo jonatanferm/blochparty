@@ -130,7 +130,7 @@
   (2026-10-10): Wansapura et al. 1999 (JMRI 9:531) gives T2 "for gray matter and white matter"
   as 80 and 110 ms, opposite to every other 3 T study (GM > WM, Stanisz 2005 99 / 69 ms), and
   also calls its 14-echo FLASH T2* values "T2" and an occipital GM value that is the lower one
-  "significantly higher". `validation/anatomy_brainweb.py` used the abstract order since M2
+  "significantly higher". `validation/anatomy/anatomy_brainweb.py` used the abstract order since M2
   (2026-10-07); its human-3 T T2-weighted GM/WM ratio was 0.69 (cortex darker than white matter,
   which no T2-weighted image shows) and is 1.56 with GM 110 / WM 80 ms. A predicted contrast
   ratio that inverts the textbook appearance is the quick check. The Wiley full text sits
@@ -202,7 +202,7 @@
   long sequences, mostly from merging states whose k agrees only to float32); default PDG
   pruning thresholds discard most signal of point-isochromat phantoms, and its pre-pass with
   mean T1/T2 prunes long-lived CSF states; ADC frequency offsets are ignored; it tips +z to −y
-  (constant −i relative to us). (`validation/RESULTS.md`)
+  (constant −i relative to us). (`validation/mrzero/RESULTS.md`)
 
 - **KomaMRI (from source, 2026)**: ideal linear gradients only, uniform transmit, no noise
   model; diffusion "under construction", susceptibility commented out; strong on motion,
@@ -219,7 +219,7 @@
   equilibrium), gradients otherwise do nothing, and a frequency offset rotates the frame for the
   pulse's duration, with phase bookkeeping (`accum_phase`) between pulses. Shaped pulses are
   downsampled to `max_pulse_samples` (500 by default). With the Lorentzian lineshape it
-  agrees with blochparty to 6e-7 in Z (`validation/compare_bmctool.py`).
+  agrees with blochparty to 6e-7 in Z (`validation/bmctool/compare_bmctool.py`).
 
 ## Tissue-property database — 2026-10-10
 
@@ -244,7 +244,7 @@
 - **Abstract labels lie**: Wansapura 1999 calls T2* "T2" and lists "GM and WM 80 and 110 ms" in the
   order opposite to physics (GM T2 > WM T2); Shin 2025 swaps WM/GM in the abstract (Table 3 is GM,
   WM); the ISMRM archive page of Peters et al. 2006 lists Hoogenraad first (the PDF has Peters).
-  `validation/anatomy_brainweb.py` used the abstract order until 2026-10-10 (now GM .110, WM .080 s;
+  `validation/anatomy/anatomy_brainweb.py` used the abstract order until 2026-10-10 (now GM .110, WM .080 s;
   see the Wansapura entry under "Pulseq, data and reference values").
 
 - **The CSF T1 the project quotes (4.4 s, via Spijkerman 2018 ref. 13) is 4.3 +- 0.2 s in Rooney
@@ -288,7 +288,7 @@
   where a contrast lives (an edge-depth profile, tissue composition per depth band) before tuning a
   parameter. Still off: the calvarial diploe (fatty marrow) is 0.8 vs 1.6 in the real profile.
 
-- **J coupling of the chain ends does not explain bright fat by itself** (2026-10-13, validation/jcoupling_fat.py): a
+- **J coupling of the chain ends does not explain bright fat by itself** (2026-10-13, validation/jcoupling/jcoupling_fat.py): a
   density-matrix model of the coupled triglyceride fragments (methyl, carboxyl, allylic, diallylic, glycerol; J 7 Hz),
   calibrated to CPMG fat T2 145 ms at 8 ms spacing, predicts single-echo fat T2 222 ms where 48-68 ms is measured at
   3 T. Half the fat signal is bulk methylene whose neighbours share its shift (no observable J), and the coupled groups'

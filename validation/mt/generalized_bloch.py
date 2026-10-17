@@ -3,7 +3,7 @@ rectangular pulses, generalized Bloch model (``blochparty.generalized_bloch``) v
 Graham rate model of ``exchange.py`` (W = w1^2 G, the super-Lorentzian held at its 1 kHz value
 on resonance), as Fig. 3 of Asslander et al. (arXiv 2107.11000).
 
-    uv run python validation/generalized_bloch.py
+    uv run python validation/mt/generalized_bloch.py
 
 Isolated bound pool, super-Lorentzian, T2s = 12 us, R1s = 1/s. Rate model: z_s = exp(-W T_RF)
 (plus R1, negligible here)."""

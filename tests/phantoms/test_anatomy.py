@@ -1,7 +1,7 @@
 """Anatomy assembly vs conservation, Ernst, continuous-box FT and sphere fields.
 
 All unit fixtures are synthetic; real BrainWeb checks and throughput live in
-validation/anatomy_brainweb.py and validation/anatomy/RESULTS.md.
+validation/anatomy/anatomy_brainweb.py and validation/anatomy/RESULTS.md.
 """
 from dataclasses import replace, fields
 import gzip

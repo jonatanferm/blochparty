@@ -14,8 +14,8 @@ From the repository root:
 
 ```sh
 uv run python validation/anatomy/fetch_brainweb.py --legacy
-uv run python validation/anatomy_brainweb.py
-uv run python validation/anatomy_brainweb.py --benchmark-only
+uv run python validation/anatomy/anatomy_brainweb.py
+uv run python validation/anatomy/anatomy_brainweb.py --benchmark-only
 ```
 
 The benchmark needs an Apple GPU. The contrast script runs on CPU. Both write JSON
@@ -204,4 +204,4 @@ IXI012 against its own T2 (the scanner trend removed from both: brain |log(real 
 QSM as `chi` (no air or bone: `chi_background = 0`), `map_field_T = 7`. There is no R2 map:
 supply a 7 T table entry `"brain"` with T2, and, because the default T2* policy omits R2'
 when susceptibility is on, supply `maps["intrinsic_r2prime"]` (e.g. R2* - R2) to keep the
-measured R2* contrast (`validation/anatomy_ahead.py` does both, as stated assumptions).
+measured R2* contrast (`validation/anatomy/anatomy_ahead.py` does both, as stated assumptions).

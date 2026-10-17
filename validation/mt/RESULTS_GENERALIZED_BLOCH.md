@@ -1,6 +1,6 @@
 # Generalized Bloch model vs. the rate model of magnetization transfer
 
-    uv run python validation/generalized_bloch.py
+    uv run python validation/mt/generalized_bloch.py
     uv run pytest tests/physics/test_generalized_bloch.py
 
 `blochparty.generalized_bloch` implements the generalized Bloch model of Assländer et al.

@@ -106,7 +106,7 @@ def phantom_from_maps(
         along each map axis, e.g. ``(1, 8)`` for 8 spins along x in 2D. Spins sit on a
         regular sub-grid (cell centres), or, with ``jitter="stratified"``, at one uniform
         random point per sub-cell (seeded by ``seed``). Rule of thumb (see
-        ``validation/RESULTS.md``): spins per voxel side must exceed the cycles of
+        ``validation/mrzero/RESULTS.md``): spins per voxel side must exceed the cycles of
         dephasing across a voxel (gradient moment x voxel size) that still carry signal;
         with fewer, those configurations alias back as spurious echoes.
     t2prime: T2' map [s] (inf = none). Every spin of a voxel gets a static frequency

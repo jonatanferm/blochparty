@@ -35,9 +35,9 @@ contains no replacement download URL.
 uv sync --extra anatomy
 uv run python validation/anatomy/fetch_qsm_challenge.py --model 1
 uv run python validation/anatomy/fetch_qsm_challenge.py --model 2
-uv run python validation/anatomy_qsm.py --fetch-reference
-uv run python validation/anatomy_qsm.py --root validation/anatomy/data/qsm_challenge1 --resolution native
-uv run python validation/anatomy_qsm.py --root validation/anatomy/data/qsm_challenge2 --resolution native
+uv run python validation/anatomy/anatomy_qsm.py --fetch-reference
+uv run python validation/anatomy/anatomy_qsm.py --root validation/anatomy/data/qsm_challenge1 --resolution native
+uv run python validation/anatomy/anatomy_qsm.py --root validation/anatomy/data/qsm_challenge2 --resolution native
 ```
 
 `qsm_challenge1.json` and `qsm_challenge2.json` pin decompressed NIfTI bytes

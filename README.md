@@ -91,7 +91,7 @@ phantom = bp.phantom_from_maps(
 - **Sub-voxel isochromats** (`spins_per_voxel=K` or per-side counts like `(1, 8)`; regular
   sub-grid or `jitter="stratified"`; in-plane for 2D maps). Spins per voxel side must exceed the cycles of
   dephasing across a voxel that still carry signal (spoilers, stimulated echoes), else
-  those configurations alias back as spurious echoes (`validation/RESULTS.md`). Costs
+  those configurations alias back as spurious echoes (`validation/mrzero/RESULTS.md`). Costs
   K× the spins; use `simulate_metal` (its adjoint) or `simulate_chunked` for gradients.
 - **T2′** (`t2prime` map): each voxel's spins get static offsets from a Lorentzian of
   half-width 1/(2πT2′) (Cauchy quantiles shuffled over the voxel, or `t2prime_sampling="random"`),
@@ -207,7 +207,7 @@ write_pulseq(bp.gre_2d(64, ramps=True, spoiling="rf", slice_thickness=5e-3), "gr
   timings off the rasters, and sequences changed after building (e.g. by `apply_girf`: write the
   nominal sequence). Imported files are written back from their own events.
 - Cross-validation against MRzero: `uv sync --extra mrzero`, then
-  `uv run python validation/compare_mrzero.py` (writes [validation/RESULTS.md](validation/RESULTS.md))
+  `uv run python validation/mrzero/compare_mrzero.py` (writes [validation/mrzero/RESULTS.md](validation/mrzero/RESULTS.md))
   or `uv run pytest -m crosscheck`.
 
 ## Scanner field model
@@ -352,7 +352,8 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `maps.py` | `FieldMaps`: scanner-frame B0, B1⁺ and coil maps sampled where each spin is |
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
 | `anatomy/`, `susceptibility.py` | anatomies on a grid (`grid`), cited tissue tables (`tables`, and the `tissuedb` database), the BrainWeb / QSM / AHEAD / IXI loaders, anatomy → spins (`phantom`), the generator's edits (`edits`), deformations and the head sampler `sample_head` (`sampler`); susceptibility → B0, shimming |
-| `io.py` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance |
+| `io/` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance (`ismrmrd`); a minimal Siemens twix reader (`twix`) |
+| `montecarlo.py` | estimators for simulations repeated over random seeds: debiased power and magnitude, jackknife, Sobol points |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise; the receive ring's placement behind the head and the scanner's prescan normalisation |
 | `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |
 | `receive.py` | the receive chain (oversampling, filtering) |

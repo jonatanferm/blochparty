@@ -1,6 +1,6 @@
 # Cross-validation: magnetization transfer vs. BMCTool
 
-    uv run --with bmctool==1.0.3 python validation/compare_bmctool.py
+    uv run --with bmctool==1.0.3 python validation/bmctool/compare_bmctool.py
 
 Z-spectrum at 3 T: water T1/T2 1.0 s / 50 ms; bound pool f 0.1351, k 30 Hz, T1b 1 s, shifted to
 −3 ppm (so the spectrum is asymmetric and any sign error in the RF frequency, the importer or

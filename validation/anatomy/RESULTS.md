@@ -26,7 +26,7 @@ checksums, coordinate updates, separate scanner shims and T2* double counting.
 
 ## Downloaded reference contrasts
 
-Run `uv run python validation/anatomy_brainweb.py` after fetching with `--legacy`.
+Run `uv run python validation/anatomy/anatomy_brainweb.py` after fetching with `--legacy`.
 Manifests pin decompressed source bytes, with all volumes kept outside Git.
 Reference ROIs use memberships > 95%: 449,752 WM, 509,944 GM, 202,279 CSF voxels
 for the older SBD. Report median image intensities, divided into tissue ratios.
@@ -94,7 +94,7 @@ Challenge forward-field validation belongs to M3.
 
 ## Full 3D GPU benchmark
 
-Run `uv run python validation/anatomy_brainweb.py --benchmark-only` with Apple GPU
+Run `uv run python validation/anatomy/anatomy_brainweb.py --benchmark-only` with Apple GPU
 access. Local macOS host, Python 3.12.13. Full 1-mm subject-04 anatomy, categorical
 K=1, seed=0, all head tissues, six fat peaks; 1-ms 30° pulse split into 50 segments
 followed by 32 FID samples at 0.2-ms dwell (83 sequence segments total). Shader
@@ -149,7 +149,7 @@ L = 4 mm: realised mean 1.0006 / 1.0020 / 1.0006, SD 0.966 / 0.954 / 0.995 of th
 T1 and PD fields uncorrelated (|r| < 0.05); same texture for another spin seed, another
 texture for another variability seed, crops identical to the full realisation; default off.
 
-## M3 alternative: AHEAD v3 loader (`load_ahead`, `validation/anatomy_ahead.py`)
+## M3 alternative: AHEAD v3 loader (`load_ahead`, `validation/anatomy/anatomy_ahead.py`)
 
 Synthetic RPS files (`tests/phantoms/test_anatomy_ahead.py`): every voxel's encoded world position
 survives the reorientation exactly; ppm -> SI; mask; PD volume conserved by resampling (1e-12).

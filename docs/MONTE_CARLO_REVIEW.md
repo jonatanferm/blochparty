@@ -55,12 +55,12 @@ Three evidence levels are distinguished throughout:
 Reproduction from the repository root:
 
 ```sh
-.venv/bin/python validation/monte_carlo_audit.py
+.venv/bin/python validation/monte_carlo/monte_carlo_audit.py
 ```
 
 The script calls the existing NIST estimators and sampler, the existing phantom builder, and
 the existing Philox implementation. Numerical output is saved in
-[`validation/monte_carlo_audit_results.json`](../validation/monte_carlo_audit_results.json).
+[`validation/monte_carlo/monte_carlo_audit_results.json`](../validation/monte_carlo/monte_carlo_audit_results.json).
 Environment: PyTorch 2.14.1, SciPy 1.18.1, NumPy 2.5.3. MPS was unavailable to this execution
 environment, so no new Apple-GPU throughput or real-scanner benchmark is claimed. Previously
 recorded GPU results below are historical project evidence.
@@ -655,7 +655,7 @@ automatically preserve nominal coverage.
 
 ## 6. Checks performed and limitations
 
-- Ran all five diagnostic experiments in `validation/monte_carlo_audit.py`, including the
+- Ran all five diagnostic experiments in `validation/monte_carlo/monte_carlo_audit.py`, including the
   current production magnitude estimator and sampler. The JSON records full numerical results.
 - Ran targeted existing diffusion, restriction, and sub-voxel tests. The initial run had
   **21 passed, 6 skipped**, and one fused test blocked by the default compiler-cache location.

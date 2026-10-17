@@ -207,7 +207,7 @@ real data only in an opt-in marked test or a validation script)
    positions also change; quantile broadening uses its own fixed random stream.
 6. GPU = core on a small anatomical phantom (relative error ~1e-5, as `tests/engines/test_gpu.py`).
 
-Validation script (`validation/anatomy_brainweb.py`, [RESULTS](../../validation/anatomy/RESULTS.md)):
+Validation script (`validation/anatomy/anatomy_brainweb.py`, [RESULTS](../../validation/anatomy/RESULTS.md)):
 compare tissue contrast ratios (GM/WM, CSF/GM) against downloaded references. The newer
 20-model set publishes only SFLASH T1 (22/9.2 ms, 30°); the older SBD publishes SFLASH T1
 (18/10 ms, 30°) and DSE T2/PD (TR 3300 ms, echoes 35/120 ms). These are separate comparisons.

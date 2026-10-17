@@ -9,7 +9,7 @@ The model has J modulation only; one intrinsic T2 (shared by every proton) is ca
 spacing (17 echoes, mono-exponential fit) reads 145 ms, then the single-echo series (TE 10 / 20 / 40 / 80 / 160 ms)
 and other spacings are predicted.
 
-    uv run python validation/jcoupling_fat.py
+    uv run python validation/jcoupling/jcoupling_fat.py
 
 2026-10-13: intrinsic T2 266 ms; single-echo apparent T2 222 ms against the measured 48-68 ms, and fat at TE 100 ms
 1.13 x brighter in a 10.26 ms train than in one spin echo (Henkelman 1992: up to ~2): the model's J modulation (the

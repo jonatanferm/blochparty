@@ -13,7 +13,7 @@ from .qsm import _file_sha256
 
 # Units of the AHEAD v3 templates: the publisher record does not state them. ppm and 1/s
 # follow from the values (WM R1 ~0.8 /s and R2* ~ 35 /s at 7 T match Caan et al. 2019, same
-# MP2RAGEME method; pallidal QSM ~ +0.1 is ppm, not ppb); checked in validation/anatomy_ahead.py.
+# MP2RAGEME method; pallidal QSM ~ +0.1 is ppm, not ppb); checked in validation/anatomy/anatomy_ahead.py.
 AHEAD_UNITS = {"chi": 1e-6, "R1": 1.0, "R2star": 1.0, "relative_PD": 1.0}
 
 

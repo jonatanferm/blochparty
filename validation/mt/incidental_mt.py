@@ -1,6 +1,6 @@
 """Incidental magnetization transfer in multi-slice imaging, against Shin, Gu & Yang (2009).
 
-    uv run python validation/incidental_mt.py
+    uv run python validation/mt/incidental_mt.py
 
 Shin et al. (MRM 2009; PMC2779549) measured at 3 T, in white and grey matter, that the steady
 state of a multi-slice inversion-recovery Look-Locker EPI (TR 400 ms, 16 deg, 5 mm slices) with fat

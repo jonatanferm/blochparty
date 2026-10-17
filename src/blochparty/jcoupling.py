@@ -10,7 +10,7 @@ returns each group's echo amplitude relative to the uncoupled case, for single s
 allylic, diallylic) and the glycerol backbone, weighted by triglyceride stoichiometry, plus the bulk methylene, whose
 neighbours share its shift and which this model leaves unmodulated. ``fat_modulation`` sums them.
 
-Finding (2026-10-13, validation/jcoupling_fat.py): with one intrinsic T2 calibrated so that CPMG at 8 ms spacing reads
+Finding (2026-10-13, validation/jcoupling/jcoupling_fat.py): with one intrinsic T2 calibrated so that CPMG at 8 ms spacing reads
 145 ms (Keene 2020, 3 T), this model gives single-echo spin echoes an apparent T2 of 222 ms, against 48-68 ms
 measured at 3 T (Jordan 2013, de Bazelaire 2004): the coupled end groups modulate and partly recover, while most of
 the fat signal (the bulk methylene) is not J-modulated here. The in-vivo difference between spin-echo and CPMG fat

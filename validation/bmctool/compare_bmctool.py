@@ -1,7 +1,7 @@
 """Cross-validation of magnetization transfer: blochparty vs. BMCTool (pulseq-cest) Z-spectra.
 
-    uv run --with bmctool==1.0.3 python validation/compare_bmctool.py [--quick]
-    BLOCHPARTY_BACKEND=metal uv run --with bmctool==1.0.3 python validation/compare_bmctool.py   # on the Apple GPU
+    uv run --with bmctool==1.0.3 python validation/bmctool/compare_bmctool.py [--quick]
+    BLOCHPARTY_BACKEND=metal uv run --with bmctool==1.0.3 python validation/bmctool/compare_bmctool.py   # on the Apple GPU
 
 BMCTool solves the Bloch-McConnell equations with a Pade matrix exponential per RF sample;
 its MT pool is the same two-pool model (Henkelman/Graham rate W = w1^2 G) as

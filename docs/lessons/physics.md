@@ -74,7 +74,7 @@
   qsm-forward kernel sets D(0)=1/3 while ours uses zero, giving ~375 Hz constant offsets
   for synthetic water/air heads at 3 T. After removing only the ROI mean difference,
   residuals are <6.83e-13 Hz. Match the exact encoded exterior/corner and padding first;
-  do not hide disagreement with a slope or spatial fit. (`validation/anatomy_qsm.py`)
+  do not hide disagreement with a slope or spatial fit. (`validation/anatomy/anatomy_qsm.py`)
 
 - **Fuzzy membership is a density, not subcell geometry.** Keep each tissue's T1/T2 and
   weight its spins by fraction × PD; averaging relaxation constants gives the wrong
@@ -149,7 +149,7 @@
   magnitude of a few random phasors isn't zero. Real 3 T IR-SE with crushers (~1.7 cycles per
   slice thickness): 16–32 positions across the slice → 14 % shape error; 64 → 3 %; 128 →
   1.4 %. Treat spin density as a convergence parameter and report it.
-  (`validation/real/RESULTS.md`; also `validation/RESULTS.md` for RF spoiling: K must exceed
+  (`validation/real/RESULTS.md`; also `validation/mrzero/RESULTS.md` for RF spoiling: K must exceed
   the dephasing orders present, ~80 cycles per voxel after 40 TRs)
 
 - **The textbook inversion-recovery formula misses real IR spin echo by ~26 %** (curve shape)
@@ -353,8 +353,8 @@
   The latter operations introduce bias. In 200,000 four-seed Gaussian experiments with
   mean-component SD 1, a true zero becomes 0.524 on average; true amplitude 2 becomes 1.696.
   Retain complex means and unclipped power and calibrate the downstream estimator at nulls.
-  Derivation and reproduction: [MONTE_CARLO_REVIEW.md](MONTE_CARLO_REVIEW.md),
-  `validation/monte_carlo_audit.py`.
+  Derivation and reproduction: [MONTE_CARLO_REVIEW.md](../MONTE_CARLO_REVIEW.md),
+  `validation/monte_carlo/monte_carlo_audit.py`.
 
 - **Jackknife the statistic that is reported.** Both NIST drivers combine marginal sphere
   SEs as though their reconstructed errors were independent. Shared water and reconstruction
