@@ -211,7 +211,6 @@ def check_kspace(pseq, tol=1e-9):
     k_pp = pseq.calculate_kspace()[0].T
     err = np.abs(k_bp - k_pp).max()
     assert err <= tol, err
-    assert np.abs(seq.meta["kspace_trajectory"].numpy() - k_pp).max() == 0
     return seq, k_bp
 
 

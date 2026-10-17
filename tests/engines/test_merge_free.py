@@ -62,16 +62,24 @@ def test_same_signal_fewer_segments_gpu(gpu, name):
 
 
 def test_gradients_reach_the_original_segments():
-    seq = bp.tse_2d(8, etl=4, tr=0.3, slice_thickness=5e-3, spoiling="gradient")
-    grad = seq.grad.clone().requires_grad_(True)
+    """Static spins see a free stretch only through its total moment, so the gradient with respect to every original
+    segment's gradient is the same through the merged sequence (where the merged segment's moment carries its parts)
+    as through the original one."""
     from dataclasses import replace
 
-    s = replace(seq, grad=grad)
-    loss = bp.simulate(phantom(60, mt=False), s.merge_free()).signal.abs().square().sum()
-    loss.backward()
-    assert grad.grad is not None and grad.grad.abs().sum() > 0
+    seq = bp.tse_2d(8, etl=4, tr=0.3, slice_thickness=5e-3, spoiling="gradient")
+    ph = phantom(60, mt=False)
+
+    def grads(merge):
+        grad = seq.grad.clone().requires_grad_(True)
+        s = replace(seq, grad=grad)
+        bp.simulate(ph, s.merge_free() if merge else s).signal.abs().square().sum().backward()
+        return grad.grad
+
+    merged, plain = grads(True), grads(False)
     free = [i for i in range(len(seq)) if not seq.is_rf[i] and not seq.adc[i]]
-    assert grad.grad[free].abs().sum() > 0  # the merged segments' moments carry their parts' gradients
+    assert merged[free].abs().sum() > 0.1 * merged.abs().sum()  # the merged segments' parts carry real gradient
+    assert rel(merged, plain) < 1e-9
 
 
 def test_nothing_to_merge_returns_the_sequence():

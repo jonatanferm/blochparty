@@ -25,11 +25,19 @@ def test_power_is_the_unbiased_pair_statistic():
     assert mc_magnitude(many)[0].mean() > 0.2
 
 
-def test_magnitude_unchanged():
-    x = noisy(1.5, 4, (16,), np.random.default_rng(1))
-    mean = x.mean(0)
-    s2 = (np.abs(x - mean) ** 2).sum(0) / 3 / 4
-    np.testing.assert_array_equal(mc_magnitude(x)[0], np.sqrt(np.clip(np.abs(mean) ** 2 - s2, 0, None)))
+def test_magnitude_bias_follows_the_delta_method():
+    """At high SNR the clip never acts and sqrt(power) has the second-order bias -v / (4 A) (power = A^2 + d with
+    E d = 0, Var d ~ 2 A^2 v + v^2 for a mean of variance v), equal and opposite to the plain |mean|'s +v / (4 A):
+    only the power is debiased, as the docstring says. Checked against that expansion, not against the code."""
+    amplitude, k, sigma = 1.5, 4, 0.2  # sigma per component: the mean's complex variance v = 2 sigma^2 / K
+    x = noisy(0.0, k, (1_000_000,), np.random.default_rng(1)) * sigma + amplitude
+    v = 2 * sigma**2 / k
+    bias = v / (4 * amplitude)  # 3.3e-3; the next order is v^2 / (8 A^3) ~ 1.5e-5
+    mag, plain = mc_magnitude(x)[0], np.abs(x.mean(0))
+    se = mag.std() / np.sqrt(mag.size)  # ~1e-4
+    assert abs(mag.mean() - (amplitude - bias)) < 4 * se
+    assert abs(plain.mean() - (amplitude + bias)) < 4 * se
+    assert bias > 20 * se  # the two predictions are far apart at this precision
 
 
 def test_aggregate_jackknife_keeps_covariance():
