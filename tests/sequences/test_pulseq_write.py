@@ -13,6 +13,7 @@ import torch
 import blochparty as bp
 from blochparty.pulseq import flip_angle, read_pulseq, write_pulseq
 from blochparty.sequence import kspace_trajectory
+from helpers import rel
 
 pp = pytest.importorskip("pypulseq")
 f64 = torch.float64
@@ -33,10 +34,6 @@ def phantom():
     ph = bp.shepp_logan(16)
     g = torch.Generator().manual_seed(0)
     return replace(ph, db0=(torch.rand(len(ph), generator=g, dtype=f64) - 0.5) * 60)
-
-
-def rel(a, b):
-    return float((a - b).abs().max() / b.abs().max())
 
 
 @pytest.fixture(params=list(CASES), scope="module")
@@ -152,7 +149,7 @@ def test_imported_file_is_written_back_losslessly(tmp_path):
 def test_scanner_file_is_written_back_losslessly(tmp_path):
     from pathlib import Path
 
-    path = Path(__file__).parents[1] / "validation" / "real" / "data" / "iohexol" / "Seq_04_IR_LL_FOV_192_SOS3.seq"
+    path = Path(__file__).parents[2] / "validation" / "real" / "data" / "iohexol" / "Seq_04_IR_LL_FOV_192_SOS3.seq"
     if not path.exists():
         pytest.skip("validation data not fetched (validation/real/fetch_iohexol.py)")
     first = read_pulseq(path)

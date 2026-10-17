@@ -16,9 +16,9 @@ import pytest
 import torch
 
 import blochparty as bp
-from blochparty import GAMMA_BAR, Phantom, SequenceBuilder, Sequence, simulate, trapezoid
+from blochparty import Phantom, SequenceBuilder, Sequence, simulate, trapezoid
 from blochparty.girf import GIRF, EddyCurrents, _linear_scan, apply_girf
-from test_free_runs import random_phantom
+from cases import random_phantom
 from helpers import rel
 
 SIMS = {"core": simulate}

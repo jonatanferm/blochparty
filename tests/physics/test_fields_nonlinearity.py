@@ -4,7 +4,7 @@ Checked against: gradunwarp's ``siemens_B`` formula (spherical coordinates and S
 associated Legendre functions, written out here), Laplace's equation for every basis
 field, a synthetic coefficient file in both layouts, the image of a point grid (each
 point must appear at its analytically mapped position) and finite differences for the
-coefficient gradients (Metal agrees with the core in ``test_engines.py`` and ``test_metal_grad.py``).
+coefficient gradients (Metal agrees with the core in ``test_engines.py`` and ``test_gpu_grad.py``).
 """
 
 import math
@@ -18,11 +18,10 @@ import torch
 import blochparty as bp
 from blochparty import Phantom, simulate
 from blochparty.fields import GradientNonlinearity, Scanner, solid_harmonics
-from test_free_runs import busy_sequence, random_phantom
+from cases import busy_sequence, distortion, R0, random_phantom
 from helpers import rel
 
 SIMS = {"core": simulate}
-R0 = 0.25
 
 
 def gradunwarp_displacement(alpha, beta, pos, r0):
@@ -168,15 +167,6 @@ def test_linear_terms_scale_the_gradients(sim):
     a = SIMS[sim](ph, seq, scanner=Scanner(nonlinearity=GradientNonlinearity(alpha, beta, R0)))
     b = SIMS[sim](replace(ph, pos=ph.pos * scale), seq)
     assert rel(a.signal, b.signal) < 1e-12
-
-
-def distortion():
-    """x, y coils with third- and fifth-order terms: up to ~3 pixels at the edge of the grid."""
-    alpha, beta = torch.zeros(3, 6, 6, dtype=torch.float64), torch.zeros(3, 6, 6, dtype=torch.float64)
-    alpha[0, 3, 1], alpha[0, 5, 1], alpha[0, 3, 3] = -1.2, 0.5, 0.25
-    beta[1, 3, 1], beta[1, 5, 1], beta[1, 3, 3] = -1.0, 0.4, -0.25
-    alpha[2, 3, 0] = -0.5
-    return GradientNonlinearity(alpha, beta, R0)
 
 
 def peaks(image, guesses, fov, n, up=8):

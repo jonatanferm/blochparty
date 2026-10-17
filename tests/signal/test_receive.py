@@ -4,7 +4,6 @@ the filter's designed frequency response with no phase delay, the noise power th
 filter, the quantisation noise step^2 / 12 and clipping, an interference tone at the image
 column its frequency predicts."""
 
-import math
 
 import numpy as np
 import torch

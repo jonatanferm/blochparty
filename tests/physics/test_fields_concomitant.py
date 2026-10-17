@@ -4,7 +4,7 @@ Checked against: the explicit vector field of a cylindrical coil set (Maxwell's
 equations, and |B| in 50-digit arithmetic), Bernstein's analytic concomitant phase of a
 bipolar gradient pair, a Maxwell-compensated spin echo, the closed-form free runs against
 segment-wise stepping, and finite differences for the field strength (Metal agrees with the core
-in ``test_engines.py`` and ``test_metal_grad.py``).
+in ``test_engines.py`` and ``test_gpu_grad.py``).
 """
 
 import math
@@ -16,7 +16,7 @@ import torch
 
 from blochparty import GAMMA_BAR, Phantom, SequenceBuilder, simulate, trapezoid
 from blochparty.fields import Scanner, concomitant_coefficients, exact_excess, transverse_coefficients
-from test_free_runs import busy_sequence, random_phantom
+from cases import busy_sequence, random_phantom
 from helpers import rel
 
 SIMS = {"core": simulate}
@@ -173,8 +173,7 @@ def test_maxwell_compensated_echo(sim):
     assert (plain - 1).abs().max() > 0.1
 
 
-@pytest.mark.parametrize("engine", ["core", "metal"])
-def test_moving_spin_in_a_compensated_echo(engine):
+def _moving_spin_in_a_compensated_echo(sim, engine):
     # Maxwell compensation cancels int f_c dt for a static spin only: a spin moving at v sees
     # f_c(r0 + v t), quadratic in t, and keeps -2 pi (int_after - int_before) f_c dt, integrated here
     # exactly per gradient segment (3-point Gauss-Legendre) along the path; the ratio to the ideal
@@ -183,13 +182,6 @@ def test_moving_spin_in_a_compensated_echo(engine):
     # C dt^3 / 12 per segment, so the lobes are cut into k pieces and the error falls as k^-2.
     from blochparty import Motion
 
-    if engine == "metal":
-        metal = pytest.importorskip("blochparty.metal")
-        if not metal.available():
-            pytest.skip("no Apple GPU")
-        sim = metal.simulate_metal
-    else:
-        sim = simulate
     f0, G, delta = GAMMA_BAR * 0.55, 0.8 * G_MAX, 5e-3
     r0 = points(20, seed=3, extent=0.15)
     v = (torch.rand(20, 3, dtype=torch.float64, generator=torch.Generator().manual_seed(4)) - 0.5) * 4.0  # <= 2 m/s
@@ -228,6 +220,14 @@ def test_moving_spin_in_a_compensated_echo(engine):
         assert 3.8 < coarse / fine < 4.2  # second order in the segment length
     else:  # float32: the lobes are ~6400 rad of G.r phase at 15 cm, resolved to ~4e-4 rad (2^-24 of it)
         assert still < 2e-3 and fine < 2e-3
+
+
+def test_moving_spin_in_a_compensated_echo():
+    _moving_spin_in_a_compensated_echo(simulate, "core")
+
+
+def test_moving_spin_in_a_compensated_echo_gpu(gpu):
+    _moving_spin_in_a_compensated_echo(gpu.simulate, "gpu")
 
 
 @pytest.mark.parametrize("sim", SIMS)

@@ -12,6 +12,7 @@ import torch
 
 import blochparty as bp
 from blochparty.phantom import GAMMA_BAR, b0_cylinder, b0_shim, b0_sphere
+from cases import partial_volume
 
 DCHI, B0 = 9.4e-6, 3.0
 
@@ -33,15 +34,6 @@ def test_shim_terms():
     c = torch.tensor(2.0, dtype=torch.float64, requires_grad=True)
     b0_shim(pos, z2=c).sum().backward()
     assert torch.allclose(c.grad, terms["z2"].sum())
-
-
-def partial_volume(inside, grids, h, sub=4):
-    """Fraction of each cell inside the object, from sub^d samples per cell."""
-    offs = (torch.arange(sub, dtype=torch.float64) + 0.5) / sub - 0.5
-    frac = torch.zeros_like(grids[0])
-    for o in torch.cartesian_prod(*[offs] * len(grids)).reshape(-1, len(grids)):
-        frac += inside(*(g + oi * h for g, oi in zip(grids, o))).double()
-    return frac / sub ** len(grids)
 
 
 def test_sphere_vs_fourier_dipole():

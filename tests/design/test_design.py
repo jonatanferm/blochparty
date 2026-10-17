@@ -3,14 +3,12 @@ bound vs its closed form, the design report, and three optimizations that must r
 optima known independently (brute-force grids over closed forms, EPG + SciPy SLSQP).
 
 The optimizations run through the core in float64 (the checks are at 1e-6 to 1e-12), DESPOT1
-also through the Metal adjoint; for each loss, the Metal adjoint and autograd through
+also through the GPU adjoint (Metal, CUDA); for each loss, the GPU adjoint and autograd through
 ``simulate`` must give the same gradient to float32 accuracy.
 """
 
 import json
 import math
-import sys
-from pathlib import Path
 
 import pytest
 import torch
@@ -19,15 +17,14 @@ import blochparty as bp
 from blochparty import SequenceBuilder, simulate
 from blochparty import design as d
 from blochparty.constants import PULSEQ_GAMMA_BAR
-from blochparty.epg import epg_cpmg
 from blochparty.phantom import LABELS
 from blochparty.reference import spoiled_gre_signal
 from blochparty.sequence import System
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "examples"))
-import design_contrast_tr as contrast_tr  # noqa: E402
-import design_despot1 as despot1  # noqa: E402
-import design_tse_flips as tse  # noqa: E402
+import design_contrast_tr as contrast_tr
+import design_despot1 as despot1
+import design_tse_flips as tse
+from helpers import rel
 
 G = d.GAMMA_BAR
 f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
@@ -35,16 +32,10 @@ f64 = lambda v: torch.as_tensor(v, dtype=torch.float64)
 tr_with_grad = pytest.mark.filterwarnings("ignore:Converting a tensor with requires_grad=True to a scalar")
 
 
-@pytest.fixture(scope="module")
-def metal():
-    module = pytest.importorskip("blochparty.metal")
-    if not module.available():
-        pytest.skip("no Apple GPU (MPS)")
-    return module.simulate_metal
-
-
-def rel(a, b):
-    return float((a - b).abs().max() / b.abs().max())
+@pytest.fixture
+def gpu_simulate(gpu):
+    """The simulate function of each available GPU engine (the shared ``gpu`` fixture)."""
+    return gpu.simulate
 
 
 HW150 = d.Hardware(max_slew=150.0)  # the violation tests below assume a 150 T/m/s scanner
@@ -240,22 +231,22 @@ def test_finite_difference_jacobians_converge_at_their_order():
         assert abs(math.log2(e1 / e2) - order) < 0.1, (method, e1, e2)
 
 
-def test_despot1_optimum_through_the_metal_adjoint(metal):
+def test_despot1_optimum_through_the_gpu_adjoint(gpu_simulate):
     # float32: fourth-order differences for the bound's Jacobian; the bound is flat along a2, so the pair
     # moves by up to 0.03 deg with the step while its closed-form bound stays within 3e-6 of the optimum
     # (the core in float64: 0.0002 deg, but 74 s)
-    res = despot1.optimize(simulate=metal, rel_step=despot1.METAL_STEP, method="fd4")
+    res = despot1.optimize(simulate=gpu_simulate, rel_step=despot1.METAL_STEP, method="fd4")
     (g1, g2), gcov = despot1.grid_optimum()
     assert abs(res["flips"][0] - g1) < 0.05 and abs(res["flips"][1] - g2) < 0.05, (res, g1, g2)
     assert float(despot1.closed_form_cov(*torch.deg2rad(f64(res["flips"])))) / gcov - 1 < 1e-5
 
 
-def test_crb_gradient_metal_and_differences_match_autograd(metal):
+def test_crb_gradient_gpu_and_differences_match_autograd(gpu_simulate):
     # d CRB / d flips: central differences in T1 through the core, and fourth-order ones through the
     # Metal adjoint (1.5e-5 measured), against the exact Jacobian's double backward through the core
     grads = []
     for sim, method, kw in ((simulate, "autograd", {}), (simulate, "fd", {}),
-                            (metal, "fd4", {"rel_step": despot1.METAL_STEP})):
+                            (gpu_simulate, "fd4", {"rel_step": despot1.METAL_STEP})):
         flips = f64([5.0, 30.0]).requires_grad_(True)
         (g,) = torch.autograd.grad(despot1.t1_crb(flips, sim, method=method, n_dummy=40, **kw), flips)
         grads.append(g)
@@ -279,9 +270,9 @@ def test_contrast_with_free_tr_under_scan_time_budget():
 
 
 @tr_with_grad
-def test_contrast_gradient_metal_equals_simulate(metal):
+def test_contrast_gradient_gpu_equals_simulate(gpu_simulate):
     grads = []
-    for sim in (metal, simulate):
+    for sim in (gpu_simulate, simulate):
         flip, u = f64(20.0).requires_grad_(True), f64(2.0).requires_grad_(True)
         seq = contrast_tr.sequence(flip, contrast_tr.tr_of(u))
         grads.append(torch.stack(torch.autograd.grad(contrast_tr.image_contrast(seq, sim).double(), [flip, u])))
@@ -306,9 +297,9 @@ def test_tse_low_sar_train():
     assert abs(float((ref ** 2).sum() / (flips ** 2).sum()) - 1) < 1e-6
 
 
-def test_tse_gradient_metal_equals_simulate(metal):
+def test_tse_gradient_gpu_equals_simulate(gpu_simulate):
     grads = []
-    for sim in (metal, simulate):
+    for sim in (gpu_simulate, simulate):
         flips = torch.linspace(150.0, 60.0, tse.N_ECHO, dtype=torch.float64).requires_grad_(True)
         seq = tse.cpmg_sequence(flips.unbind())
         loss = (tse.echoes(seq, sim).double() / tse.TARGET - 1).pow(2).sum() + d.rf_energy(seq)
@@ -320,14 +311,14 @@ def test_tse_gradient_metal_equals_simulate(metal):
 # --- design report -------------------------------------------------------------------------
 
 
-def test_design_report_is_json_and_matches_closed_forms(metal):
+def test_design_report_is_json_and_matches_closed_forms(gpu_simulate):
     n, fov, tr, te, flip = 32, 0.22, 10e-3, 3e-3, 16.0
     maps = bp.shepp_logan_maps(n)
     phantom = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], fov)
     masks = {t: maps["label"] == LABELS.index(t) for t in ("wm", "gm", "csf")}
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, te=te, dwell=2e-6, n_dummy=400)
     report = d.design_report(seq, phantom, masks=masks, contrast_pairs=[("wm", "gm")], noise_sigma=1e-3,
-                             simulate=metal)
+                             simulate=gpu_simulate)
     report = json.loads(json.dumps(report))  # plain JSON types only
     assert abs(report["timing"]["duration_s"] - (400 + n) * tr) < 1e-12
     # readout gradient dk / dwell = 1 / (fov * dwell) Hz/m is the largest

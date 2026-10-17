@@ -1,13 +1,12 @@
 """Realistic phantoms through every simulator: sub-voxel spins + T2' + fat + B1+ + B0 maps,
-the Metal kernel (float32: forward and adjoint) and ``simulate_chunked`` (float64) against the
+the GPU engines (Metal, CUDA; float32: forward and adjoint) and ``simulate_chunked`` (float64) against the
 PyTorch core, forward and gradients (to the spins, the sequence, the coils and back to the maps
 they were built from)."""
 
 from dataclasses import replace
 
-import pytest
 import torch
-from helpers import rel
+from helpers import compare_gradients, rel
 
 import blochparty as bp
 from blochparty import simulate
@@ -15,11 +14,7 @@ from blochparty.chunked import simulate_chunked
 from blochparty.coils import birdcage_b1
 from blochparty.phantom import b0_shim, b0_sphere
 
-metal = pytest.importorskip("blochparty.metal")
-needs_gpu = pytest.mark.skipif(not metal.available(), reason="no Apple GPU (MPS)")
-
-
-TOL_GRAD = 2e-4  # the float32 adjoint against float64 autograd (test_metal_grad.py)
+TOL_GRAD = 2e-4  # the float32 adjoint against float64 autograd (test_gpu_grad.py)
 
 
 def realistic_maps(n, ndim=2):
@@ -39,48 +34,56 @@ def realistic(n, ndim=2, spv=4, **maps):
                                 t2prime=m["t2prime"], fat_fraction=m["fat_fraction"], b1=m["b1"], seed=1)
 
 
-@pytest.mark.parametrize("sim", ["metal", "chunked"])
-def test_forward_2d_and_3d(sim):
-    if sim == "metal" and not metal.available():
-        pytest.skip("no Apple GPU (MPS)")
-    for ph, seq in [(realistic(16), bp.gre_2d(16, flip_deg=20.0, rf_phase=0.3, n_dummy=30)),
-                    (realistic(8, ndim=3, spv=8), bp.gre_3d(8, flip_deg=20.0, n_dummy=10))]:
+def cases():
+    return [(realistic(16), bp.gre_2d(16, flip_deg=20.0, rf_phase=0.3, n_dummy=30)),
+            (realistic(8, ndim=3, spv=8), bp.gre_3d(8, flip_deg=20.0, n_dummy=10))]
+
+
+def check_forward(sim, tol):
+    for ph, seq in cases():
         assert ph.b1 is not None and ph.db0.abs().max() > 100
         coils = bp.birdcage_sensitivities(ph.pos, n_coils=6)
         ref = simulate(ph, seq, coils)
-        if sim == "metal":  # float32 against the float64 core
-            out, tol = metal.simulate_metal(ph, seq, coils), 1e-5
-        else:
-            out, tol = simulate_chunked(ph, seq, coils, spin_chunk=97), 1e-12
+        out = sim(ph, seq, coils)
         errs = rel(out.signal.to(torch.complex128), ref.signal), rel(out.m.double(), ref.m)
         assert max(errs) <= tol, errs
 
 
-def test_spin_and_sequence_gradients():
-    # every input, b1 included, against autograd through the PyTorch core
-    from helpers import GPU
-    from test_metal_grad import compare
+def test_forward_2d_and_3d_chunked():
+    check_forward(lambda ph, seq, coils: simulate_chunked(ph, seq, coils, spin_chunk=97), 1e-12)
 
+
+def test_forward_2d_and_3d_gpu(gpu):
+    check_forward(gpu.simulate, 1e-5)  # float32 against the float64 core
+
+
+def b1_gradient(sim, ph, seq, coils):
+    b1 = ph.b1.clone().requires_grad_()
+    r = sim(replace(ph, b1=b1), seq, coils)
+    return torch.autograd.grad((r.signal.abs() ** 2).sum().double() + r.m.sum().double(), b1)[0]
+
+
+def gradient_case():
     ph = realistic(8)
-    coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
-    seq = bp.gre_2d(8, flip_deg=30.0, rf_phase=0.4, n_dummy=8)
-    if metal.available():
-        compare(GPU("metal"), ph, seq, TOL_GRAD, coils=coils)
+    return ph, bp.gre_2d(8, flip_deg=30.0, rf_phase=0.4, n_dummy=8), bp.birdcage_sensitivities(ph.pos, n_coils=3)
 
-    def leaves_with_b1(sim):
-        b1 = ph.b1.clone().requires_grad_()
-        r = sim(replace(ph, b1=b1), seq, coils)
-        return torch.autograd.grad((r.signal.abs() ** 2).sum().double() + r.m.sum().double(), b1)[0]
 
-    ref = leaves_with_b1(simulate)
+def test_b1_gradient_chunked():
+    ph, seq, coils = gradient_case()
+    ref = b1_gradient(simulate, ph, seq, coils)
     assert ref.abs().min() > 0
-    assert rel(leaves_with_b1(lambda *a: simulate_chunked(*a, spin_chunk=50)), ref) <= 1e-10
-    if metal.available():
-        assert rel(leaves_with_b1(metal.simulate_metal).double(), ref) <= TOL_GRAD
+    assert rel(b1_gradient(lambda *a: simulate_chunked(*a, spin_chunk=50), ph, seq, coils), ref) <= 1e-10
 
 
-@needs_gpu
-def test_gradients_reach_the_maps():
+def test_spin_and_sequence_gradients_gpu(gpu):
+    # every input, b1 included, against autograd through the PyTorch core
+    ph, seq, coils = gradient_case()
+    compare_gradients(gpu, ph, seq, TOL_GRAD, coils=coils)
+    ref = b1_gradient(simulate, ph, seq, coils)
+    assert rel(b1_gradient(gpu.simulate, ph, seq, coils).double(), ref) <= TOL_GRAD
+
+
+def test_gradients_reach_the_maps(gpu):
     # through phantom_from_maps: PD, T1, T2', fat fraction, fat T2, B1+ and B0 maps
     seq = bp.gre_2d(8, flip_deg=25.0, n_dummy=8)
     base = realistic_maps(8)
@@ -96,7 +99,7 @@ def test_gradients_reach_the_maps():
         out = torch.autograd.grad((r.signal.abs() ** 2).sum().double(), [*leaves.values(), fat_t2])
         return dict(zip([*names, "fat_t2"], out))
 
-    ref, out = grads(simulate), grads(metal.simulate_metal)
+    ref, out = grads(simulate), grads(gpu.simulate)
     mask = base["pd"] > 0
     errs = {k: rel(out[k].double(), ref[k]) for k in ref}
     assert all(ref[k].abs().max() > 0 for k in ref) and max(errs.values()) <= TOL_GRAD, errs

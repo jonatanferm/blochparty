@@ -7,6 +7,7 @@ import torch
 
 import blochparty as bp
 from blochparty.exchange import BoundPool
+from helpers import rel
 
 f64 = torch.float64
 
@@ -33,10 +34,6 @@ CASES = {
 }
 
 
-def rel(a, b):
-    return float((a - b).abs().max() / b.abs().max())
-
-
 @pytest.mark.parametrize("name", list(CASES))
 def test_same_signal_fewer_segments(name):
     seq = CASES[name]()
@@ -49,13 +46,19 @@ def test_same_signal_fewer_segments(name):
     ph = phantom(mt="slices" in name)
     a, b = bp.simulate(ph, seq), bp.simulate(ph, merged)
     assert rel(b.signal, a.signal) < 1e-11 and rel(b.m, a.m) < 1e-11
-    metal = pytest.importorskip("blochparty.metal")
-    if metal.available():
-        p32 = ph.to(torch.float32)
-        x = metal.simulate_metal(p32, seq.to(torch.float32)).signal.to(a.signal.dtype)
-        y = metal.simulate_metal(p32, merged.to(torch.float32)).signal.to(a.signal.dtype)
-        assert rel(y, x) < 2e-5  # merged vs unmerged on the GPU: measured 2e-6
-        assert rel(y, a.signal) < 1e-4
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_same_signal_fewer_segments_gpu(gpu, name):
+    seq = CASES[name]()
+    merged = seq.merge_free()
+    ph = phantom(mt="slices" in name)
+    a = bp.simulate(ph, seq)
+    p32 = ph.to(torch.float32)
+    x = gpu.simulate(p32, seq.to(torch.float32)).signal.to(a.signal.dtype)
+    y = gpu.simulate(p32, merged.to(torch.float32)).signal.to(a.signal.dtype)
+    assert rel(y, x) < 2e-5  # merged vs unmerged on the GPU: measured 2e-6
+    assert rel(y, a.signal) < 1e-4
 
 
 def test_gradients_reach_the_original_segments():

@@ -6,7 +6,6 @@ import pytest
 import torch
 
 from blochparty import jcoupling as jc
-from blochparty.constants import GAMMA_BAR
 from blochparty.phantom import FAT_PEAKS
 
 TE = np.array([10, 40, 80, 120, 160]) * 1e-3

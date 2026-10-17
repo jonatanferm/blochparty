@@ -19,31 +19,11 @@ import pytest
 import torch
 
 from blochparty.constants import GAMMA_BAR
-from blochparty.phantom import b0_cylinder, b0_shim, b0_sphere
+from blochparty.phantom import b0_cylinder, b0_shim
 from blochparty.susceptibility import shim, susceptibility_to_b0
-from test_phantom_b0 import partial_volume
+from cases import coordinates, DCHI, FIELD, partial_volume, sphere
 
-DCHI, FIELD = 9.4e-6, 3.0
 SCALE = GAMMA_BAR * FIELD * DCHI
-
-
-def coordinates(shape, voxel, origin=None):
-    if origin is None:
-        origin = tuple(-(n - 1) * h / 2 for n, h in reversed(list(zip(shape, voxel))))
-    axes = [torch.arange(n, dtype=torch.float64) * h + o
-            for n, h, o in zip(shape, voxel, reversed(origin))]
-    z, y, x = torch.meshgrid(*axes, indexing="ij")
-    return torch.stack((x, y, z), -1)
-
-
-def sphere(n=48):
-    h, radius = 0.064 / n, 0.01
-    pos = coordinates((n,) * 3, (h,) * 3)
-    x, y, z = pos.unbind(-1)
-    chi = DCHI * partial_volume(lambda x, y, z: x*x + y*y + z*z <= radius**2,
-                               (x, y, z), h)
-    ref = b0_sphere(pos, (0, 0, 0), radius, DCHI, FIELD)
-    return chi, pos, h, radius, ref
 
 
 def rms(x):

@@ -8,7 +8,7 @@ from dataclasses import replace
 
 import pytest
 import torch
-from test_bloch_vs_ode import random_case
+from cases import random_case
 from helpers import rel, with_readout
 
 import blochparty as bp
@@ -50,8 +50,7 @@ def test_signal_equation_uses_b1():
     assert rel(signal_equation(replace(ph, b1=None), seq), ref) > 0.05
 
 
-@pytest.mark.parametrize("sim", ["core", "metal"])
-def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
+def _b1_image_matches_ernst(signal_of):
     # 2D GRE with a centre-brightened birdcage B1+ map: every pixel is the ideal spoiled-GRE
     # steady state at its own flip angle b1 * alpha
     n, fov, flip, tr = 32, 0.22, 25.0, 10e-3
@@ -60,13 +59,7 @@ def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
     ph = bp.phantom_from_maps(maps["pd"], maps["t1"], maps["t2"], fov, b1=b1_map)
     assert ph.b1.min() < 0.7 and ph.b1.max() == 1.0
     seq = bp.gre_2d(n, fov, flip_deg=flip, tr=tr, dwell=1e-6, rf_duration=1e-6, n_dummy=300)
-    if sim == "metal":
-        metal = pytest.importorskip("blochparty.metal")
-        if not metal.available():
-            pytest.skip("no Apple GPU (MPS)")
-        signal = metal.simulate_metal(ph, seq).signal.to(torch.complex128)
-    else:
-        signal = SIMS[sim](ph, seq).signal
+    signal = signal_of(ph, seq)
     img = bp.ifft2c(bp.kspace_grid(signal, seq))[0]
     mask = maps["pd"] > 0
     expected = 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"],
@@ -77,6 +70,14 @@ def test_spoiled_gre_image_matches_ernst_at_b1_flip(sim):
     nominal = torch.where(mask, 1j * spoiled_gre_signal(maps["pd"], maps["t1"], maps["t2"], tr, seq.meta["te"],
                                                          math.radians(flip)), 0)
     assert (img - nominal).abs().max() > 0.05 * expected.abs().max()
+
+
+def test_spoiled_gre_image_matches_ernst_at_b1_flip():
+    _b1_image_matches_ernst(lambda ph, seq: SIMS["core"](ph, seq).signal)
+
+
+def test_spoiled_gre_image_matches_ernst_at_b1_flip_gpu(gpu):
+    _b1_image_matches_ernst(lambda ph, seq: gpu.simulate(ph, seq).signal.to(torch.complex128))
 
 
 def test_unit_b1_changes_nothing():

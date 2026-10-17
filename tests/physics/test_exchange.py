@@ -14,6 +14,7 @@ from scipy.integrate import quad, solve_ivp
 from blochparty import Phantom, SequenceBuilder, simulate
 from blochparty.exchange import (BoundPool, lineshape, lorentzian, modes_lineshape, pool_modes, rf_frequency,
                                  superlorentzian, z_exchange)
+from cases import bm_case
 
 f64 = torch.float64
 
@@ -138,31 +139,6 @@ def bm_ode(phantom: Phantom, seq):
                 m[:2] = 0
         out.append(m)
     return np.array(out)
-
-
-def bm_case(seed: int, shape: str):
-    g = torch.Generator().manual_seed(seed)
-    rnd = lambda *s: torch.rand(*s, generator=g, dtype=f64)
-    n = 5
-    ph = Phantom(pos=(rnd(n, 3) - 0.5) * 0.2, pd=0.5 + rnd(n), t1=0.5 + rnd(n), t2=0.02 + 0.08 * rnd(n),
-                 db0=(rnd(n) - 0.5) * 200,
-                 bound=BoundPool(f=0.1 + 0.1 * rnd(n), k=20 + 40 * rnd(n), t1=torch.ones(n, dtype=f64),
-                                 t2=(8 + 6 * rnd(n)) * 1e-6, dw=(rnd(n) - 0.5) * 600, lineshape=shape))
-    b = SequenceBuilder()
-    for _ in range(3):
-        kk, dt = 40, 10e-6
-        t = (torch.arange(kk, dtype=f64) + 0.5) * dt
-        f_off = (rnd(()) - 0.5) * 8000  # off-resonant saturation-like pulse: a phase ramp
-        amp = 300 + 1500 * rnd(kk)
-        b.rf_waveform(torch.stack([amp * torch.cos(-2 * math.pi * f_off * t), amp * torch.sin(-2 * math.pi * f_off * t)], -1),
-                      dt, grad=(rnd(3) - 0.5) * 2000)
-        b.delay(rnd(()) * 3e-3, grad=(rnd(3) - 0.5) * 4000)
-        b.rf(100e-6, flip_deg=180 * rnd(()), phase=2 * math.pi * rnd(()))
-        b.delay(rnd(()) * 3e-3)
-    b.spoil()
-    b.rf(200e-6, flip_deg=90.0, n_steps=10)
-    b.delay(1e-3)
-    return ph, b.build()
 
 
 @pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])

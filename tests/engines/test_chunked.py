@@ -7,6 +7,7 @@ import torch
 import blochparty as bp
 from blochparty import Phantom, SequenceBuilder, simulate
 from blochparty.chunked import simulate_chunked
+from helpers import rel
 
 N_MAP, FOV = 10, 0.22  # 51 spins: chunks of 17 divide it, 16 does not
 
@@ -53,10 +54,6 @@ def make_inputs():
 def loss_fn(res, weight):
     # Uses both outputs, so dL/dm reaches the backward alongside dL/d(signal).
     return (res.signal.abs() ** 2).sum() + (weight * res.m).sum()
-
-
-def rel(a, b):
-    return ((a - b).abs().max() / b.abs().max()).item()
 
 
 @pytest.mark.parametrize("spin_chunk", [1, 16, 17, 51, 1000])

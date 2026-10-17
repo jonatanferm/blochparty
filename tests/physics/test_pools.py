@@ -14,7 +14,7 @@ from scipy.integrate import solve_ivp
 import blochparty as bp
 from blochparty import ExchangePool, Phantom, simulate
 from blochparty.exchange import lineshape, rf_frequency
-from test_exchange import bm_case
+from cases import bm_case, _maps_for, pool_case
 from helpers import with_readout
 
 f64 = torch.float64
@@ -65,17 +65,6 @@ def full_ode(ph: Phantom, seq):
     return np.array(out)
 
 
-def pool_case(seed, with_bound=True):
-    ph, seq = bm_case(seed, "superlorentzian")
-    g = torch.Generator().manual_seed(seed + 5)
-    rnd = lambda: torch.rand(len(ph), generator=g, dtype=f64)
-    amide = ExchangePool(f=0.01 + 0.02 * rnd(), k=50 + 200 * rnd(), t1=torch.ones(len(ph), dtype=f64),
-                         t2=0.02 + 0.08 * rnd(), dw=3.5e-6 * 3 * bp.GAMMA_BAR + 100 * rnd())
-    myelin = ExchangePool(f=0.15 + 0.05 * rnd(), k=5 + 10 * rnd(), t1=0.4 + 0.2 * rnd(), t2=0.008 + 0.01 * rnd(),
-                          dw=10 * rnd())
-    return replace(ph, pools=(amide, myelin), bound=ph.bound if with_bound else None), seq
-
-
 @pytest.mark.parametrize("with_bound", [True, False])
 @pytest.mark.parametrize("seed", [0, 1])
 def test_exact_engine_matches_ode(seed, with_bound):
@@ -117,15 +106,6 @@ def test_inert_pool_matches_split_core():
 
 
 # ---------------------------------------------------------------- with FieldMaps, motion, diffusion (ROADMAP M1c)
-
-
-def _maps_for(ph):
-    zz, yy, xx = torch.meshgrid(torch.linspace(-0.2, 0.2, 5, dtype=f64), torch.linspace(-0.3, 0.3, 7, dtype=f64),
-                                torch.linspace(-0.3, 0.3, 7, dtype=f64), indexing="ij")
-    coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.05) * torch.exp(1j * 2 * yy),
-                         torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.05) * torch.exp(-1j * xx)])
-    return bp.FieldMaps((-0.3, -0.3, -0.2), (0.1, 0.1, 0.1), b0=40 * xx**2 - 20 * yy + 10 * zz, b1=1 + 0.3 * xx,
-                        coils=coils)
 
 
 def test_pools_under_field_maps_equal_the_fields_per_spin():

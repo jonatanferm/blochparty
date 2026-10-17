@@ -10,6 +10,7 @@ import numpy as np
 import torch
 
 import blochparty as bp
+from helpers import rel
 
 f64 = torch.float64
 
@@ -18,10 +19,6 @@ def grid(nz=3, ny=7, nx=7):
     zz, yy, xx = torch.meshgrid(torch.linspace(-0.1, 0.1, nz, dtype=f64), torch.linspace(-0.3, 0.3, ny, dtype=f64),
                                 torch.linspace(-0.3, 0.3, nx, dtype=f64), indexing="ij")
     return (-0.3, -0.3, -0.1), (0.1, 0.1, 0.1), xx, yy, zz
-
-
-def rel(a, b):
-    return float((a.to(b.dtype) - b).abs().max() / b.abs().max())
 
 
 def test_static_linear_maps_equal_per_spin_fields():
@@ -81,12 +78,7 @@ def test_adc_during_rf_under_mapped_coils():
     assert rel(moving.signal, moved.signal) < 1e-12
 
 
-def test_gpu_matches_core():
-    import pytest
-
-    metal = pytest.importorskip("blochparty.metal")
-    if not metal.available():
-        pytest.skip("no Apple GPU")
+def test_gpu_matches_core(gpu):
     origin, spacing, xx, yy, _ = grid(4, 9, 9)
     coils = torch.stack([torch.exp(-((xx - 0.1) ** 2 + yy**2) / 0.02) * torch.exp(1j * 3 * yy),
                          torch.exp(-((xx + 0.1) ** 2 + yy**2) / 0.02) * torch.exp(-2j * xx)])
@@ -98,4 +90,4 @@ def test_gpu_matches_core():
                                      np.stack([[0.02 * math.sin(2 * math.pi * x / 0.1), 0, 0] for x in t])))
     seq = bp.gre_2d(16, n_dummy=2)
     for p in (ph, replace(ph, motion=mot), replace(ph, motion=mot, diffusion=torch.full((len(ph),), 2e-9, dtype=f64))):
-        assert rel(metal.simulate_metal(p, seq, maps=maps, seed=1).signal, bp.simulate(p, seq, maps=maps, seed=1).signal) < 1e-5
+        assert rel(gpu.simulate(p, seq, maps=maps, seed=1).signal, bp.simulate(p, seq, maps=maps, seed=1).signal) < 1e-5

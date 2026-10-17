@@ -24,4 +24,6 @@ build-backend = "hatchling.build"
 testpaths = ["tests"]
 markers = ["crosscheck: cross-simulator agreement with MRzero (opt-in: pytest -m crosscheck)",
            "slow: over ~1 s; pytest -m 'not slow' is the quick subset for iterating (under a minute)"]
-addopts = "-m 'not crosscheck'"
+addopts = "-m 'not crosscheck' --import-mode=importlib"
+# helpers.py and cases.py (tests/), and the example and validation scripts the tests import
+pythonpath = ["tests", "examples", "validation", "validation/real", "validation/realism", "validation/anatomy"]

@@ -18,10 +18,10 @@ from pathlib import Path
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # for tests.test_bloch_vs_ode
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))  # for cases.random_case
 
 import blochparty as bp  # noqa: E402
-from tests.test_bloch_vs_ode import random_case  # noqa: E402
+from cases import random_case  # noqa: E402
 
 
 def snapshot() -> dict:

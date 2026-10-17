@@ -2,13 +2,10 @@
 the realism loaders exactly as a raw fastMRI file would: manifest(), manifest_key(), coil_kspace(), fastmri_volume(),
 score.real_set's floors and score.noise_covariances, keyed by the fastMRI file name throughout."""
 import json
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "validation" / "realism"))
 R = pytest.importorskip("realism")
 SC = pytest.importorskip("score")
 

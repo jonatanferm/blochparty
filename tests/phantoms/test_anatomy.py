@@ -15,10 +15,10 @@ import torch
 
 import blochparty as bp
 from blochparty.anatomy import (AIR_CHI, Anatomy, BRAINWEB_TISSUES, DEFAULT_TISSUES,
-    Distribution, TissueProperties, anatomy_field_maps, load_brainweb, to_phantom)
+    Distribution, anatomy_field_maps, load_brainweb, to_phantom)
 from blochparty.maps import sample
 from blochparty.phantom import b0_sphere
-from test_susceptibility import sphere
+from cases import sphere
 
 
 def mixed(shape=(3,4,5),dtype=torch.float64):
@@ -273,15 +273,12 @@ def test_invalid_anatomy_and_options():
         to_phantom(a,spins_per_voxel=2)
 
 
-def test_gpu_equals_core():
-    metal = pytest.importorskip("blochparty.metal")
-    if not metal.available():
-        pytest.skip("no Apple GPU")
+def test_gpu_equals_core(gpu):
     a = mixed((3,3,3))
     ph = to_phantom(a,mt=True,diffusion=True,spins_per_voxel=8)
     q = bp.SequenceBuilder().rf(.001,flip_deg=35,n_steps=50).readout(12,.0002).build()
     ref = bp.simulate(ph,q).signal
-    actual = metal.simulate_metal(ph,q).signal
+    actual = gpu.simulate(ph,q).signal
     error = (actual-ref).abs().max()/ref.abs().max()
     print("anatomy GPU relative signal error:",error.item())
     assert error < 1e-5

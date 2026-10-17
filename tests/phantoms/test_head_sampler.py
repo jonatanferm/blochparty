@@ -14,7 +14,7 @@ from blochparty.anatomy import (DEFAULT_TISSUES, Anatomy, DigitalPhantom, _bspli
                                 deformation_jacobian, draw_tissues, random_deformation, sample_head, sulcal_width,
                                 to_phantom)
 
-DATA = Path(__file__).parents[1] / "validation" / "anatomy" / "data"
+DATA = Path(__file__).parents[2] / "validation" / "anatomy" / "data"
 
 
 @pytest.mark.parametrize("options", [{}, dict(mt=True, diffusion=True, chi_to_b0=False, t2star="off"),
@@ -261,7 +261,6 @@ def test_ixi_heads(tmp_path):
     """source="ixi": a prepared IXI head loads with its meta, sample_head draws it, size="native" restores its own
     size from the registration's scale (0.9 here: the brain shrinks ~0.73 in volume), and age= / ventricle_age=
     / size="native" for BrainWeb are refused."""
-    import numpy as np
     from blochparty.anatomy import ixi_subjects, load_ixi
 
     _fake_ixi(tmp_path)
@@ -316,7 +315,6 @@ def test_lesions_in_sampled_heads(tmp_path):
     """sample_head(lesions=...) on an IXI head: the lesion class appears with the requested count recorded in meta,
     its mass comes out of white matter (every voxel's total 1), the draw is its own stream (the same seed without lesions
     gives the same tissue draws), and the lesion class has tissue values at both fields."""
-    import numpy as np
     from blochparty.anatomy import GENERATED
 
     _fake_ixi(tmp_path)

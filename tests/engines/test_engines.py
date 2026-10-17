@@ -31,16 +31,11 @@ from blochparty.chunked import simulate_chunked
 from blochparty.fields import Scanner
 from blochparty.girf import GIRF, EddyCurrents, apply_girf
 from blochparty.motion import rotation_z
-from test_bloch_vs_ode import random_case
-from test_diffusion import pgse
-from test_exchange import bm_case
-from test_fields_nonlinearity import distortion
-from helpers import with_readout
-from test_pools import pool_case
-from test_restriction import sgp
+from cases import bm_case, distortion, pgse, pool_case, random_case, sgp
+from helpers import rel, with_readout
 
 f64 = torch.float64
-DOC = Path(__file__).resolve().parents[1] / "docs" / "ENGINES.md"
+DOC = Path(__file__).resolve().parents[2] / "docs" / "ENGINES.md"
 ENGINES = ("core", "metal", "cuda", "chunked")
 # agreement with the core, max |engine - core| / scale per output (``errors``); observed worst cases
 # in docs/ENGINES.md ("Agreement")
@@ -459,13 +454,6 @@ def outputs(r: bp.SimResult) -> dict:
     return out
 
 
-def rel(a, b, scale=None) -> float:
-    """max |a - b| / scale, scale = max |b| by default."""
-    a = a.to(b.dtype)
-    scale = b.abs().max() if scale is None else scale
-    return float((a - b).abs().max() / scale) if scale > 0 else float(a.abs().max())
-
-
 def errors(out: dict, ref: dict) -> dict:
     """Relative error of every output; the bound pool and free pools relative to the water's
     magnetization (a saturated bound pool is tiny, its own maximum no scale)."""
@@ -556,15 +544,18 @@ def test_cell(feature, eng, kind, mark):
 
 
 def test_dtypes():
-    """Core and chunked compute in the phantom's dtype; Metal computes in float32 and returns
-    float32 whatever the input dtype."""
+    """Core and chunked compute in the phantom's dtype (float64 here)."""
     case = build("basic Bloch: PD, T1, T2, dB0, RF, gradients, ADC, spoils, coils", grad=False)
     for eng in ("core", "chunked"):
         assert run(eng, case).m.dtype == f64
-    metal = pytest.importorskip("blochparty.metal")
-    if metal.available():
-        r = metal.simulate_metal(case.phantom, case.seq, **case.kw)
-        assert r.m.dtype == torch.float32 and r.signal.dtype == torch.complex64
+
+
+def test_dtypes_gpu(gpu):
+    """The GPU engines compute in float32 and return float32 whatever the input dtype."""
+    case = build("basic Bloch: PD, T1, T2, dB0, RF, gradients, ADC, spoils, coils", grad=False)
+    r = gpu.simulate(case.phantom, case.seq, **case.kw)
+    assert case.phantom.pd.dtype == f64
+    assert r.m.dtype == torch.float32 and r.signal.dtype == torch.complex64
 
 
 def test_metal_runs_under_no_grad():

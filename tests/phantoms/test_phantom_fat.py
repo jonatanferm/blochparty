@@ -68,7 +68,7 @@ def test_with_subvoxel_spins_t2prime_b1_and_maps():
 def test_chemical_shift_displacement():
     # Fat-only phantom, main peak only, readout bandwidth = |shift| / 2 per pixel: the fat
     # image is the water image moved by exactly 2 pixels towards -x (negative frequency;
-    # +2 bandwidth-pixels of off-resonance move it to +x, see tests/test_imaging.py).
+    # +2 bandwidth-pixels of off-resonance move it to +x, see tests/signal/test_imaging.py).
     run = simulate
     n, fov, b0 = 32, 0.22, 3.0
     m = bp.shepp_logan_maps(n)

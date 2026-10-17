@@ -9,17 +9,13 @@ Tolerances, from the full 32 x 32 runs in validation/RESULTS.md:
   splitting error of the 0.2 us pulses (6e-7 on bSSFP, shrinking as subdivide_rf(k)**-2).
 """
 
-import sys
-from pathlib import Path
-
 import pytest
 import torch
 
 pytestmark = [pytest.mark.crosscheck, pytest.mark.slow]  # slow: excluded by -m 'not slow' too
 pytest.importorskip("pypulseq")
 pytest.importorskip("MRzeroCore")
-sys.path.insert(0, str(Path(__file__).parents[1] / "validation"))
-import compare_mrzero as cm  # noqa: E402
+import compare_mrzero as cm  # noqa: E402 (after the importorskips)
 
 from blochparty.pulseq import read_pulseq  # noqa: E402
 

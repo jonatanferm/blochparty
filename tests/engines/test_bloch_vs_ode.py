@@ -12,7 +12,8 @@ import pytest
 import torch
 from scipy.integrate import solve_ivp
 
-from blochparty import Phantom, SequenceBuilder, simulate
+from blochparty import Phantom, simulate
+from cases import random_case
 
 
 def bloch_ode(phantom: Phantom, seq) -> np.ndarray:
@@ -35,31 +36,6 @@ def bloch_ode(phantom: Phantom, seq) -> np.ndarray:
                 m[:2] = 0
         out.append(m)
     return np.array(out)
-
-
-def random_case(seed: int):
-    g = torch.Generator().manual_seed(seed)
-    rnd = lambda *shape: torch.rand(*shape, generator=g, dtype=torch.float64)
-    n = 6
-    phantom = Phantom(
-        pos=(rnd(n, 3) - 0.5) * 0.2,
-        pd=0.5 + rnd(n),
-        t1=0.2 + rnd(n),
-        t2=0.02 + 0.1 * rnd(n),
-        db0=(rnd(n) - 0.5) * 200,
-    )
-    b = SequenceBuilder()
-    for _ in range(4):
-        # shaped RF on a 10 us raster with a slice-select-like gradient
-        k = 40
-        b.rf_waveform((rnd(k, 2) - 0.5) * 2000, 10e-6, grad=(rnd(3) - 0.5) * 2000)
-        b.delay(rnd(()) * 3e-3, grad=(rnd(3) - 0.5) * 4000)
-        b.rf(100e-6, flip_deg=180 * rnd(()), phase=2 * math.pi * rnd(()))
-        b.delay(rnd(()) * 3e-3, grad=(rnd(3) - 0.5) * 4000)
-    b.spoil()
-    b.rf(200e-6, flip_deg=90.0, n_steps=10)
-    b.delay(1e-3)
-    return phantom, b.build()
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])

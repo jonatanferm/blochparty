@@ -11,22 +11,14 @@ import torch
 
 import blochparty as bp
 from blochparty.rng import normals, philox
+from cases import DELTA_BIG, DELTA_SMALL, pgse
 
 f64 = torch.float64
-DELTA_SMALL, DELTA_BIG = 10e-3, 30e-3
 
 
 def water(n, diffusion, t2=1e6):
     return bp.Phantom(pos=torch.zeros(n, 3, dtype=f64), pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
                       t2=torch.full((n,), t2, dtype=f64), db0=torch.zeros(n, dtype=f64), diffusion=diffusion)
-
-
-def pgse(g, readout=1):
-    """90 - lobe (delta) - 180 - lobe, lobes DELTA_BIG apart; ADC at the echo."""
-    b = bp.SequenceBuilder()
-    b.rf(10e-6, flip_deg=90.0).delay(DELTA_SMALL, grad=g).delay(DELTA_BIG - DELTA_SMALL - 10e-6)
-    b.rf(10e-6, flip_deg=180.0, phase=math.pi / 2).delay(DELTA_SMALL, grad=g).readout(readout, 10e-6)
-    return b.build()
 
 
 def b_value(gnorm):
@@ -125,12 +117,9 @@ def epg_cpmg_diffusion(alpha, n_echo, esp, d, dk):
     return np.array(echoes)
 
 
-def test_cpmg_stimulated_echoes_match_epg_with_diffusion():
+def test_cpmg_stimulated_echoes_match_epg_with_diffusion(gpu):
     # crushers make every echo a sum of spin- and stimulated-echo pathways, each attenuated by
     # its own diffusion history; walkers spread uniformly over whole crusher wavelengths
-    metal = pytest.importorskip("blochparty.metal")
-    if not metal.available():
-        pytest.skip("no Apple GPU")
     n, d, esp, n_echo, alpha = 1_000_000, 2.5e-9, 10e-3, 8, math.radians(150)
     g = 2.0e6  # [Hz/m] for esp / 2: dk = 2 pi g esp / 2
     dk = 2 * math.pi * g * esp / 2
@@ -144,7 +133,7 @@ def test_cpmg_stimulated_echoes_match_epg_with_diffusion():
         b.delay(esp / 2 - 1e-6, grad=(g * esp / 2 / (esp / 2 - 1e-6), 0, 0))
         b.rf(1e-6, flip_deg=math.degrees(alpha), phase=math.pi / 2)
         b.delay(esp / 2 - 1e-6, grad=(g * esp / 2 / (esp / 2 - 1e-6), 0, 0)).readout(1, 2e-6)
-    sim = metal.simulate_metal(ph, b.build(), seed=1).signal[0].abs().numpy() / n
+    sim = gpu.simulate(ph, b.build(), seed=1).signal[0].abs().numpy() / n
     ref = epg_cpmg_diffusion(alpha, n_echo, esp, d, dk)
     no_diff = epg_cpmg_diffusion(alpha, n_echo, esp, 0.0, dk)
     assert np.abs(no_diff - ref).max() > 0.05  # diffusion matters here

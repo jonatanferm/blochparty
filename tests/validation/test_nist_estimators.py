@@ -3,14 +3,10 @@ is exactly the unbiased pair statistic, the magnitude built on it is still biase
 jackknife of an aggregate keeps the covariance its parts' SEs drop, pairing cancels shared MC
 noise, and invalid sample counts fail."""
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "validation" / "real"))
-from nist import _sobol_points, fill_phantom_qmc, jackknife, mc_errors, mc_magnitude, mc_paired_difference, mc_power  # noqa: E402
+from nist import _sobol_points, fill_phantom_qmc, jackknife, mc_errors, mc_magnitude, mc_paired_difference, mc_power
 
 
 def noisy(amplitude, k, shape, rng):

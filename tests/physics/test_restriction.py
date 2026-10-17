@@ -14,6 +14,7 @@ from scipy.special import j1
 
 import blochparty as bp
 from blochparty.restriction import Restriction, n_sub, start_offsets, tau_max, walk_segment
+from cases import sgp
 
 f64 = torch.float64
 D = 2e-9
@@ -23,15 +24,6 @@ def walkers(n, kind, size, axis):
     return bp.Phantom(pos=torch.zeros(n, 3, dtype=f64), pd=torch.ones(n, dtype=f64), t1=torch.full((n,), 1e6, dtype=f64),
                       t2=torch.full((n,), 1e6, dtype=f64), db0=torch.zeros(n, dtype=f64),
                       diffusion=torch.full((n,), D, dtype=f64), restriction=bp.Restriction(kind, size, axis))
-
-
-def sgp(q, delta, big_delta, axis=0):
-    """Pulsed-gradient spin echo with q = 2 pi G delta [rad/m]."""
-    g = [0.0, 0.0, 0.0]
-    g[axis] = q / (2 * math.pi * delta)
-    b = bp.SequenceBuilder().rf(1e-6, flip_deg=90.0).delay(delta, grad=g).delay(big_delta - delta - 1e-6)
-    b.rf(1e-6, flip_deg=180.0, phase=math.pi / 2).delay(delta, grad=g).readout(1, 2e-6)
-    return b.build()
 
 
 def signals(sim, ph, qs, delta, big_delta, **kw):
@@ -57,29 +49,21 @@ def test_equilibrium_is_uniform(kind, axis, power):
     assert np.abs(u - (np.arange(n) + 0.5) / n).max() < 1.63 / math.sqrt(n)  # KS at 1 %
 
 
-@pytest.fixture
-def metal():
-    m = pytest.importorskip("blochparty.metal")
-    if not m.available():
-        pytest.skip("no Apple GPU")
-    return m
-
-
-def test_gpu_walks_the_core_paths(metal):
+def test_gpu_walks_the_core_paths(gpu):
     qs = np.array([0.6, 1.2]) / 5e-6
     for kind, axis, size in (("planes", (0.6, 0.8, 0.0), 10e-6), ("cylinder", (0.0, 0.6, 0.8), 5e-6),
                              ("sphere", None, 5e-6)):
         ph = walkers(1500, kind, size, axis)
         a = signals(bp.simulate, ph, qs, 1e-3, 20e-3)
-        b = signals(metal.simulate_metal, ph, qs, 1e-3, 20e-3)
+        b = signals(gpu.simulate, ph, qs, 1e-3, 20e-3)
         assert np.abs(a - b).max() < 2e-5, (kind, a, b)
 
 
 @pytest.mark.parametrize("big_delta", [10e-3, 25e-3, 200e-3])
-def test_planes_tanner_stejskal(metal, big_delta):
+def test_planes_tanner_stejskal(gpu, big_delta):
     n, L = 400_000, 10e-6
     qs = np.array([0.37, 0.8, 1.3]) * 2 * math.pi / L
-    sim = signals(metal.simulate_metal, walkers(n, "planes", L, (1.0, 0.0, 0.0)), qs, 0.02e-3, big_delta)
+    sim = signals(gpu.simulate, walkers(n, "planes", L, (1.0, 0.0, 0.0)), qs, 0.02e-3, big_delta)
     x = qs * L
     ref = 2 * (1 - np.cos(x)) / x**2 + 4 * x**2 * sum(
         np.exp(-(k * math.pi) ** 2 * D * big_delta / L**2) * (1 - (-1) ** k * np.cos(x)) / (x**2 - (k * math.pi) ** 2) ** 2
@@ -88,15 +72,15 @@ def test_planes_tanner_stejskal(metal, big_delta):
 
 
 @pytest.mark.slow
-def test_sphere_and_cylinder_long_time_limits(metal):
+def test_sphere_and_cylinder_long_time_limits(gpu):
     n, r_c = 1_000_000, 5e-6
     qs = np.array([0.6, 1.0, 1.4, 2.0]) / r_c
     x = qs * r_c
-    s = signals(metal.simulate_metal, walkers(n, "sphere", r_c, None), qs, 5e-6, 300e-3)
-    c = signals(metal.simulate_metal, walkers(n, "cylinder", r_c, (0.0, 0.0, 1.0)), qs, 5e-6, 300e-3)
+    s = signals(gpu.simulate, walkers(n, "sphere", r_c, None), qs, 5e-6, 300e-3)
+    c = signals(gpu.simulate, walkers(n, "cylinder", r_c, (0.0, 0.0, 1.0)), qs, 5e-6, 300e-3)
     assert np.abs(s - (3 * (np.sin(x) - x * np.cos(x)) / x**3) ** 2).max() < 2e-3
     assert np.abs(c - (2 * j1(x) / x) ** 2).max() < 2e-3
     # along the cylinder: free diffusion
     q = np.array([2e5, 5e5])
-    free = signals(metal.simulate_metal, walkers(200_000, "cylinder", r_c, (1.0, 0.0, 0.0)), q, 1e-3, 30e-3)
+    free = signals(gpu.simulate, walkers(200_000, "cylinder", r_c, (1.0, 0.0, 0.0)), q, 1e-3, 30e-3)
     assert np.abs(free - np.exp(-q**2 * (30e-3 - 1e-3 / 3) * D)).max() < 3e-3

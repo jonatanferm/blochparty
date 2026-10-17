@@ -9,6 +9,7 @@ import blochparty as bp
 from blochparty.exchange import BoundPool
 from blochparty.pulseq import write_pulseq
 from blochparty.sequence import System
+from helpers import rel
 
 f64 = torch.float64
 ORDER = [-0.015, -0.005, 0.005, 0.015, 0.0, -0.01, 0.01]  # interleaved, 5 mm apart, this slice 5th
@@ -26,10 +27,6 @@ def wm_column(n=29, half=3.5e-3, mt=True):
         ph.bound = BoundPool(torch.full((n,), 0.1277 / 0.8723, dtype=f64), torch.full((n,), 19.0, dtype=f64), ph.t1,
                              torch.full((n,), 9.7e-6, dtype=f64), model="rate")
     return ph
-
-
-def rel(a, b):
-    return float((a - b).abs().max() / b.abs().max())
 
 
 def test_single_slice_untouched_timing_kept_and_bound_only_on_far_pulses():
@@ -74,13 +71,10 @@ def test_realism_setting_equals_every_pulse_exact():
     assert rel(fast, exact) < 0.015  # measured 0.71 % (n = 16)
 
 
-def test_gpu_equals_core():
-    metal = pytest.importorskip("blochparty.metal")
-    if not metal.available():
-        pytest.skip("no Apple GPU")
+def test_gpu_equals_core(gpu):
     for ph in (wm_column(11), wm_column(11, mt=False)):  # without a bound pool the far pulses are free segments
         seq = bp.tse_2d(**KW, slice_order=ORDER, bound_only_beyond=0.0075, system=System(rf_raster=1e-5))
         ref = bp.simulate(ph, seq)
-        out = metal.simulate_metal(ph.to(torch.float32), seq.to(torch.float32))
+        out = gpu.simulate(ph.to(torch.float32), seq.to(torch.float32))
         assert rel(out.signal.to(ref.signal.dtype), ref.signal) < 1e-4  # no frame offset: float32's level
         assert rel(out.m.double(), ref.m) < 1e-4

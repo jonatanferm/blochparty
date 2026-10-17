@@ -9,69 +9,10 @@ import pytest
 import torch
 
 import blochparty as bp
-from test_bloch_vs_ode import random_case
-from helpers import with_readout
-
-from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
-from helpers import GPU, gpu_engines
-
-
-@pytest.fixture(params=gpu_engines())
-def gpu(request):
-    return GPU(request.param)
-
+from cases import random_case
+from helpers import compare_gradients as compare, input_gradients as gradients, rel, weighted_loss as loss, with_readout
 
 f64 = torch.float64
-
-
-def rel(a, b):
-    return float((a.to(b.dtype) - b).abs().max() / b.abs().max())
-
-
-def loss(r, which="both"):
-    """Linear in the outputs with fixed random weights (float64, so float32 engines get the same)."""
-    g = torch.Generator().manual_seed(1)
-    w = lambda x: torch.randn(x.shape, generator=g, dtype=f64)
-    total = 0
-    if which in ("both", "signal"):
-        total = total + (r.signal.real.double() * w(r.signal.real)).sum() + (r.signal.imag.double() * w(r.signal.imag)).sum()
-    if which in ("both", "m"):
-        total = total + (r.m.double() * w(r.m)).sum()
-        if r.m_bound is not None:
-            total = total + (r.m_bound.double() * w(r.m_bound)).sum()
-    return total
-
-
-def gradients(sim, phantom, seq, coils=None, m_init=None, scanner=None, which="both", **kw):
-    """Gradients of ``loss`` w.r.t. every input tensor (phantom, bound pool, sequence, coils, m_init)."""
-    leaves = {}
-
-    def leaf(name, t):
-        t = t.detach().clone().requires_grad_()
-        leaves[name] = t
-        return t
-
-    ph = replace(phantom, **{k: leaf(k, getattr(phantom, k)) for k in ("pos", "pd", "t1", "t2", "db0")})
-    if phantom.b1 is not None:
-        ph = replace(ph, b1=leaf("b1", phantom.b1))
-    if phantom.bound is not None:
-        b = phantom.bound.expand(len(phantom), phantom.pd)
-        ph = replace(ph, bound=replace(b, **{k: leaf("bound." + k, getattr(b, k)) for k in ("f", "k", "t1", "t2", "dw")}))
-    sq = replace(seq, **{k: leaf(k, getattr(seq, k)) for k in ("dt", "rf", "grad", "adc_phase")})
-    if seq.b0_offset is not None:
-        sq = replace(sq, b0_offset=leaf("b0_offset", seq.b0_offset))
-    c = None if coils is None else leaf("coils", coils)
-    m0 = None if m_init is None else leaf("m_init", m_init)
-    r = sim(ph, sq, c, m_init=m0, scanner=scanner, **kw)
-    grads = torch.autograd.grad(loss(r, which), list(leaves.values()), allow_unused=True)
-    return {k: g for k, g in zip(leaves, grads)}
-
-
-def compare(gpu, phantom, seq, tol, **kw):
-    ref, out = gradients(bp.simulate, phantom, seq, **kw), gradients(gpu.simulate, phantom, seq, **kw)
-    errors = {k: rel(out[k], ref[k]) for k in ref if ref[k] is not None and ref[k].abs().max() > 0}
-    assert max(errors.values()) < tol, errors
-    return errors
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
@@ -101,7 +42,7 @@ def test_gre_2d_coils(gpu, n_coils):
 
 @pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
 def test_rate_model_bound_pool(gpu, shape):
-    from test_exchange import bm_case
+    from cases import bm_case
 
     ph, seq = bm_case(0, shape)
     ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64))
@@ -112,7 +53,7 @@ def test_rate_model_bound_pool(gpu, shape):
 @pytest.mark.parametrize("concomitant", ["leading", "exact"])
 def test_scanner_field_model(gpu, concomitant):
     # through the encoding positions and concomitant coefficients to the hardware parameters
-    from test_fields_nonlinearity import distortion
+    from cases import distortion
 
     from blochparty.fields import Scanner
 

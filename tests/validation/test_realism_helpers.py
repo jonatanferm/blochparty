@@ -1,8 +1,6 @@
 """Helpers of the realism experiment (validation/realism/simulate_heads.py, validation/anatomy/prepare_ixi.py):
 the display orientation, the receive ring's position and the soft-tissue references."""
 import math
-from pathlib import Path
-import sys
 
 import numpy as np
 import pytest
@@ -10,11 +8,8 @@ import torch
 
 import blochparty as bp
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "validation" / "realism"))
-sys.path.insert(0, str(ROOT / "validation" / "anatomy"))
-import simulate_heads as SH  # noqa: E402
-import prepare_ixi as P  # noqa: E402
+import simulate_heads as SH
+import prepare_ixi as P
 
 
 def test_display_is_posterior_up():

@@ -3,15 +3,11 @@ absolute metric's single scale, the receive profile's exact recovery of a polyno
 the B1+ model's identifiability from one sagittal plane (what lets a fit on one plane predict the
 other)."""
 
-import sys
-from pathlib import Path
-
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).parents[1] / "validation" / "real"))
-from nist import CENTRE, N, absolute_error, receive_profile  # noqa: E402
-from nist_twin import R_B1, b1_field  # noqa: E402
+from nist import CENTRE, N, absolute_error, receive_profile
+from nist_twin import R_B1, b1_field
 
 
 def test_absolute_error_has_one_scale_for_all_spheres():

@@ -10,19 +10,10 @@ import blochparty as bp
 from blochparty.exchange import BoundPool
 
 from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
-from helpers import GPU, gpu_engines
-
-
-@pytest.fixture(params=gpu_engines())
-def gpu(request):
-    return GPU(request.param)
+from helpers import rel
 
 
 f32, f64 = torch.float32, torch.float64
-
-
-def rel(a, b):
-    return float((a - b).abs().max() / b.abs().max())
 
 
 def phantom(mt=False):

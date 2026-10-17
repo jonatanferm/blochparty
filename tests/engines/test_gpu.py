@@ -7,19 +7,9 @@ import pytest
 import torch
 
 import blochparty as bp
-from test_bloch_vs_ode import random_case
+from cases import random_case
 
-from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
-from helpers import GPU, gpu_engines
-
-
-@pytest.fixture(params=gpu_engines())
-def gpu(request):
-    return GPU(request.param)
-
-
-def rel(a, b):
-    return float((a.to(b.dtype) - b).abs().max() / b.abs().max())
+from helpers import rel
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
@@ -82,7 +72,7 @@ def test_hard_pulse_flip_angle_and_fid(gpu):
 @pytest.mark.parametrize("concomitant", [None, "leading", "exact"])
 def test_scanner_field_model(gpu, concomitant):
     # gradient nonlinearity (encoding positions) and concomitant fields at 0.55 T, where they are large
-    from test_fields_nonlinearity import distortion
+    from cases import distortion
 
     from blochparty.fields import Scanner
 
@@ -104,7 +94,7 @@ def test_scanner_field_model(gpu, concomitant):
 def test_magnetization_transfer(gpu, shape, mma):
     from dataclasses import replace
 
-    from test_exchange import bm_case
+    from cases import bm_case
     from helpers import with_readout
 
     ph, seq = bm_case(0, shape)
@@ -124,7 +114,7 @@ def test_magnetization_transfer(gpu, shape, mma):
 def test_generalized_bloch_bound_pool(gpu, shape, mma):
     from dataclasses import replace
 
-    from test_exchange import bm_case
+    from cases import bm_case
     from helpers import with_readout
 
     ph, seq = bm_case(1, shape)
@@ -143,7 +133,7 @@ def test_diffusion_same_walk_as_core(gpu, mma):
     # the same Philox walk per spin: the engines agree spin by spin, not only statistically
     import math
 
-    from test_diffusion import pgse
+    from cases import pgse
 
     g = torch.Generator().manual_seed(2)
     n = 3000
@@ -183,7 +173,7 @@ def _pools_case(n_pools, with_bound, seed=0):
     from dataclasses import replace
 
     from helpers import with_readout
-    from test_pools import pool_case
+    from cases import pool_case
 
     ph, seq = pool_case(seed, with_bound)
     n = len(ph)
@@ -249,7 +239,7 @@ def test_free_pools_cest_spectrum(gpu):
 def test_free_pools_scanner_field_model(gpu):
     from dataclasses import replace
 
-    from test_fields_nonlinearity import distortion
+    from cases import distortion
 
     from blochparty.fields import Scanner
 
@@ -303,7 +293,7 @@ def test_free_pools_moving_and_mapped(gpu, kind):
     # free pools with what moves spins or maps the scanner's fields (ROADMAP M1c): the _bm*_diff kernels
     from dataclasses import replace
 
-    from test_pools import _maps_for
+    from cases import _maps_for
 
     ph, seq = _pools_case(2, True)
     n = len(ph)
@@ -327,7 +317,7 @@ def test_lineshape_without_cut(gpu, n_pools):
     in the MT kernel (no free pools) and in the Bloch-McConnell kernels."""
     from dataclasses import replace
 
-    from test_exchange import bm_case
+    from cases import bm_case
     from helpers import with_readout
 
     if n_pools == 0:
