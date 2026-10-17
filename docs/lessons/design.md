@@ -2,6 +2,12 @@
 
 ## Sequence design by classification — 2026-10-17
 
+- **A repeat with a new seed must leave what it holds fixed alone** (validation/design/lesion_design.py, the second
+  seed of arm C): `--seed` set the networks' initialisation and also drew the Gaussian line mask, so "the same run
+  with another seed" would have scanned other lines and mixed the mask's luck into the seed spread. `--mask-seed`
+  now draws the mask on its own; the repeat checked its `ky_cycles` against the first run's before reading any AUC.
+  The same goes for anything a seed reaches indirectly (caches keyed by it, the data split).
+
 - **Know which k-space axis is the phase encode before you undersample it** (validation/design/lesion_design.py, the
   first two sweeps): every Cartesian k-space here is (coil, ky, kx) — `cartesian_kspace` fills the TSE's
   `kspace_index` line by line and the GRE's `kspace_shape` is (lines, readout) — and `ifft2c` of it has rows along +y.

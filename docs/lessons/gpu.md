@@ -50,6 +50,13 @@
   it. A secure 4090 for 45 minutes of verification and benchmarks cost $0.59. Reuse the image's PyTorch
   (`uv venv --system-site-packages`): the project ran on torch 2.8 there, nothing to download.
 
+- **Copy a pod's data from where it lives, not through the laptop** (2026-10-17, the second lesion-design seed): the
+  7.0 GB of slabs came from the mini to the laptop at ~5 MB/s; a throwaway ed25519 key made on the mini and added to
+  the pod's `authorized_keys` let the mini rsync straight to the pod at ~19 MB/s (6 minutes). Delete the key, its
+  `known_hosts` line and any log from the mini afterwards, and never put the Runpod key itself on a shared machine. A
+  small CNN job does not fill an L40: the design run logged a mean 21 % (peak 93 %, 231 W) over 23 minutes that
+  include the copy, and still ran its joint phase about 5x faster than the mini's M4.
+
 - **Know what a GPU test run measures**: the engine tests compare tiny cases (6-300 spins) with the float64 core on
   the CPU, so a 28-minute GPU test run kept the GPU at 0 % and 17 CPU cores busy (the user saw no GPU use and asked).
   Log `nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv -l 1` under `setsid` from the start, and show
