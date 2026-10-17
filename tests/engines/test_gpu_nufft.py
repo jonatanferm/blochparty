@@ -9,7 +9,7 @@ import torch
 import blochparty as bp
 from blochparty.exchange import BoundPool
 
-from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
+from blochparty.engines.gpu import driver  # the GPU engines' shared driver (_readout_runs, _reused_pulses)
 from helpers import rel
 
 
@@ -44,7 +44,7 @@ def test_same_signal_as_per_sample_and_core(gpu, name):
     coils = bp.birdcage_sensitivities(ph.pos, 8)
     direct = gpu.simulate(ph.to(f32), seq.to(f32), coils.to(torch.complex64))
     fast = gpu.simulate(ph.to(f32), seq.to(f32), coils.to(torch.complex64), readouts="nufft")
-    assert metal._readout_runs(seq)  # the case does take the NUFFT path
+    assert driver._readout_runs(seq)  # the case does take the NUFFT path
     print(f"{name}: NUFFT vs per-sample {rel(fast.signal, direct.signal):.1e}")
     assert rel(fast.signal, direct.signal) < 1e-4  # measured 1.2e-6 (TSE) to 2.1e-5 (GRE)
     # one jump over each readout instead of n float32 steps: the end state moves at float32's level
@@ -58,7 +58,7 @@ def test_fallback_and_dispatch_boundaries(gpu, monkeypatch):
     seq = CASES["GRE, RF spoiling"]().merge_free()
     ph, coils = phantom(), bp.birdcage_sensitivities(phantom().pos, 4).to(torch.complex64)
     ref = gpu.simulate(ph.to(f32), seq.to(f32), coils).signal
-    monkeypatch.setattr(metal, "NUFFT_WMAX", 7)  # most threadgroups keep the per-sample path
+    monkeypatch.setattr(driver, "NUFFT_WMAX", 7)  # most threadgroups keep the per-sample path
     assert rel(gpu.simulate(ph.to(f32), seq.to(f32), coils, readouts="nufft").signal, ref) < 1e-4
     monkeypatch.undo()
     out = gpu.simulate(ph.to(f32), seq.to(f32), coils, readouts="nufft", chunk=301)  # chunks inside readouts

@@ -1,0 +1,345 @@
+
+kernel void bloch_chunk@SUFFIX@(device float* M            [[buffer(0)]],  // (3, N) magnetization, in/out
+                                constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
+                                constant float* sens       [[buffer(2)]],  // (2C, N) per coil: real, imag
+                                constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
+                                constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil, 16 bound-only rf
+                                constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
+                                device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
+                                device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
+                                constant float* pool       [[buffer(8)]],  // (5, N) f k r1b t2b dw (mt)
+                                constant float* frf        [[buffer(9)]],  // (S,) RF frequency [Hz] (mt 1)
+                                constant float* line       [[buffer(10)]],  // (6,) lineshape (mt 1)
+                                constant float* log_f      [[buffer(11)]],  // lineshape table (mt 1)
+                                constant float* conc       [[buffer(12)]],  // (7, N) concomitant-field coefficients
+                                device float* U            [[buffer(13)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                                constant float* modes      [[buffer(14)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                                constant int* nsub         [[buffer(15)]],  // (S,) RF sub-steps (mt 2)
+                                device float* P            [[buffer(16)]],  // (3, N) walker positions, in/out (diffusion)
+                                constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
+                                constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
+                                constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
+                                constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
+                                constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
+                                constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
+                                constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
+                                constant uint* prm         [[buffer(24)]],  // (16,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped fmove
+                                device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
+                                constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
+                                constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
+                                device float* L            [[buffer(28)]],  // (4, N) low parts of m, mb (two_sum), in/out
+                                uint i    [[thread_position_in_grid]],
+                                uint lane [[thread_index_in_simdgroup]],
+                                uint sg   [[simdgroup_index_in_threadgroup]],
+                                uint nsg  [[simdgroups_per_threadgroup]],
+                                uint tid  [[thread_index_in_threadgroup]],
+                                uint ntg  [[threads_per_threadgroup]]) {
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13], mapped = prm[14], fmove = prm[15];
+
+    // ADC samples are buffered per simdgroup in threadgroup memory and reduced a block at a time:
+    // two barriers per block of samples instead of two per sample, and the final sums are spread
+    // over all threads of the group.
+    threadgroup float partial[TG_FLOATS];
+    threadgroup int block_rows[TG_FLOATS / (MAX_SG * 2)];
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    if (active) st.lx = L[j], st.ly = L[n + j], st.lz = L[2 * n + j], st.lb = L[3 * n + j];  // dispatches continue exactly
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
+        st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
+        if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    }
+    if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Walk wk;
+    if (@DIFF@) {
+        wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active && diffuse ? chol[c * n + j] : 0.0f;
+        wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
+    Move mv;
+    if (@DIFF@) {
+        mv.diffuse = diffuse != 0, mv.move = move != 0, mv.maps = mapped != 0;
+        mv.db0t = st.p.db0, mv.b1t = st.p.b1;
+        if (mv.move && active) {
+            mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
+            mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
+        }
+    }
+    Geom gm;
+    if (@DIFF@ && kind) {
+        gm.kind = kind, gm.size = geom[j];
+        gm.ax = float3(geom[n + j], geom[2 * n + j], geom[3 * n + j]);
+        gm.c = float3(geom[4 * n + j], geom[5 * n + j], geom[6 * n + j]);
+    }
+    Modes md;
+    for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    BMS bm;
+    if (@V@ == 3) {  // inactive threads: zero state and PD (inert)
+        bm.bound = mt != 0;
+        bm.hi = bm_load(BMv, 0, n, j), bm.lo = bm_load(BMv, BM_NC, n, j);
+        if (!active) bm.hi = BMVec{}, bm.lo = BMVec{}, st.p.pd = 0.0f;
+        bm.c0 = st.p.r1 * st.p.pd, bm.kex = 0.0f;
+        for (uint p = 0; p < @NP@; ++p) {
+            const float f = bmp[(5 * p) * n + j], k = bmp[(5 * p + 1) * n + j];
+            bm.kin[p] = k, bm.kout[p] = k * f, bm.r1[p] = bmp[(5 * p + 2) * n + j], bm.r2[p] = bmp[(5 * p + 3) * n + j];
+            bm.cz[p] = bm.r1[p] * f * st.p.pd, bm.dw[p] = TWO_PI * bmp[(5 * p + 4) * n + j], bm.kex += k + k * f;
+        }
+        bm.kfb = bm.kb = bm.r1b = bm.cb = 0.0f;
+        if (mt) bm.kfb = st.b.k * st.b.f, bm.kb = st.b.k, bm.r1b = st.b.r1b, bm.cb = st.b.r1b * st.b.f * st.p.pd;
+    }
+    thread float &mx = st.mx, &my = st.my, &mz = st.mz;
+    const uint nv = 2 * n_coils;
+    const uint block = TG_FLOATS / (MAX_SG * nv);  // samples buffered per flush
+    uint nb = 0;
+
+    for (uint s = s0; s < s1; ++s) {
+        constant float* q = segs + 8 * s;
+        const int f = flags[s];
+        advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+        if (f & 2) {  // ADC sample: simdgroup sums into the block buffer, flushed when full
+            const float cp = precise::cos(q[6]), sp = precise::sin(q[6]);
+            for (uint v = 0; v < nv; v += 2) {
+                float sr = active ? sens[v * n + j] : 0.0f, si = active ? sens[(v + 1) * n + j] : 0.0f;
+                if (@DIFF@ && mapped > 1u && active) {  // mapped coils, where the spin is now
+                    const float3 at = float3(st.p.px, st.p.py, st.p.pz);
+                    sr = map_sample(maps, mg, 2u + v, at), si = map_sample(maps, mg, 3u + v, at);
+                }
+                const float re = (mx + st.lx) * sr - (my + st.ly) * si, im = (mx + st.lx) * si + (my + st.ly) * sr;
+                const float tr = simd_sum(re * cp + im * sp), ti = simd_sum(im * cp - re * sp);
+                if (lane == 0) {
+                    partial[(sg * block + nb) * nv + v] = tr;
+                    partial[(sg * block + nb) * nv + v + 1] = ti;
+                }
+            }
+            if (tid == 0) block_rows[nb] = adc_row[s];
+            if (++nb == block) { flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg); nb = 0; }
+        }
+        if (f & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+    }
+    if (nb > 0) flush(partial, block_rows, sig, nb, nv, nsg, tid, ntg);
+    if (active) {
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        L[j] = st.lx, L[n + j] = st.ly, L[2 * n + j] = st.lz, L[3 * n + j] = st.lb;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
+        for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+        if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
+        if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
+    }
+}
+
+kernel void bloch_chunk_mma@SUFFIX@(device float* M            [[buffer(0)]],  // (3, N) magnetization, in/out
+                                    constant float* spins      [[buffer(1)]],  // (8, N) px py pz pd r1 r2 db0 b1
+                                    device const float* sens   [[buffer(2)]],  // (2, 8T, N_pad): real, imag; zero-padded
+                                    constant float* segs       [[buffer(3)]],  // (S, 8) dt rfx rfy gx gy gz psi b0
+                                    constant int* flags        [[buffer(4)]],  // (S,) 1 rf, 2 adc, 4 spoil, 16 bound-only rf
+                                    constant int* adc_row      [[buffer(5)]],  // (S,) signal row of an ADC segment
+                                    device atomic_float* sig   [[buffer(6)]],  // (n_adc, C, 2)
+                                    device float* MB           [[buffer(7)]],  // (N,) bound-pool Mz, in/out (mt)
+                                    constant float* pool       [[buffer(8)]],  // (5, N) f k r1b t2b dw (mt)
+                                    constant float* frf        [[buffer(9)]],  // (S,) RF frequency [Hz] (mt 1)
+                                    constant float* line       [[buffer(10)]],  // (6,) lineshape (mt 1)
+                                    constant float* log_f      [[buffer(11)]],  // lineshape table (mt 1)
+                                    constant float* conc       [[buffer(12)]],  // (7, N) concomitant-field coefficients
+                                    device float* U            [[buffer(13)]],  // (2J, N) generalized pool modes, in/out (mt 2)
+                                    constant float* modes      [[buffer(14)]],  // (J, 4) Re p, Im p, Re c, Im c (mt 2)
+                                    constant int* nsub         [[buffer(15)]],  // (S,) RF sub-steps (mt 2)
+                                    device float* P            [[buffer(16)]],  // (3, N) walker positions, in/out (diffusion)
+                                    constant float* chol       [[buffer(17)]],  // (6, N) Cholesky factors of D (diffusion)
+                                    constant int* wsub         [[buffer(18)]],  // (S,) restricted-walk sub-steps
+                                    constant float* geom       [[buffer(19)]],  // (7, N) size, axis, centre (restriction)
+                                    constant float* mseg       [[buffer(20)]],  // (S, 14) motion: t, w, A (row-major), b
+                                    constant float* mspin      [[buffer(21)]],  // (6, N) motion: velocity, displacement
+                                    constant float* maps       [[buffer(22)]],  // (K, nz, ny, nx) b0, b1, coils (moving spins in FieldMaps)
+                                    constant float* mg         [[buffer(23)]],  // (9,) map origin, spacing, dims
+                                    constant uint* prm         [[buffer(24)]],  // (19,) n n_coils s0 s1 n_tiles n_pad mt mode nj seed_lo seed_hi kind move diffuse mapped fmove nufft reuse pbase
+                                    device float* BMv          [[buffer(25)]],  // (2 BM_NC, N) free-pool state hi, lo, in/out (V 3)
+                                    constant float* bmp        [[buffer(26)]],  // (5 MAX_POOLS, N) per free pool: f k r1 r2 dw (V 3)
+                                    constant float* fm         [[buffer(27)]],  // field model of moving spins (nl_displacement, conc_at)
+                                    device float* L            [[buffer(28)]],  // (4, N) low parts of m, mb (two_sum), in/out
+                                    constant int* run_of       [[buffer(29)]],  // (S',) NUFFT readout starting at s, else -1
+                                    constant float* nu         [[buffer(30)]],  // NUFFT: header (NU_HEAD), per run n, row, shift
+                                    uint i    [[thread_position_in_grid]],
+                                    uint lane [[thread_index_in_simdgroup]],
+                                    uint sg   [[simdgroup_index_in_threadgroup]],
+                                    uint nsg  [[simdgroups_per_threadgroup]],
+                                    uint tid  [[thread_index_in_threadgroup]],
+                                    uint ntg  [[threads_per_threadgroup]]) {
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6], mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12], diffuse = prm[13], mapped = prm[14], fmove = prm[15];
+
+    threadgroup float buf[MAX_SG * MMA_REGION];
+    threadgroup int rows[8];
+    threadgroup float psi[8];
+    threadgroup int tgred[2 * MAX_SG];  // NUFFT readouts: per-simdgroup window ends
+    threadgroup int tgwin[2];
+    const uint nuon = prm[16], pon = prm[17], pbase = prm[18];
+    threadgroup float* mine = buf + sg * MMA_REGION;
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    if (active) st.lx = L[j], st.ly = L[n + j], st.lz = L[2 * n + j], st.lb = L[3 * n + j];  // dispatches continue exactly
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
+        st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
+        if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    }
+    if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Walk wk;
+    if (@DIFF@) {
+        wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active && diffuse ? chol[c * n + j] : 0.0f;
+        wk.seed = uint2(seed_lo, seed_hi), wk.spin = j;
+    }
+    Move mv;
+    if (@DIFF@) {
+        mv.diffuse = diffuse != 0, mv.move = move != 0, mv.maps = mapped != 0;
+        mv.db0t = st.p.db0, mv.b1t = st.p.b1;
+        if (mv.move && active) {
+            mv.v = float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
+            mv.d = float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
+        }
+    }
+    Geom gm;
+    if (@DIFF@ && kind) {
+        gm.kind = kind, gm.size = geom[j];
+        gm.ax = float3(geom[n + j], geom[2 * n + j], geom[3 * n + j]);
+        gm.c = float3(geom[4 * n + j], geom[5 * n + j], geom[6 * n + j]);
+    }
+    Modes md;
+    for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    BMS bm;
+    if (@V@ == 3) {  // inactive threads: zero state and PD (inert)
+        bm.bound = mt != 0;
+        bm.hi = bm_load(BMv, 0, n, j), bm.lo = bm_load(BMv, BM_NC, n, j);
+        if (!active) bm.hi = BMVec{}, bm.lo = BMVec{}, st.p.pd = 0.0f;
+        bm.c0 = st.p.r1 * st.p.pd, bm.kex = 0.0f;
+        for (uint p = 0; p < @NP@; ++p) {
+            const float f = bmp[(5 * p) * n + j], k = bmp[(5 * p + 1) * n + j];
+            bm.kin[p] = k, bm.kout[p] = k * f, bm.r1[p] = bmp[(5 * p + 2) * n + j], bm.r2[p] = bmp[(5 * p + 3) * n + j];
+            bm.cz[p] = bm.r1[p] * f * st.p.pd, bm.dw[p] = TWO_PI * bmp[(5 * p + 4) * n + j], bm.kex += k + k * f;
+        }
+        bm.kfb = bm.kb = bm.r1b = bm.cb = 0.0f;
+        if (mt) bm.kfb = st.b.k * st.b.f, bm.kb = st.b.k, bm.r1b = st.b.r1b, bm.cb = st.b.r1b * st.b.f * st.p.pd;
+    }
+    thread float &mx = st.mx, &my = st.my, &mz = st.mz;
+    const uint j0 = i - lane;
+    uint nb = 0;
+
+    for (uint s = s0; s < s1; ++s) {
+        constant float* q = segs + 8 * s;
+        const int f = flags[s];
+        if (nuon && run_of[s] >= 0) {
+            // A readout as a type-1 NUFFT (docs/PERFORMANCE.md 2.1): sample i of the run is
+            // m e^{-(i+1) dt R2} e^{-i (i+1) phi}, phi = 2 pi dt bz; each spin spreads its decay terms
+            // m e^{-tau_m R2} e^{-i shift phi} onto an oversampled grid in phi with an ES kernel (the
+            // coil sums by the same matrix products as the samples, a few columns of grid cells instead
+            // of n samples), then jumps over the run in one free step. The grid is transformed on the
+            // CPU. The window of cells is common to the threadgroup (spins sorted along phi); a
+            // threadgroup whose window is wider than wmax keeps the per-sample path.
+            if (nb > 0) { flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg); nb = 0; }
+            const int r = run_of[s];
+            constant float* rp = nu + NU_HEAD + 3 * r;
+            const uint nr = uint(rp[0]), mrow = uint(rp[1]);
+            const float shift = rp[2];
+            const int ng = int(nu[0]), nadc = int(nu[4]);
+            const uint w = uint(nu[1]), nterm = uint(nu[2]), wmax = uint(nu[5]);
+            const float beta = nu[3];
+            const float phi = TWO_PI * q[0] * offset(st.p, st.conc, 0u, q);
+            const float turns = phi / TWO_PI;
+            const float xg = (turns - floor(turns)) * float(ng);
+            const int base = int(floor(xg - 0.5f * float(w))) + 1;
+            int lo_b = active ? base : 0x7fffffff, hi_b = active ? base : -0x7fffffff;
+            lo_b = simd_min(lo_b), hi_b = simd_max(hi_b);
+            if (lane == 0) tgred[sg] = lo_b, tgred[MAX_SG + sg] = hi_b;
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            if (tid == 0) {
+                int a = 0x7fffffff, b = -0x7fffffff;
+                for (uint g = 0; g < nsg; ++g) a = min(a, tgred[g]), b = max(b, tgred[MAX_SG + g]);
+                tgwin[0] = a, tgwin[1] = b;
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+            const int wb = tgwin[0], we = tgwin[1];
+            if (wb > we || uint(we - wb) + w <= wmax) {  // all inactive, or a narrow window
+                if (wb <= we) {
+                    const uint ncol = (uint(we - wb) + w) * nterm;
+                    const float ax = mx + st.lx, ay = my + st.ly;
+                    const float cs = precise::cos(shift * phi), sn = precise::sin(shift * phi);
+                    const float sr = ax * cs + ay * sn, si = ay * cs - ax * sn;  // (ax + i ay) e^{-i shift phi}
+                    float er[MAX_TERMS];
+                    for (uint m = 0; m < nterm; ++m) er[m] = exp(-nu[6 + m] * st.p.r2);
+                    for (uint c0 = 0; c0 < ncol; c0 += 8) {
+                        const uint nbk = min(8u, ncol - c0);
+                        for (uint b = 0; b < nbk; ++b) {
+                            const uint col = c0 + b, cell = col / nterm, m = col % nterm;
+                            const float z = 2.0f * (float(wb + int(cell)) - xg) / float(w);
+                            const float kv = (active && fabs(z) < 1.0f) ? exp(beta * (sqrt(1.0f - z * z) - 1.0f)) * er[m] : 0.0f;
+                            mine[8 * lane + b] = kv * sr;
+                            mine[256 + 8 * lane + b] = kv * si;
+                            mine[512 + 8 * lane + b] = -kv * si;
+                            if (tid == 0) {
+                                int u = (wb + int(cell)) % ng;
+                                if (u < 0) u += ng;
+                                rows[b] = nadc + (r * int(nterm) + int(m)) * ng + u;
+                                psi[b] = 0.0f;
+                            }
+                        }
+                        flush_mma(buf, mine, rows, psi, sens, sig, nbk, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
+                    }
+                }
+                advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, mrow, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+                s += nr - 1;
+                if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+                continue;
+            }
+        }
+        if (@V@ < 2 && pon && run_of[s] <= -2) {
+            // A reused pulse (simulate_metal(pulses="reuse")): the spin's affine map of this pulse,
+            // m += D m + c (pulse_maps, from the pulse's first occurrence), turned about z by this
+            // occurrence's phase q[6]: P_phi = Rz(phi) P Rz(-phi), since relaxation and exchange
+            // commute with Rz. U holds the maps (P, K, n_pad), K = R (R + 1) for R rows (x y z [b]).
+            const uint pid = uint(-2 - run_of[s]);
+            const uint R = (@V@ != 0 && mt) ? 4u : 3u;
+            mx += st.lx, my += st.ly, mz += st.lz, st.lx = st.ly = st.lz = 0.0f;
+            if (R == 4) st.mb += st.lb, st.lb = 0.0f;
+            float cph;
+            const float sph = precise::sincos(q[6], cph);
+            const float ux = cph * mx + sph * my, uy = cph * my - sph * mx;
+            device const float* D = U + pid * R * (R + 1) * n_pad + j;
+            float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (uint r = 0; r < R; ++r) {
+                device const float* row = D + r * (R + 1) * n_pad;
+                float a = row[R * n_pad] + row[0] * ux + row[n_pad] * uy + row[2 * n_pad] * mz;
+                if (R == 4) a += row[3 * n_pad] * st.mb;
+                v[r] = a;
+            }
+            two_sum(mx, st.lx, cph * v[0] - sph * v[1]), two_sum(my, st.ly, sph * v[0] + cph * v[1]);
+            two_sum(mz, st.lz, v[2]);
+            if (R == 4) two_sum(st.mb, st.lb, v[3]);
+            s += uint(nu[pbase + pid]) - 1;
+            if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+            continue;
+        }
+        advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+        if (f & 2) {  // ADC sample: column nb of this simdgroup's (32 spins x 8 samples) block
+            mine[8 * lane + nb] = mx + st.lx;
+            mine[256 + 8 * lane + nb] = my + st.ly;
+            mine[512 + 8 * lane + nb] = -(my + st.ly);
+            if (tid == 0) { rows[nb] = adc_row[s]; psi[nb] = q[6]; }
+            if (++nb == 8) { flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg); nb = 0; }
+        }
+        if (f & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+    }
+    if (nb > 0) flush_mma(buf, mine, rows, psi, sens, sig, nb, n_coils, n_tiles, n_pad, j0, nsg, tid, ntg);
+    if (active) {
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        L[j] = st.lx, L[n + j] = st.ly, L[2 * n + j] = st.lz, L[3 * n + j] = st.lb;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
+        for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+        if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
+        if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
+    }
+}

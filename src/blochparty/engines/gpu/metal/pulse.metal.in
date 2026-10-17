@@ -1,0 +1,43 @@
+
+// ==== Reused pulses (simulate_metal(pulses="reuse")): per spin, the affine map of each distinct pulse,
+// m -> m + D m + c over the rows x, y, z (and the bound pool's Mz), from the same steps as the main
+// kernel on the pulse's first occurrence: the columns of D from unit vectors with pd = 0 (no
+// recovery), c from zero with the spin's pd. Thread (p, j): pulse p, spin j; maps (P, K, T).
+kernel void pulse_maps@SUFFIX@(device float* maps      [[buffer(0)]],
+                              constant float* spins   [[buffer(1)]],
+                              constant float* segs    [[buffer(2)]],
+                              constant int* flags     [[buffer(3)]],
+                              constant float* pool    [[buffer(4)]],
+                              constant float* frf     [[buffer(5)]],
+                              constant float* line    [[buffer(6)]],
+                              constant float* log_f   [[buffer(7)]],
+                              constant int* pinfo     [[buffer(8)]],  // (P, 2): first segment, length
+                              constant uint* prm      [[buffer(9)]],  // n T P mt
+                              uint i [[thread_position_in_grid]]) {
+    const uint n = prm[0], T = prm[1], P = prm[2], mt = prm[3];
+    const uint pid = i / T, j = i % T;
+    if (pid >= P || j >= n) return;
+    const uint R = (@V@ != 0 && mt) ? 4u : 3u, K = R * (R + 1);
+    const Spin p0 = load_spin(spins, n, j);
+    Pool b = Pool{0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+    if (@V@ != 0 && mt) b = load_pool(pool, n, j);
+    const int a = pinfo[2 * pid], len = pinfo[2 * pid + 1];
+    Conc cc;
+    for (uint col = 0; col <= R; ++col) {
+        Spin p = p0;
+        if (col < R) p.pd = 0.0f;
+        float mx = col == 0 ? 1.0f : 0.0f, my = col == 1 ? 1.0f : 0.0f, mz = col == 2 ? 1.0f : 0.0f;
+        float mb = col == 3 ? 1.0f : 0.0f, lx = 0.0f, ly = 0.0f, lz = 0.0f, lb = 0.0f;
+        Cache k;
+        ZCache zc;
+        for (int s = a; s < a + len; ++s) {
+            constant float* q = segs + 8 * s;
+            const float bz = offset(p, cc, 0u, q);
+            if (@V@ != 0 && mt) step_mt(q, flags[s], bz, frf[s], mx, my, mz, mb, lx, ly, lz, lb, p, b, line, log_f, k, zc);
+            else step(q, flags[s], bz, mx, my, mz, lx, ly, lz, p, k);
+        }
+        const float v[4] = {(mx - (col == 0 ? 1.0f : 0.0f)) + lx, (my - (col == 1 ? 1.0f : 0.0f)) + ly,
+                            (mz - (col == 2 ? 1.0f : 0.0f)) + lz, (mb - (col == 3 ? 1.0f : 0.0f)) + lb};
+        for (uint r = 0; r < R; ++r) maps[(pid * K + r * (R + 1) + col) * T + j] = v[r];
+    }
+}

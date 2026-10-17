@@ -1,0 +1,33 @@
+
+// metal's bloch_replay: the forward over one interval from its checkpoint, m before every RBLOCK-th segment into R
+extern "C" __global__ void __launch_bounds__(256) @NAME@(const float* CK, const float* spins, const float* segs, const int* flags,
+        const float* pool, const float* frf, const float* line, const float* log_f, const float* conc, float* R,
+        const uint* prm) {
+    const uint i = blockIdx.x * blockDim.x + threadIdx.x;
+    const uint n = prm[0], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5];
+    if (i >= n) return;
+    const uint j = i;
+    State st;
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) st.b = load_pool(pool, n, j);
+    if (@V@ != 0 && mode)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    st.mx = CK[j], st.my = CK[n + j], st.mz = CK[2 * n + j], st.mb = CK[3 * n + j];
+    st.lx = CK[4 * n + j], st.ly = CK[5 * n + j], st.lz = CK[6 * n + j], st.lb = CK[7 * n + j];
+    for (uint s = s0; s < s1; ++s) {
+        const float* q = segs + 8 * s;
+        const int f = flags[s];
+        if ((s - s0) % RBLOCK == 0) {
+            float* r = R + (s - s0) / RBLOCK * rrows<@V@>() * n;
+            r[j] = st.mx, r[n + j] = st.my, r[2 * n + j] = st.mz;
+            if (rrows<@V@>() > 3) r[3 * n + j] = st.mb;
+        }
+        const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
+        if (@V@ != 0 && mt)
+            step_mt(q, f, bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line, log_f,
+                    st.cache, st.zc);
+        else
+            step(q, f, bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+        if (f & 4) st.mx = st.my = st.lx = st.ly = 0.0f;
+    }
+}

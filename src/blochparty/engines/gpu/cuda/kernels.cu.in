@@ -1,0 +1,185 @@
+
+extern "C" __global__ void __launch_bounds__(256) @NAME@(
+        float* M, const float* spins, const float* sens, const float* segs, const int* flags, const int* adc_row,
+        float* sig, float* MB, const float* pool, const float* frf, const float* line, const float* log_f,
+        const float* conc, float* U, const float* modes, const int* nsub, float* P, const float* chol,
+        const int* wsub, const float* geom, const float* mseg, const float* mspin, const float* maps,
+        const float* mg, const uint* prm, float* BMv, const float* bmp, const float* fm, float* L
+#if @MMA@
+        , const int* run_of, const float* nu
+#endif
+        ) {
+    const uint i = blockIdx.x * blockDim.x + threadIdx.x, lane = threadIdx.x & 31u, sg = threadIdx.x >> 5,
+               nsg = blockDim.x >> 5, tid = threadIdx.x, ntg = blockDim.x;
+    const uint n = prm[0], n_coils = prm[1], s0 = prm[2], s1 = prm[3], n_tiles = prm[4], n_pad = prm[5], mt = prm[6],
+               mode = prm[7], nj = prm[8], seed_lo = prm[9], seed_hi = prm[10], kind = prm[11], move = prm[12],
+               diffuse = prm[13], mapped = prm[14], fmove = prm[15];
+    __shared__ float partial[TG_FLOATS];
+    __shared__ int block_rows[TG_FLOATS / (MAX_SG * 2)];
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.mx = active ? M[j] : 0.0f, st.my = active ? M[n + j] : 0.0f, st.mz = active ? M[2 * n + j] : 0.0f;
+    if (active) st.lx = L[j], st.ly = L[n + j], st.lz = L[2 * n + j], st.lb = L[3 * n + j];  // dispatches continue exactly
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) {  // inactive threads: an inert pool with unit rates (det A > 0, nothing to add)
+        st.b = load_pool(pool, n, j), st.mb = active ? MB[j] : 0.0f;
+        if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    }
+    if (@V@ != 0 && mode)  // inactive threads read spin 0's coefficients (finite, nothing added to the signal)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    Walk wk;
+    if (@DIFF@) {
+        wk.x = active ? P[j] : 0.0f, wk.y = active ? P[n + j] : 0.0f, wk.z = active ? P[2 * n + j] : 0.0f;
+        for (uint c = 0; c < 6; ++c) wk.l[c] = active && diffuse ? chol[c * n + j] : 0.0f;
+        wk.seed = bp_uint2(seed_lo, seed_hi), wk.spin = j;
+    }
+    Move mv;
+    if (@DIFF@) {
+        mv.diffuse = diffuse != 0, mv.move = move != 0, mv.maps = mapped != 0;
+        mv.db0t = st.p.db0, mv.b1t = st.p.b1;
+        if (mv.move && active) {
+            mv.v = bp_float3(mspin[j], mspin[n + j], mspin[2 * n + j]);
+            mv.d = bp_float3(mspin[3 * n + j], mspin[4 * n + j], mspin[5 * n + j]);
+        }
+    }
+    Geom gm;
+    if (@DIFF@ && kind) {
+        gm.kind = kind, gm.size = geom[j];
+        gm.ax = bp_float3(geom[n + j], geom[2 * n + j], geom[3 * n + j]);
+        gm.c = bp_float3(geom[4 * n + j], geom[5 * n + j], geom[6 * n + j]);
+    }
+    Modes md;
+    for (uint m = 0; @V@ == 2 && m < nj; ++m) md.ur[m] = active ? U[2 * m * n + j] : 0.0f, md.ui[m] = active ? U[(2 * m + 1) * n + j] : 0.0f;
+    BMS bm;
+    if (@V@ == 3) {  // inactive threads: zero state and PD (inert)
+        bm.bound = mt != 0;
+        bm.hi = bm_load(BMv, 0, n, j), bm.lo = bm_load(BMv, BM_NC, n, j);
+        if (!active) bm.hi = BMVec{}, bm.lo = BMVec{}, st.p.pd = 0.0f;
+        bm.c0 = st.p.r1 * st.p.pd, bm.kex = 0.0f;
+        for (uint p = 0; p < @NP@; ++p) {
+            const float f = bmp[(5 * p) * n + j], k = bmp[(5 * p + 1) * n + j];
+            bm.kin[p] = k, bm.kout[p] = k * f, bm.r1[p] = bmp[(5 * p + 2) * n + j], bm.r2[p] = bmp[(5 * p + 3) * n + j];
+            bm.cz[p] = bm.r1[p] * f * st.p.pd, bm.dw[p] = TWO_PI * bmp[(5 * p + 4) * n + j], bm.kex += k + k * f;
+        }
+        bm.kfb = bm.kb = bm.r1b = bm.cb = 0.0f;
+        if (mt) bm.kfb = st.b.k * st.b.f, bm.kb = st.b.k, bm.r1b = st.b.r1b, bm.cb = st.b.r1b * st.b.f * st.p.pd;
+    }
+    float &mx = st.mx, &my = st.my, &mz = st.mz;
+
+    Block o;
+    o.partial = partial, o.rows = block_rows, o.sig = sig, o.nv = 2 * n_coils, o.block = TG_FLOATS / (MAX_SG * o.nv);
+    o.n_coils = n_coils, o.nsg = nsg, o.tid = tid, o.ntg = ntg, o.lane = lane, o.sg = sg, o.nb = 0;
+    Sens S;
+    S.sens = sens, S.maps = maps, S.mg = mg, S.layout = @MMA@, S.n = n, S.n_pad = n_pad, S.n_tiles = n_tiles;
+    S.i = i, S.j = j, S.active = active, S.mapped = @DIFF@ && mapped > 1u;
+#pragma unroll
+    for (uint c = 0; c < 8u; ++c) {
+        S.r0[c] = S.i0[c] = 0.0f;
+        if (c < n_coils && !S.mapped) coil_at(S, c, bp_float3(0.0f), S.r0[c], S.i0[c]);
+    }
+#if @MMA@
+    __shared__ int tgred[2 * MAX_SG];  // NUFFT readouts: per-warp window ends
+    __shared__ int tgwin[2];
+    const uint nuon = prm[16], pon = prm[17], pbase = prm[18];
+#endif
+
+    for (uint s = s0; s < s1; ++s) {
+        const float* q = segs + 8 * s;
+        const int f = flags[s];
+#if @MMA@
+        if (nuon && run_of[s] >= 0) {
+            // A readout as a type-1 NUFFT (metal's bloch_chunk_mma): each spin spreads its decay terms onto the
+            // oversampled grid, one emitted column per (cell, term), then jumps over the run in one free step.
+            const int r = run_of[s];
+            const float* rp = nu + NU_HEAD + 3 * r;
+            const uint nr = uint(rp[0]), mrow = uint(rp[1]);
+            const float shift = rp[2];
+            const int ng = int(nu[0]), nadc = int(nu[4]);
+            const uint w = uint(nu[1]), nterm = uint(nu[2]), wmax = uint(nu[5]);
+            const float beta = nu[3];
+            const float phi = TWO_PI * q[0] * offset(st.p, st.conc, 0u, q);
+            const float turns = phi / TWO_PI;
+            const float xg = (turns - floorf(turns)) * float(ng);
+            const int base = int(floorf(xg - 0.5f * float(w))) + 1;
+            int lo_b = active ? base : 0x7fffffff, hi_b = active ? base : -0x7fffffff;
+            lo_b = warp_min(lo_b), hi_b = warp_max(hi_b);
+            if (lane == 0) tgred[sg] = lo_b, tgred[MAX_SG + sg] = hi_b;
+            __syncthreads();
+            if (tid == 0) {
+                int a = 0x7fffffff, b = -0x7fffffff;
+                for (uint g = 0; g < nsg; ++g) a = min(a, tgred[g]), b = max(b, tgred[MAX_SG + g]);
+                tgwin[0] = a, tgwin[1] = b;
+            }
+            __syncthreads();
+            const int wb = tgwin[0], we = tgwin[1];
+            __syncthreads();  // tgwin is read by all before any thread can reach the next run's writes
+            if (wb > we || uint(we - wb) + w <= wmax) {  // all inactive, or a narrow window
+                if (wb <= we) {
+                    const uint ncol = (uint(we - wb) + w) * nterm;
+                    const float ax = mx + st.lx, ay = my + st.ly;
+                    const float cs = cosf(shift * phi), sn = sinf(shift * phi);
+                    const float sr = ax * cs + ay * sn, si = ay * cs - ax * sn;  // (ax + i ay) e^{-i shift phi}
+                    float er[MAX_TERMS];
+                    for (uint m = 0; m < nterm; ++m) er[m] = expf(-nu[6 + m] * st.p.r2);
+                    const bp_float3 at = bp_float3(st.p.px, st.p.py, st.p.pz);
+                    for (uint col = 0; col < ncol; ++col) {
+                        const uint cell = col / nterm, m = col % nterm;
+                        const float z = 2.0f * (float(wb + int(cell)) - xg) / float(w);
+                        const float kv = (active && fabsf(z) < 1.0f) ? expf(beta * (sqrtf(1.0f - z * z) - 1.0f)) * er[m] : 0.0f;
+                        int u = (wb + int(cell)) % ng;
+                        if (u < 0) u += ng;
+                        emit(o, S, kv * sr, kv * si, nadc + (r * int(nterm) + int(m)) * ng + u, at);
+                    }
+                }
+                advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, mrow, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+                s += nr - 1;
+                if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+                continue;
+            }
+        }
+        if (@V@ < 2 && pon && run_of[s] <= -2) {
+            // A reused pulse (metal's bloch_chunk_mma): the spin's affine map of this pulse turned about z by this
+            // occurrence's phase q[6]. U holds the maps (P, K, n_pad), K = R (R + 1) for R rows (x y z [b]).
+            const uint pid = uint(-2 - run_of[s]);
+            const uint R = (@V@ != 0 && mt) ? 4u : 3u;
+            mx += st.lx, my += st.ly, mz += st.lz, st.lx = st.ly = st.lz = 0.0f;
+            if (R == 4) st.mb += st.lb, st.lb = 0.0f;
+            float sph, cph;
+            sincosf(q[6], &sph, &cph);
+            const float ux = cph * mx + sph * my, uy = cph * my - sph * mx;
+            const float* D = U + pid * R * (R + 1) * n_pad + j;
+            float v[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (uint r = 0; r < R; ++r) {
+                const float* row = D + r * (R + 1) * n_pad;
+                float a = row[R * n_pad] + row[0] * ux + row[n_pad] * uy + row[2 * n_pad] * mz;
+                if (R == 4) a += row[3 * n_pad] * st.mb;
+                v[r] = a;
+            }
+            two_sum(mx, st.lx, cph * v[0] - sph * v[1]), two_sum(my, st.ly, sph * v[0] + cph * v[1]);
+            two_sum(mz, st.lz, v[2]);
+            if (R == 4) two_sum(st.mb, st.lb, v[3]);
+            s += uint(nu[pbase + pid]) - 1;
+            if (flags[s] & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+            continue;
+        }
+#endif
+        advance<@V@, @DIFF@, @NP@>(st, md, bm, wk, gm, mv, segs, flags, frf, s, mt, line, log_f, mode, nsub, modes, nj, wsub, mseg, maps, mg, fm, fmove);
+        if (f & 2) {  // ADC sample: m e^{-i psi} into the coil sums
+            float sp, cp;
+            sincosf(q[6], &sp, &cp);
+            const float ax = mx + st.lx, ay = my + st.ly;
+            emit(o, S, ax * cp + ay * sp, ay * cp - ax * sp, adc_row[s], bp_float3(st.p.px, st.p.py, st.p.pz));
+        }
+        if (f & 4) { mx = 0.0f; my = 0.0f; st.lx = 0.0f; st.ly = 0.0f; }
+    }
+    if (o.nb > 0) flush(o);
+    if (active) {
+        M[j] = mx; M[n + j] = my; M[2 * n + j] = mz;
+        L[j] = st.lx, L[n + j] = st.ly, L[2 * n + j] = st.lz, L[3 * n + j] = st.lb;
+        if (@V@ != 0 && mt) MB[j] = st.mb;
+        for (uint m = 0; @V@ == 2 && m < nj; ++m) U[2 * m * n + j] = md.ur[m], U[(2 * m + 1) * n + j] = md.ui[m];
+        if (@DIFF@) P[j] = wk.x, P[n + j] = wk.y, P[2 * n + j] = wk.z;
+        if (@V@ == 3) bm_store(bm.hi, BMv, 0, n, j), bm_store(bm.lo, BMv, BM_NC, n, j);
+    }
+}

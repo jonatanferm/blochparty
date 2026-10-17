@@ -1,0 +1,121 @@
+
+// metal's bloch_adjoint: the reverse sweep of one interval, a block of RBLOCK segments at a time recomputed from R
+// into shared memory (each thread its own slots). NC: coils held in registers, padded with zero coils; 0: any
+// count, from memory.
+extern "C" __global__ void __launch_bounds__(256) @NAME@(const float* CK, const float* spins, const float* sens,
+        const float* segs, const int* flags, const int* adc_row, const float* hb, const float* pool, const float* frf,
+        const float* line, const float* log_f, const float* conc, float* R, float* LAM, float* GS, float* GC,
+        float* GSEG, const uint* prm) {
+    const uint i = blockIdx.x * blockDim.x + threadIdx.x, lane = threadIdx.x & 31u, sg = threadIdx.x >> 5,
+               nsg = blockDim.x >> 5, tid = threadIdx.x, group = blockIdx.x;
+    // need_seg: 2 every segment's gradients (dt, grad, b0_offset requested), 1 those of RF segments (rf, rf_freq)
+    const uint n = prm[0], nc = prm[1], s0 = prm[2], s1 = prm[3], mt = prm[4], mode = prm[5], need_seg = prm[6],
+               need_sens = prm[7], need_adc = prm[8], K1 = prm[9];
+    const uint nch = @NC@ > 0 ? @NC@ : nc;  // coil rows of sens and hb (padded with zero coils)
+    const bool active = i < n;
+    const uint j = active ? i : 0;
+    State st;
+    st.p = load_spin(spins, n, j);
+    if (@V@ != 0 && mt) st.b = load_pool(pool, n, j);
+    if (@V@ != 0 && mode)
+        for (uint c = 0; c < 7; ++c) st.conc.c[c] = conc[c * n + j];
+    if (!active) st.p.pd = 0.0f, st.b.f = 0.0f;
+    float lx = active ? LAM[j] : 0.0f, ly = active ? LAM[n + j] : 0.0f, lz = active ? LAM[2 * n + j] : 0.0f;
+    float lb = active ? LAM[3 * n + j] : 0.0f;
+    Acc g = Acc{};
+    RCache rc;
+    __shared__ float tg[RBLOCK * 4 * 256];
+    const uint sgid = group * nsg + sg;  // this warp's row of the segment partials
+    float gcr[@NC@ + 1], gci[@NC@ + 1];
+    for (uint c = 0; c < @NC@; ++c) gcr[c] = 0.0f, gci[c] = 0.0f;
+    const uint nb = (s1 - s0 + RBLOCK - 1) / RBLOCK;
+    for (int blk = int(nb) - 1; blk >= 0; --blk) {
+        const uint b0 = s0 + uint(blk) * RBLOCK, b1 = min(b0 + RBLOCK, s1);
+        const float* r = R + uint(blk) * rrows<@V@>() * n;
+        st.mx = active ? r[j] : 0.0f, st.my = active ? r[n + j] : 0.0f, st.mz = active ? r[2 * n + j] : 0.0f;
+        st.mb = (rrows<@V@>() > 3 && active) ? r[3 * n + j] : 0.0f;
+        st.lx = st.ly = st.lz = st.lb = 0.0f;
+        st.cache = Cache{}, st.zc = ZCache{};
+        for (uint s = b0; s < b1; ++s) {
+            const float* q = segs + 8 * s;
+            const int f = flags[s];
+            float* t = tg + (s - b0) * 4 * 256;
+            t[tid] = st.mx, t[256 + tid] = st.my, t[512 + tid] = st.mz, t[768 + tid] = st.mb;
+            const float bz = offset(st.p, st.conc, @V@ == 0 ? 0u : mode, q);
+            if (@V@ != 0 && mt)
+                step_mt(q, f, bz, frf[s], st.mx, st.my, st.mz, st.mb, st.lx, st.ly, st.lz, st.lb, st.p, st.b, line,
+                        log_f, st.cache, st.zc);
+            else
+                step(q, f, bz, st.mx, st.my, st.mz, st.lx, st.ly, st.lz, st.p, st.cache);
+            if ((f & 2) && need_adc && need_sens) {  // coil gradients from the sample (before the spoil)
+                const float* h = hb + 2 * nch * uint(adc_row[s]);
+                const float ox = st.mx + st.lx, oy = st.my + st.ly;
+                if (@NC@ > 0) {
+                    for (uint c = 0; c < @NC@; ++c) gcr[c] += h[2 * c] * ox + h[2 * c + 1] * oy, gci[c] += h[2 * c + 1] * ox - h[2 * c] * oy;
+                } else if (active) {
+                    for (uint c = 0; c < nc; ++c)
+                        GC[2 * c * n + j] += h[2 * c] * ox + h[2 * c + 1] * oy, GC[(2 * c + 1) * n + j] += h[2 * c + 1] * ox - h[2 * c] * oy;
+                }
+            }
+            if (f & 4) st.mx = st.my = st.lx = st.ly = 0.0f;
+        }
+        // the samples' source terms dL/dm = sum_c h_c conj(sens_c), coils outermost
+        float ur[RBLOCK], ui[RBLOCK];
+        int row[RBLOCK];
+        bool any = false;
+#pragma unroll
+        for (uint k = 0; k < RBLOCK; ++k) {
+            ur[k] = ui[k] = 0.0f;
+            row[k] = (need_adc && b0 + k < b1 && (flags[b0 + k] & 2)) ? adc_row[b0 + k] : -1;
+            any = any || row[k] >= 0;
+        }
+        if (any) {
+            for (uint c = 0; c < nch; ++c) {
+                const float a = sens[2 * c * n + j], b = sens[(2 * c + 1) * n + j];
+#pragma unroll
+                for (uint k = 0; k < RBLOCK; ++k) {
+                    if (row[k] < 0) continue;
+                    const float* h = hb + 2 * nch * uint(row[k]) + 2 * c;
+                    ur[k] += h[0] * a + h[1] * b, ui[k] += h[1] * a - h[0] * b;
+                }
+            }
+        }
+        for (int s = int(b1) - 1; s >= int(b0); --s) {
+            const float* q = segs + 8 * s;
+            const int f = flags[s];
+            const float* t = tg + (uint(s) - b0) * 4 * 256;
+            const float x0 = t[tid], y0 = t[256 + tid], z0 = t[512 + tid], v0 = t[768 + tid];
+            if (f & 4) lx = ly = 0.0f;
+            if ((f & 2) && need_adc) {  // the sample: lambda += dL/dm
+                const uint k = uint(s) - b0;
+                lx += k == 0 ? ur[0] : (k == 1 ? ur[1] : (k == 2 ? ur[2] : ur[3]));
+                ly += k == 0 ? ui[0] : (k == 1 ? ui[1] : (k == 2 ? ui[2] : ui[3]));
+            }
+            SegG sgv = SegG{};
+            reverse_seg<@V@>(q, f, (@V@ != 0 && mt) ? frf[s] : 0.0f, x0, y0, z0, v0, st.p, st.b, st.conc, mode, mt != 0,
+                             line, log_f, lx, ly, lz, lb, g, sgv, rc);
+            // one partial per warp and segment (seg_reduce sums them in order)
+            float* out = GSEG + (sgid * K1 + (uint(s) - s0)) * 8;
+            if (need_seg == 2 || (need_seg == 1 && (f & 1))) {
+                const float v[8] = {sgv.dt, sgv.rx, sgv.ry, sgv.gx, sgv.gy, sgv.gz, sgv.off, sgv.frf};
+#pragma unroll
+                for (uint k = 0; k < 8; ++k) {
+                    const float tt = warp_sum(active ? v[k] : 0.0f);
+                    if (lane == 0) out[k] = tt;
+                }
+            } else if (need_seg == 1 && lane < 8) {  // the partials buffer is reused: this segment contributes nothing
+                out[lane] = 0.0f;
+            }
+            if (s % 64 == 0 && active) {
+                acc_flush(g, GS, n, j);
+                for (uint c = 0; need_sens && c < @NC@; ++c)
+                    GC[2 * c * n + j] += gcr[c], GC[(2 * c + 1) * n + j] += gci[c], gcr[c] = gci[c] = 0.0f;
+            }
+        }
+    }
+    if (active) {
+        acc_flush(g, GS, n, j);
+        for (uint c = 0; need_sens && c < @NC@; ++c) GC[2 * c * n + j] += gcr[c], GC[(2 * c + 1) * n + j] += gci[c];
+        LAM[j] = lx, LAM[n + j] = ly, LAM[2 * n + j] = lz, LAM[3 * n + j] = lb;
+    }
+}

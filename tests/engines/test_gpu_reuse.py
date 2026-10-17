@@ -9,7 +9,7 @@ import torch
 import blochparty as bp
 from blochparty.exchange import BoundPool
 
-from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
+from blochparty.engines.gpu import driver  # the GPU engines' shared driver (_readout_runs, _reused_pulses)
 from helpers import rel
 
 
@@ -42,7 +42,7 @@ CASES = {  # (sequence, bound pool, distinct reused pulses)
 def test_same_result_as_stepping_every_pulse(gpu, name):
     make, mt, distinct = CASES[name]
     seq = make().merge_free()
-    groups = metal._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
+    groups = driver._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
     assert len(groups) == distinct  # the case does reuse pulses
     ph = phantom(mt)
     coils = bp.birdcage_sensitivities(ph.pos, 8).to(torch.complex64)
@@ -63,7 +63,7 @@ def test_same_result_as_stepping_every_pulse(gpu, name):
 def test_phases_and_lengths_found():
     """RF spoiling: one pulse, every TR at its own phase (quadratic increments of 117 deg)."""
     seq = bp.gre_2d(16, spoiling="rf", slice_thickness=5e-3, n_dummy=2)
-    ((a, k, occ),) = metal._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
+    ((a, k, occ),) = driver._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
     assert len(occ) == 18 and k == sum(seq.is_rf[a:a + k])
     rf = torch.complex(seq.rf[:, 0].double(), seq.rf[:, 1].double())
     for s, ph in occ:
@@ -78,7 +78,7 @@ def test_dispatch_boundaries_and_memory_cap(gpu, monkeypatch):
     out = gpu.simulate(p32, s32, pulses="reuse", chunk=7)  # chunk ends inside pulses
     assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
     K, threads = 20, 256 * -(-len(ph) // 256)
-    monkeypatch.setattr(metal, "PULSE_MEMORY", 4 * K * threads * 2)  # two pulses reused, the rest stepped
+    monkeypatch.setattr(driver, "PULSE_MEMORY", 4 * K * threads * 2)  # two pulses reused, the rest stepped
     out = gpu.simulate(p32, s32, pulses="reuse")
     assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
 
