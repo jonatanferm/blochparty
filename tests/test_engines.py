@@ -8,7 +8,7 @@ The matrix is parsed from the document. For every feature row there is a small c
   (``TOL``). For the core itself the cell says it runs; its references are the other test files
   named in the document.
 * ``✓`` gradients: core: autograd matches a (Richardson-extrapolated) central difference of the
-  same loss along a random direction; Metal and chunked: their gradients match the core's autograd.
+  same loss along a random direction; Metal, CUDA and chunked: their gradients match the core's autograd.
 * ``✗``: the engine raises ``NotImplementedError`` (forward: on the plain case; gradients: on the
   case with its tensors requiring grad, grad mode on).
 * ``–``: not applicable, not checked.
@@ -41,15 +41,15 @@ from test_restriction import sgp
 
 f64 = torch.float64
 DOC = Path(__file__).resolve().parents[1] / "docs" / "ENGINES.md"
-ENGINES = ("core", "metal", "chunked")
+ENGINES = ("core", "metal", "cuda", "chunked")
 # agreement with the core, max |engine - core| / scale per output (``errors``); observed worst cases
 # in docs/ENGINES.md ("Agreement")
-TOL = {"metal": 5e-5, "chunked": 1e-12}
-# Metal with walking spins (diffusion): the kernel walks absolute positions in float32, which
+TOL = {"metal": 5e-5, "cuda": 5e-5, "chunked": 1e-12}
+# Metal and CUDA with walking spins (diffusion): the kernel walks absolute positions in float32, which
 # perturbs every spin's phase; the per-spin states feel it most, the signal averages it
 TOL_METAL_WALK = {"signal": 2e-4, "states": 3e-3}
-GRAD_TOL = {"core": 1e-6, "chunked": 1e-12, "metal": 2e-4}  # core: vs finite differences
-# metal: its float32 adjoint vs the core's float64 autograd
+GRAD_TOL = {"core": 1e-6, "chunked": 1e-12, "metal": 2e-4, "cuda": 2e-4}  # core: vs finite differences
+# metal, cuda: the float32 adjoint vs the core's float64 autograd
 
 
 # ---------------------------------------------------------------- the document
@@ -436,6 +436,11 @@ def engine(name: str):
         if not metal.available():
             pytest.skip("no Apple GPU (MPS)")
         return metal.simulate_metal
+    if name == "cuda":
+        cuda = pytest.importorskip("blochparty.cuda")
+        if not cuda.available():
+            pytest.skip("no CUDA device with NVRTC")
+        return cuda.simulate_cuda
     if name == "chunked":
         return lambda *a, seed=None, **k: simulate_chunked(*a, spin_chunk=4, **k)
     raise ValueError(name)
@@ -531,7 +536,7 @@ def test_cell(feature, eng, kind, mark):
         assert set(out) == set(ref)
         err = errors(out, ref)
         tol = {k: TOL[eng] for k in ref}
-        if eng == "metal" and case.phantom.diffusion is not None:
+        if eng in ("metal", "cuda") and case.phantom.diffusion is not None:
             tol = {k: TOL_METAL_WALK["signal" if k == "signal" else "states"] for k in ref}
         assert all(err[k] < tol[k] for k in ref), err
         return

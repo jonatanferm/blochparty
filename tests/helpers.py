@@ -28,3 +28,31 @@ def head_3d(n=12, n_coils=4):
     g = torch.Generator().manual_seed(1)
     phantom = replace(phantom, db0=(torch.rand(len(phantom), generator=g, dtype=torch.float64) - 0.5) * 100)
     return phantom, bp.birdcage_sensitivities(phantom.pos, n_coils=n_coils)
+
+
+def gpu_engines():
+    """pytest params "metal" (Apple GPU) and "cuda" (NVIDIA), each skipped where it is not available: the
+    GPU engines share their Python driver, so their tests are one set run on each."""
+    import importlib
+
+    import pytest
+
+    params = []
+    for name, reason in (("metal", "no Apple GPU (MPS)"), ("cuda", "no CUDA device with NVRTC")):
+        try:
+            ok = importlib.import_module(f"blochparty.{name}").available()
+        except Exception:
+            ok = False
+        params.append(pytest.param(name, marks=pytest.mark.skipif(not ok, reason=reason), id=name))
+    return params
+
+
+class GPU:
+    """A GPU engine by name: ``simulate`` is ``simulate_metal`` or ``simulate_cuda``."""
+
+    def __init__(self, name: str):
+        import importlib
+
+        self.name = name
+        self.module = importlib.import_module(f"blochparty.{name}")
+        self.simulate = getattr(self.module, f"simulate_{name}")

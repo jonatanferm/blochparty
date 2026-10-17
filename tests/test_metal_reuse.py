@@ -9,9 +9,14 @@ import torch
 import blochparty as bp
 from blochparty.exchange import BoundPool
 
-metal = pytest.importorskip("blochparty.metal")
-if not metal.available():
-    pytest.skip("no Apple GPU", allow_module_level=True)
+from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
+from helpers import GPU, gpu_engines
+
+
+@pytest.fixture(params=gpu_engines())
+def gpu(request):
+    return GPU(request.param)
+
 
 f32, f64 = torch.float32, torch.float64
 
@@ -43,7 +48,7 @@ CASES = {  # (sequence, bound pool, distinct reused pulses)
 
 
 @pytest.mark.parametrize("name", list(CASES))
-def test_same_result_as_stepping_every_pulse(name):
+def test_same_result_as_stepping_every_pulse(gpu, name):
     make, mt, distinct = CASES[name]
     seq = make().merge_free()
     groups = metal._reused_pulses(seq, torch.tensor(seq.is_rf, dtype=torch.int32), None)
@@ -51,14 +56,14 @@ def test_same_result_as_stepping_every_pulse(name):
     ph = phantom(mt)
     coils = bp.birdcage_sensitivities(ph.pos, 8).to(torch.complex64)
     p32, s32 = ph.to(f32), seq.to(f32)
-    step = metal.simulate_metal(p32, s32, coils)
-    reuse = metal.simulate_metal(p32, s32, coils, pulses="reuse")
+    step = gpu.simulate(p32, s32, coils)
+    reuse = gpu.simulate(p32, s32, coils, pulses="reuse")
     print(f"{name}: reuse vs step {rel(reuse.signal, step.signal):.1e}, m {rel(reuse.m, step.m):.1e}")
     assert rel(reuse.signal, step.signal) < 1e-5  # measured 9e-8 to 3e-7
     assert rel(reuse.m, step.m) < 2e-5  # 6e-7 to 3e-6
     if mt:
         assert rel(reuse.m_bound, step.m_bound) < 2e-5
-    both = metal.simulate_metal(p32, s32, coils, pulses="reuse", readouts="nufft")
+    both = gpu.simulate(p32, s32, coils, pulses="reuse", readouts="nufft")
     assert rel(both.signal, step.signal) < 1e-4  # the NUFFT's own level
     core = bp.simulate(ph, seq, coils.to(torch.complex128))
     assert rel(reuse.signal.to(core.signal.dtype), core.signal) < 2e-4
@@ -74,24 +79,24 @@ def test_phases_and_lengths_found():
         assert torch.allclose(rf[s:s + k], rf[a:a + k] * torch.exp(torch.tensor(1j * ph)), rtol=0, atol=1e-6 * rf.abs().max())  # the grouping tolerance
 
 
-def test_dispatch_boundaries_and_memory_cap(monkeypatch):
+def test_dispatch_boundaries_and_memory_cap(gpu, monkeypatch):
     seq = CASES["TSE, bound pool, 16 slices"][0]().merge_free()
     ph = phantom(True)
     p32, s32 = ph.to(f32), seq.to(f32)
-    ref = metal.simulate_metal(p32, s32, pulses="reuse")
-    out = metal.simulate_metal(p32, s32, pulses="reuse", chunk=7)  # chunk ends inside pulses
+    ref = gpu.simulate(p32, s32, pulses="reuse")
+    out = gpu.simulate(p32, s32, pulses="reuse", chunk=7)  # chunk ends inside pulses
     assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
     K, threads = 20, 256 * -(-len(ph) // 256)
     monkeypatch.setattr(metal, "PULSE_MEMORY", 4 * K * threads * 2)  # two pulses reused, the rest stepped
-    out = metal.simulate_metal(p32, s32, pulses="reuse")
+    out = gpu.simulate(p32, s32, pulses="reuse")
     assert rel(out.signal, ref.signal) < 1e-5 and rel(out.m, ref.m) < 1e-5
 
 
-def test_refuses_what_it_does_not_cover():
+def test_refuses_what_it_does_not_cover(gpu):
     seq = CASES["TSE"][0]()
     ph = phantom()
     ph.diffusion = torch.full((len(ph),), 1e-9, dtype=f64)
     with pytest.raises(ValueError, match="static spins without diffusion"):
-        metal.simulate_metal(ph.to(f32), seq.to(f32), pulses="reuse")
+        gpu.simulate(ph.to(f32), seq.to(f32), pulses="reuse")
     with pytest.raises(ValueError, match="pulses must be"):
-        metal.simulate_metal(phantom().to(f32), seq.to(f32), pulses="cached")
+        gpu.simulate(phantom().to(f32), seq.to(f32), pulses="cached")

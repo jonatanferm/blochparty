@@ -16,6 +16,7 @@ uv run python examples/optimize_contrast.py  # gradient descent through the simu
 uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
 uv run python benchmarks/bench.py --backend metal  # same, on the Apple GPU
 uv run python benchmarks/bench.py --grad --backend metal  # forward + backward through the GPU adjoint
+uv run python benchmarks/bench.py --backend cuda   # same, on an NVIDIA GPU (blochparty.cuda)
 uv run python examples/gre3d_128.py        # full 3D 128^3 on the Apple GPU, ~3 min
 ```
 
@@ -50,6 +51,9 @@ cell by `tests/test_engines.py`.
   no near-resonance cut) equals the generalized model to 5e-5 on 50 ms pulses and runs on the GPU
   (ROADMAP M1c). Differentiable through a hand-written adjoint on the GPU (sequence, phantom, coils,
   `m_init`, rate-model bound pool, scanner field model; not moving spins or free pools).
+- `blochparty.cuda.simulate_cuda`: the Metal engine on an NVIDIA GPU, with the same arguments,
+  results, adjoint and limits (the same device code and driver; kernels compiled at run time by
+  NVRTC). An RTX 4090 runs the 3D 64^3 GRE benchmark in 0.5 s, against 2.4 s for Metal on an M4.
 - `bp.simulate_chunked`: the core with a backward pass that holds one chunk of spins at a time,
   for gradients on large phantoms (no exchange, diffusion, motion, scanner model, `FieldMaps` or
   `m_init`).

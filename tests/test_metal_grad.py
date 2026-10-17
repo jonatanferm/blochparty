@@ -12,8 +12,15 @@ import blochparty as bp
 from test_bloch_vs_ode import random_case
 from helpers import with_readout
 
-metal = pytest.importorskip("blochparty.metal")
-pytestmark = pytest.mark.skipif(not metal.available(), reason="no Apple GPU (MPS)")
+from blochparty import metal  # the GPU engines' shared driver (helpers such as _readout_runs)
+from helpers import GPU, gpu_engines
+
+
+@pytest.fixture(params=gpu_engines())
+def gpu(request):
+    return GPU(request.param)
+
+
 f64 = torch.float64
 
 
@@ -60,50 +67,50 @@ def gradients(sim, phantom, seq, coils=None, m_init=None, scanner=None, which="b
     return {k: g for k, g in zip(leaves, grads)}
 
 
-def compare(phantom, seq, tol, **kw):
-    ref, out = gradients(bp.simulate, phantom, seq, **kw), gradients(metal.simulate_metal, phantom, seq, **kw)
+def compare(gpu, phantom, seq, tol, **kw):
+    ref, out = gradients(bp.simulate, phantom, seq, **kw), gradients(gpu.simulate, phantom, seq, **kw)
     errors = {k: rel(out[k], ref[k]) for k in ref if ref[k] is not None and ref[k].abs().max() > 0}
     assert max(errors.values()) < tol, errors
     return errors
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])
-def test_random_rf_gradients_off_resonance(seed):
+def test_random_rf_gradients_off_resonance(gpu, seed):
     ph, seq = random_case(seed)
     seq = with_readout(seq)
     seq = replace(seq, b0_offset=0.5 * torch.sin(torch.arange(len(seq), dtype=f64)))
     ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64))
     m0 = torch.randn(len(ph), 3, dtype=f64, generator=torch.Generator().manual_seed(5))
-    compare(ph, seq, 3e-5, coils=bp.birdcage_sensitivities(ph.pos, 3), m_init=m0)
+    compare(gpu, ph, seq, 3e-5, coils=bp.birdcage_sensitivities(ph.pos, 3), m_init=m0)
 
 
 @pytest.mark.parametrize("which", ["signal", "m"])
-def test_one_output_only(which):
+def test_one_output_only(gpu, which):
     ph, seq = random_case(1)
-    compare(ph, with_readout(seq), 3e-5, coils=bp.birdcage_sensitivities(ph.pos, 2), which=which)
+    compare(gpu, ph, with_readout(seq), 3e-5, coils=bp.birdcage_sensitivities(ph.pos, 2), which=which)
 
 
 @pytest.mark.parametrize("n_coils", [1, 3, 8, 20])
-def test_gre_2d_coils(n_coils):
+def test_gre_2d_coils(gpu, n_coils):
     # coil gradients in registers up to 16 coils (padded: 3 -> 4), from memory above (20)
     ph = bp.shepp_logan(16)
     seq = bp.gre_2d(16, n_dummy=5, spoiling="rf", ramps=True)
     coils = torch.randn(len(ph), n_coils, dtype=torch.complex128, generator=torch.Generator().manual_seed(0))
-    compare(ph, seq, 2e-4, coils=coils)
+    compare(gpu, ph, seq, 2e-4, coils=coils)
 
 
 @pytest.mark.parametrize("shape", ["lorentzian", "superlorentzian"])
-def test_rate_model_bound_pool(shape):
+def test_rate_model_bound_pool(gpu, shape):
     from test_exchange import bm_case
 
     ph, seq = bm_case(0, shape)
     ph = replace(ph, b1=torch.linspace(0.8, 1.2, len(ph), dtype=f64))
     m0 = torch.rand(len(ph), 4, dtype=f64, generator=torch.Generator().manual_seed(2))
-    compare(ph, with_readout(seq), 1e-3, coils=bp.birdcage_sensitivities(ph.pos, 2), m_init=m0)
+    compare(gpu, ph, with_readout(seq), 1e-3, coils=bp.birdcage_sensitivities(ph.pos, 2), m_init=m0)
 
 
 @pytest.mark.parametrize("concomitant", ["leading", "exact"])
-def test_scanner_field_model(concomitant):
+def test_scanner_field_model(gpu, concomitant):
     # through the encoding positions and concomitant coefficients to the hardware parameters
     from test_fields_nonlinearity import distortion
 
@@ -113,7 +120,7 @@ def test_scanner_field_model(concomitant):
     seq = with_readout(seq)
     seq = replace(seq, grad=seq.grad * 30)
     out = {}
-    for name, sim in (("core", bp.simulate), ("metal", metal.simulate_metal)):
+    for name, sim in (("core", bp.simulate), ("metal", gpu.simulate)):
         nl = distortion()
         alpha = nl.alpha.clone().requires_grad_()
         b0 = torch.tensor(0.55, dtype=f64, requires_grad=True)
@@ -123,11 +130,11 @@ def test_scanner_field_model(concomitant):
     assert rel(out["metal"][0], out["core"][0]) < 2e-4 and rel(out["metal"][1], out["core"][1]) < 1e-4
 
 
-def test_static_field_maps():
+def test_static_field_maps(gpu):
     zz, yy, xx = torch.meshgrid(torch.linspace(-0.1, 0.1, 4, dtype=f64), torch.linspace(-0.3, 0.3, 9, dtype=f64),
                                 torch.linspace(-0.3, 0.3, 9, dtype=f64), indexing="ij")
     out = {}
-    for name, sim in (("core", bp.simulate), ("metal", metal.simulate_metal)):
+    for name, sim in (("core", bp.simulate), ("metal", gpu.simulate)):
         b0 = (40 * xx**2 - 20 * yy).requires_grad_()
         maps = bp.FieldMaps((-0.3, -0.3, -0.1), (0.075, 0.075, 0.2 / 3), b0=b0, b1=1 + 0.3 * xx)
         ph, seq = random_case(2)
@@ -136,17 +143,17 @@ def test_static_field_maps():
     assert rel(out["metal"], out["core"]) < 3e-5
 
 
-def test_checkpoint_interval_and_runs_do_not_change_gradients():
+def test_checkpoint_interval_and_runs_do_not_change_gradients(gpu):
     # per-spin sums flushed every 64 segments, per-segment reductions in a fixed order: bit for bit
     ph = bp.shepp_logan(16)
     seq = bp.gre_2d(16, n_dummy=5, spoiling="rf", ramps=True)
     coils = bp.birdcage_sensitivities(ph.pos, 4)
-    runs = [gradients(metal.simulate_metal, ph, seq, coils=coils, checkpoint_every=k) for k in (64, 128, 640, 64)]
+    runs = [gradients(gpu.simulate, ph, seq, coils=coils, checkpoint_every=k) for k in (64, 128, 640, 64)]
     for r in runs[1:]:
         assert all(torch.equal(r[k], runs[0][k]) for k in r)
 
 
-def test_ernst_angle_by_gradient_descent():
+def test_ernst_angle_by_gradient_descent(gpu):
     # as test_gradients.test_gradient_descent_finds_ernst_angle, through the GPU adjoint
     import math
 
@@ -161,7 +168,7 @@ def test_ernst_angle_by_gradient_descent():
         for _ in range(150):
             b.rf(1e-6, flip_deg=flip).delay(te).spoil().delay(tr - te - 1e-6)
         b.rf(1e-6, flip_deg=flip).delay(te).readout(1, 1e-9)
-        loss_ = -metal.simulate_metal(spin, b.build()).signal.abs().sum()
+        loss_ = -gpu.simulate(spin, b.build()).signal.abs().sum()
         loss_.backward()
         return loss_
 
@@ -170,7 +177,7 @@ def test_ernst_angle_by_gradient_descent():
     assert abs(abs(float(flip.detach())) - math.degrees(math.acos(math.exp(-tr / t1)))) < 0.01
 
 
-def test_unsupported_inputs_raise():
+def test_unsupported_inputs_raise(gpu):
     ph, seq = random_case(0)
     pd = ph.pd.clone().requires_grad_()
     n = len(ph)
@@ -179,6 +186,6 @@ def test_unsupported_inputs_raise():
                   {"pools": (bp.ExchangePool(f=0.01, k=100.0, t1=1.0, t2=0.01, dw=100.0),)},
                   {"bound": bp.BoundPool(f=0.1, k=30.0, t1=1.0, t2=12e-6, model="generalized")}):
         with pytest.raises(NotImplementedError):
-            metal.simulate_metal(replace(ph, pd=pd, **extra), seq)
+            gpu.simulate(replace(ph, pd=pd, **extra), seq)
     with pytest.raises(ValueError, match="multiple of 64"):
-        metal.simulate_metal(replace(ph, pd=pd), seq, checkpoint_every=100)
+        gpu.simulate(replace(ph, pd=pd), seq, checkpoint_every=100)

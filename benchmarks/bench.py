@@ -4,6 +4,7 @@
     uv run python benchmarks/bench.py --cases 3d-64    # pick cases
     uv run python benchmarks/bench.py --record         # also append to history.jsonl
     uv run python benchmarks/bench.py --backend metal  # Apple GPU (blochparty.metal); --grad: its adjoint
+    uv run python benchmarks/bench.py --backend cuda   # NVIDIA GPU (blochparty.cuda); --grad: its adjoint
     uv run python benchmarks/bench.py --repeat 3       # fastest of 3 runs per case (GPU timings vary ~10 %)
 
 Throughput is reported as spin-segments/s (work the simulator does) and as
@@ -37,6 +38,7 @@ CASES = {
     "3d-32": (3, 32),
     "3d-48": (3, 48),
     "3d-64": (3, 64),
+    "3d-96": (3, 96),  # a big-GPU case (~0.4 M spins)
 }
 DEFAULT = ["2d-96", "3d-32", "3d-48"]
 HISTORY = Path(__file__).with_name("history.jsonl")
@@ -117,9 +119,9 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=DEFAULT, choices=list(CASES))
     p.add_argument("--dtype", default="float32", choices=["float32", "float64"])
     p.add_argument("--device", default="cpu")
-    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "metal"])
+    p.add_argument("--backend", default="torch", choices=["torch", "chunked", "metal", "cuda"])
     p.add_argument("--grad", action="store_true", help="time forward + backward instead of forward")
-    p.add_argument("--checkpoint-every", type=int, default=None, help="metal --grad: checkpoint interval")
+    p.add_argument("--checkpoint-every", type=int, default=None, help="metal / cuda --grad: checkpoint interval")
     p.add_argument("--repeat", type=int, default=1, help="run each case this many times, keep the fastest")
     p.add_argument("--record", action="store_true", help="append results to history.jsonl")
     args = p.parse_args(argv)
@@ -140,6 +142,17 @@ def main(argv=None):
                              bp.birdcage_sensitivities(warm.pos, n_coils=8))
         simulate = functools.partial(metal.simulate_metal, checkpoint_every=args.checkpoint_every)
         threads, backend = "GPU", "metal (Apple GPU)"
+    elif args.backend == "cuda":
+        from blochparty import cuda
+
+        if args.dtype != "float32":
+            p.error("--backend cuda is float32")
+        # compile (or load from the disk cache) and run the first kernels outside the timed region
+        warm = bp.shepp_logan(8, dtype=torch.float32)
+        cuda.simulate_cuda(warm, bp.gre_cartesian((8, 8), n_dummy=1, dtype=torch.float32),
+                           bp.birdcage_sensitivities(warm.pos, n_coils=8))
+        simulate = functools.partial(cuda.simulate_cuda, checkpoint_every=args.checkpoint_every)
+        threads, backend = "GPU", f"cuda ({torch.cuda.get_device_name()})"
     if args.grad:
         if args.record:
             p.error("--record tracks forward runs only")
@@ -167,7 +180,7 @@ def main(argv=None):
                  "dtype": args.dtype, "threads": threads, "peak_rss_mb": round(peak_mb),
                  "projected_128_min": round(proj / 60, 1), "results": results}
         if args.backend != "torch":
-            entry.update(backend=args.backend, block=args.block)
+            entry.update(backend=args.backend)
         if args.repeat > 1:
             entry.update(repeat=args.repeat)
         with HISTORY.open("a") as f:
