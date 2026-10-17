@@ -8,8 +8,9 @@ import torch
 
 import blochparty as bp
 
-import simulate_heads as SH
-import prepare_ixi as P
+pytest.importorskip("nibabel")  # prepare_ixi reads NIfTI: the optional anatomy extra
+import simulate_heads as SH  # noqa: E402
+import prepare_ixi as P  # noqa: E402
 
 
 def test_display_is_posterior_up():
