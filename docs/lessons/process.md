@@ -227,7 +227,9 @@
 - **The documented sync command is a whitelist by omission** (2026-10-17): `rsync` of the repo excluded only
   `validation/real/data`, so it also carried `validation/anatomy/data` (11 GB: IXI, BrainWeb, AHEAD; the mini held
   7.5 GB of it from earlier jobs) and the fastMRI `.eml`, whose signed links had been sitting world-readable in the
-  mini's mirror on a machine another user shares. Stopped before any data file landed; the `.eml` copy deleted; the
-  command in `CLAUDE.md` now excludes the data folders, `*.eml` and the installers. On macOS, `find -cmin` cannot
-  tell what rsync wrote (it rewrites every file's metadata); the birth time (`stat -f %B`) can. And moving files needs
-  `rsync --delete` on that folder, or the mirror keeps both copies and pytest collects the old ones.
+  mini's mirror on a machine another user shares. Stopped after a few minutes; the `.eml` copy deleted; the
+  command in `CLAUDE.md` now excludes the data folders, `*.eml` and the installers. Afterwards nothing tells what a
+  sync wrote: `find -cmin` matches every file whose metadata rsync reset, and the birth time is no better, because
+  this rsync preserves creation times (a file known to be new showed nine days old). Before copying data, list what
+  will be copied (`rsync -n`) and keep that list. And moving files needs `rsync --delete` on that folder, or the
+  mirror keeps both copies and pytest collects the old ones.
