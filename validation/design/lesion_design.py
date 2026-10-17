@@ -252,11 +252,18 @@ def main():
         choices=("uniform", "gauss"),
         help="which K lines every arm acquires (sampled_lines)",
     )
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=0, help="the networks' initialisation, noise and order (and the mask)")
+    ap.add_argument(
+        "--mask-seed",
+        type=int,
+        default=None,
+        help="the gauss line mask's seed (default --seed): fixed, it repeats a run on the same lines with new training seeds",
+    )
     ap.add_argument("--arms", default="A,B,G,C")
     args = ap.parse_args()
+    mask_seed = args.seed if args.mask_seed is None else args.mask_seed
     torch.manual_seed(args.seed)
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     data, dropped = load_index(args.slabs, args.min_lesion_px)
     train, test = data["train"], data["test"]
     y_train, y_test = [r["label"] for r in train], [r["label"] for r in test]
@@ -266,7 +273,7 @@ def main():
     )
     args.out.mkdir(parents=True, exist_ok=True)
     lines = max(int(round(args.fraction * NX)), 2)
-    mask = sampled_lines(NX, lines, args.sampling, seed=args.seed)
+    mask = sampled_lines(NX, lines, args.sampling, seed=mask_seed)
     cols = torch.nonzero(mask).squeeze(1)
     results = {
         "n": {"train": len(train), "test": len(test)},
@@ -279,6 +286,8 @@ def main():
         "epochs": args.epochs,
         "seeds": args.seeds,
         "steps": args.steps,
+        "seed": args.seed,
+        "mask_seed": mask_seed,
     }
     print(
         f"fraction {args.fraction}: {lines} of {NX} lines, {args.sampling}; the TSE keeps ky indices {cols.tolist()}; front {args.front}; "
@@ -404,7 +413,7 @@ def main():
                 gre0 = learnable_gre(flips0, ky0, te0, tr0)
             k0 = cached(
                 f"gre{lines}_{flip:g}_{te_ms:g}_{tr_ms:g}"
-                + ("" if args.sampling == "uniform" else f"_{args.sampling}{args.seed}"),
+                + ("" if args.sampling == "uniform" else f"_{args.sampling}{mask_seed}"),
                 lambda ph, seq=gre0: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu(),
             )
             r, nets = fit(
