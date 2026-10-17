@@ -223,3 +223,11 @@
   every later reference to the "synthetic" net (its in-domain score, the lesion test, the saved weights) was the
   fine-tuned one, and two rows of a table agreed to the digit without anyone noticing for two days. Copy before
   fine-tuning, and treat two identical rows as a bug, not a coincidence.
+
+- **The documented sync command is a whitelist by omission** (2026-10-17): `rsync` of the repo excluded only
+  `validation/real/data`, so it also carried `validation/anatomy/data` (11 GB: IXI, BrainWeb, AHEAD; the mini held
+  7.5 GB of it from earlier jobs) and the fastMRI `.eml`, whose signed links had been sitting world-readable in the
+  mini's mirror on a machine another user shares. Stopped before any data file landed; the `.eml` copy deleted; the
+  command in `CLAUDE.md` now excludes the data folders, `*.eml` and the installers. On macOS, `find -cmin` cannot
+  tell what rsync wrote (it rewrites every file's metadata); the birth time (`stat -f %B`) can. And moving files needs
+  `rsync --delete` on that folder, or the mirror keeps both copies and pytest collects the old ones.

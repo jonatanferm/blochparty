@@ -48,7 +48,9 @@ uv run python validation/real/fetch_data.py && uv run python validation/real/nis
 Long runs (the full suite, GPU validation and benchmarks) go to the Mac mini (`ssh mini`, Apple
 M4, 16 GB): a mirror at `~/projects/blochparty` with uv at `~/.local/bin/uv`. Sync with
 `rsync -az --exclude .git --exclude .venv --exclude __pycache__ --exclude outputs --exclude .claude --exclude
-validation/real/data ./ mini:projects/blochparty/` (copy only the data a job needs), run with
+validation/real/data --exclude validation/anatomy/data --exclude '*.eml' --exclude '*.dmg' --exclude '*.pkg' ./
+mini:projects/blochparty/` (copy only the data a job needs; the anatomy data is 11 GB, the `.eml` holds signed
+links; after moving or deleting tests also `rsync -az --delete tests/ mini:projects/blochparty/tests/`), run with
 `ssh mini 'cd ~/projects/blochparty && ~/.local/bin/uv run pytest -q'`, long jobs under `nohup`
 with a log. Commit from this checkout only. Small runs here are fine.
 
