@@ -2601,3 +2601,25 @@ controls).
 - **The third sweep** (`design3.sh rss 0.5 0.3 0.2 1.0`, started 00:14): fractions 0.5, 0.3, 0.2 and 1.0, in that order,
   front `rss`, SNR 20 (the TSE's image SNR is ~2.7 x that), 100 epochs x 3 seeds for A, B, G, 400 steps for C. Each
   fraction is 1-2 h on the mini (the TSE acquisition of a slab is 0.45 s; a joint step with 8 slabs at 64 lines 10 s).
+- **50 % of k-space, the cold start (design3_rss_f0.5, 515 train / 129 test slabs, SNR 20):** A (TSE + CG-SENSE + CNN)
+  AUC 0.81 (seeds 0.73 / 0.83 / 0.87; accuracy 0.76), B (the same 32 TSE lines through the adjoint) 0.72 (0.68-0.75),
+  G (the generic GRE, 25 deg / TE 6 / TR 15 ms, 32 lines evenly spread) 0.50 on all three seeds, C from that start
+  0.48 after 400 joint steps (train AUC 0.52): TE 5.97 -> 6.14 ms, TR 15.0 -> 17.4 ms, the flips spread to 16-32 deg,
+  the line positions unchanged (std 18.7 cycles throughout). The reason is physics, not the optimiser's step: at 25 deg
+  / TR 15 ms the lesion (T1 1.36 s, PD 0.85) is 16 % darker than white matter, the same as grey matter, so the net
+  cannot learn it, and a chance-level net gives the design parameters a gradient that is noise (the per-line flips
+  random-walk, TE does not go anywhere). The TSE's 15 s against the GRE's 0.6-0.7 s is the price difference the
+  arms do not yet pay for. Changed (0421b16): `--starts` evaluates six generic GRE contrasts (25/6/15, 10/6/15,
+  25/20/30, 15/30/40, 15/45/55, 15/60/70 as flip deg / TE ms / TR ms) with one seed each, the best training AUC is
+  arm G (refitted with three seeds) and arm C's start — a coarse search before the gradient, standard for a non-convex
+  design; TE's range widened to 80 ms. The achievable GRE contrast for this lesion is T2*: at TE 30 ms lesion / WM
+  ~1.3 (25 deg) to 1.5 (8 deg), at TE 60 ms ~2.3, against the TSE's 1.6 — so the design arm has something to find.
+  Relaunched at 01:26 as `design4.sh design4 rss 0.3 0.2 1.0 0.5` (the cold-start 50 % results kept).
+- **30 % of k-space, multi-start (design4_rss_f0.3, 19 lines):** A 0.62 (0.58 / 0.62 / 0.67; accuracy 0.71 = the
+  negative class), B 0.60 (0.59-0.61). The six GRE starts, one seed each (test / train AUC): 25/6/15 0.52 / 0.54,
+  10/6/15 0.52 / 0.56, 25/20/30 0.52 / 0.57, 15/30/40 0.52 / 0.55, 15/45/55 0.50 / 0.61, 15/60/70 0.54 / 0.62; the best
+  on the training set (TE 60 ms) refitted with three seeds as G, and C from it: after 400 joint steps TE 60 -> 64.7 ms,
+  TR 70 -> 78 ms, flips 15 -> 16.4 deg (11.7-22.5), the lines' spread 18.7 -> 19.5 cycles; test AUC 0.53 (train 0.54).
+  Nineteen lines, uniform (R = 3.4 in one direction), is already past what any reader here can use: SENSE with exact
+  maps at 0.62, the zero-filled adjoint of any GRE contrast at chance. The 20 % run was moved to the end of the queue
+  (100 % and 50 % first, then 20 %, then arms B and G with the 16 coil channels at 50 / 30 %: `reorder.sh`).
