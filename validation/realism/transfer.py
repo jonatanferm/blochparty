@@ -24,6 +24,8 @@ import numpy as np
 import torch
 from torch import nn
 
+import blochparty as bp
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
 import score as SC  # noqa: E402
@@ -31,14 +33,7 @@ import score as SC  # noqa: E402
 
 def undersample(k: np.ndarray, accel: int, centre: float, rng) -> np.ndarray:
     """(C, n, n) k-space with phase-encoding columns (last axis) kept at random at 1 / accel, the central fraction always."""
-    n = k.shape[-1]
-    keep = np.zeros(n, bool)
-    c = int(round(centre * n))
-    keep[n // 2 - c // 2:n // 2 - c // 2 + c] = True
-    rest = np.flatnonzero(~keep)
-    m = max(n // accel - c, 0)
-    keep[rng.choice(rest, size=m, replace=False)] = True
-    return k * keep[None, None, :]
+    return k * bp.recon.random_mask(k.shape[-1], accel, centre, rng)[None, None, :]
 
 
 def pair(k: np.ndarray, accel: int, centre: float, rng, orient) -> tuple[np.ndarray, np.ndarray]:

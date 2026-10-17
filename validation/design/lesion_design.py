@@ -41,6 +41,8 @@ from torch import nn
 
 import blochparty as bp
 from blochparty.sequences.builder import SequenceBuilder
+from blochparty.design import auc
+from blochparty.recon import cg_sense, uniform_mask, variable_density_mask
 
 simulate_metal = functools.partial(bp.simulate, engine="gpu")  # Metal, or CUDA on an NVIDIA machine
 
@@ -114,15 +116,6 @@ class Design(nn.Module):
                 f"ky {ky.min():.1f}..{ky.max():.1f} (std {ky.std():.1f}, |ky| < 4: {(ky.abs() < 4).sum().item()})")
 
 
-def fft2c(x: torch.Tensor) -> torch.Tensor:
-    """Centred orthonormal 2D FFT over the last two axes (``ifft2c_o`` is its exact inverse and adjoint)."""
-    return torch.fft.fftshift(torch.fft.fft2(torch.fft.ifftshift(x, dim=(-2, -1)), norm="ortho"), dim=(-2, -1))
-
-
-def ifft2c_o(k: torch.Tensor) -> torch.Tensor:
-    return torch.fft.fftshift(torch.fft.ifft2(torch.fft.ifftshift(k, dim=(-2, -1)), norm="ortho"), dim=(-2, -1))
-
-
 def coils_for(ph) -> torch.Tensor:
     """(N, 8) sensitivities of an 8-element ring (radius 0.14 m) at the spins, complex64 (the same in every arm)."""
     return bp.birdcage_sensitivities(ph.pos, N_COILS, radius=COIL_RADIUS).to(torch.complex64)
@@ -137,18 +130,6 @@ def coil_maps(n=NX, fov=FOV) -> torch.Tensor:
     return bp.birdcage_sensitivities(pos, N_COILS, radius=COIL_RADIUS).to(torch.complex64).T.reshape(N_COILS, n, n)
 
 
-def uniform_mask(n: int, lines: int, centre: int = 4) -> torch.Tensor:
-    """(n,) bool over the phase-encode lines: ``lines`` of them, the central ``centre`` always, the rest evenly spaced."""
-    keep = torch.zeros(n, dtype=torch.bool)
-    keep[n // 2 - centre // 2: n // 2 - centre // 2 + centre] = True
-    rest = max(lines - centre, 0)
-    if rest:
-        cand = torch.nonzero(~keep).squeeze(1)
-        pick = torch.linspace(0, len(cand) - 1, rest).round().long()
-        keep[cand[pick]] = True
-    return keep
-
-
 def sampled_lines(n: int, lines: int, sampling: str, centre: int = 4, seed: int = 0) -> torch.Tensor:
     """(n,) bool: the phase-encode lines every arm acquires. ``uniform``: ``uniform_mask`` (evenly spaced, SENSE-style;
     arms G and C then start from evenly spread continuous positions). ``gauss``: the central ``centre`` lines and the
@@ -157,39 +138,7 @@ def sampled_lines(n: int, lines: int, sampling: str, centre: int = 4, seed: int 
     start from the same lines."""
     if sampling == "uniform":
         return uniform_mask(n, lines, centre)
-    keep = uniform_mask(n, centre, centre)
-    k = torch.arange(n, dtype=torch.float32) - n / 2
-    w = torch.exp(-k ** 2 / (2 * (n / 5) ** 2)) * (~keep)
-    g = torch.Generator().manual_seed(seed)
-    keep[torch.multinomial(w, max(lines - centre, 0), replacement=False, generator=g)] = True
-    return keep
-
-
-def cg_sense(k: torch.Tensor, maps: torch.Tensor, mask: torch.Tensor, iters: int = 20, lam: float = 1e-3) -> torch.Tensor:
-    """Least-squares SENSE by conjugate gradient: x = argmin ||M F S x - k||^2 + lam ||x||^2 for (C, ky, kx) k-space
-    whose phase-encode lines ``mask`` (ky,) are sampled, (C, n, n) coil maps; returns the (n, n) complex image."""
-    m = mask[None, :, None]
-
-    def A(x):  # image -> masked multi-coil k-space
-        return fft2c(maps * x[None]) * m
-
-    def AH(y):  # the adjoint of A (orthonormal transforms on both sides)
-        return (maps.conj() * ifft2c_o(y * m)).sum(0)
-
-    b = AH(k)
-    x = torch.zeros_like(b)
-    r = b.clone(); p = r.clone(); rs = (r.conj() * r).sum().real
-    for _ in range(iters):
-        Ap = AH(A(p)) + lam * p
-        alpha = rs / (p.conj() * Ap).sum().real
-        x = x + alpha * p
-        r = r - alpha * Ap
-        rs_new = (r.conj() * r).sum().real
-        if rs_new < 1e-12:
-            break
-        p = r + (rs_new / rs) * p
-        rs = rs_new
-    return x
+    return variable_density_mask(n, lines, centre, seed)
 
 
 def adjoint_image(k: torch.Tensor, ky_cycles: torch.Tensor, nx: int = NX) -> torch.Tensor:
@@ -268,12 +217,6 @@ def front_input(front: str, k_lines: torch.Tensor, ky_cycles: torch.Tensor) -> t
         return (img / (img.mean() + 1e-12))[None].float()
     img = img / (img.abs().mean() + 1e-12)
     return torch.cat([img.real, img.imag], 0).float()
-
-
-def auc(y, s) -> float:
-    y, s = np.asarray(y), np.asarray(s)
-    pos, neg = s[y == 1], s[y == 0]
-    return float(((pos[:, None] > neg[None]).mean() + 0.5 * (pos[:, None] == neg[None]).mean()))
 
 
 def best_threshold(y, s) -> float:

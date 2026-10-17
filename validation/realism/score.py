@@ -28,6 +28,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from blochparty.design import auc, bootstrap  # noqa: F401 (gap.py uses them as score.auc, score.bootstrap)
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import realism as R  # noqa: E402
 import simulate_heads as SH  # noqa: E402
@@ -214,26 +216,6 @@ def histogram_scores(X, y, groups, folds=5, seed=0):
         with torch.no_grad():
             scores[te] = torch.sigmoid(f[te] @ w[:-1] + w[-1]).numpy()
     return scores
-
-
-def auc(y, s):
-    """Mann-Whitney AUC (ties count half)."""
-    pos, neg = s[y == 1], s[y == 0]
-    return float(((pos[:, None] > neg[None]).sum() + 0.5 * (pos[:, None] == neg[None]).sum()) / (len(pos) * len(neg)))
-
-
-def bootstrap(y, s, groups, b=2000, seed=0):
-    """95 % interval of the AUC, resampling people (not slices)."""
-    rng = np.random.default_rng(seed)
-    people = np.array(sorted(set(groups)))
-    rows = {p: np.nonzero(groups == p)[0] for p in people}
-    pos = [p for p in people if y[rows[p][0]] == 1]
-    neg = [p for p in people if y[rows[p][0]] == 0]
-    out = []
-    for _ in range(b):
-        idx = np.concatenate([rows[p] for p in rng.choice(pos, len(pos))] + [rows[p] for p in rng.choice(neg, len(neg))])
-        out.append(auc(y[idx], s[idx]))
-    return [float(np.percentile(out, 2.5)), float(np.percentile(out, 97.5))]
 
 
 def intensity_gap(items_a, items_b, threshold=0.15):

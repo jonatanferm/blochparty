@@ -25,6 +25,7 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Callable
 
+import numpy as np
 import torch
 from torch import Tensor
 
@@ -342,6 +343,28 @@ def magnitude_image(signal: Tensor, seq: Sequence) -> Tensor:
     """Cartesian reconstruction: magnitude for one coil, root-sum-of-squares for several."""
     images = reconstruct(signal, seq)
     return images[0].abs() if images.shape[0] == 1 else rss(images)
+
+
+def auc(y, s) -> float:
+    """Mann-Whitney AUC of scores ``s`` for labels ``y`` (1 positive, 0 negative; ties count half)."""
+    y, s = np.asarray(y), np.asarray(s)
+    pos, neg = s[y == 1], s[y == 0]
+    return float(((pos[:, None] > neg[None]).sum() + 0.5 * (pos[:, None] == neg[None]).sum()) / (len(pos) * len(neg)))
+
+
+def bootstrap(y, s, groups, b=2000, seed=0) -> list[float]:
+    """95 % interval of the AUC, resampling ``groups`` (people, not slices: every row of a group shares its label)."""
+    y, s, groups = np.asarray(y), np.asarray(s), np.asarray(groups)
+    rng = np.random.default_rng(seed)
+    people = np.array(sorted(set(groups)))
+    rows = {p: np.nonzero(groups == p)[0] for p in people}
+    pos = [p for p in people if y[rows[p][0]] == 1]
+    neg = [p for p in people if y[rows[p][0]] == 0]
+    out = []
+    for _ in range(b):
+        idx = np.concatenate([rows[p] for p in rng.choice(pos, len(pos))] + [rows[p] for p in rng.choice(neg, len(neg))])
+        out.append(auc(y[idx], s[idx]))
+    return [float(np.percentile(out, 2.5)), float(np.percentile(out, 97.5))]
 
 
 # --- point-spread function ------------------------------------------------------------------
