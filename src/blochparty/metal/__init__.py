@@ -1716,6 +1716,27 @@ def available() -> bool:
         return False
 
 
+class _Metal:
+    """The driver's backend: where buffers live, the compiled kernels (called as ``kernel(*buffers, threads=,
+    group_size=)``) and how to wait for them. ``blochparty.cuda`` supplies another with the same kernels."""
+
+    name = "metal"
+    max_coils = None  # the matrix-product reduction has no limit
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("mps")
+
+    def lib(self):
+        return _lib()
+
+    def synchronize(self) -> None:
+        torch.mps.synchronize()
+
+
+METAL = _Metal()
+
+
 def _requires_grad(*objs) -> bool:
     """Whether any tensor in ``objs`` (tensors, dataclasses such as Phantom, Sequence, Scanner,
     FieldMaps and their pools, tuples) requires grad."""
@@ -1762,15 +1783,23 @@ def simulate_metal(phantom: Phantom, seq: Sequence, coils: Tensor | None = None,
     ``PULSE_MEMORY`` bytes at most of maps (12 or 20 floats per spin and pulse, the most-used pulses
     first); for static spins without concomitant fields, diffusion, motion, free pools or the
     generalized bound pool (raises otherwise)."""
+    return _simulate(METAL, phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps, checkpoint_every,
+                     readouts, nufft_width, nufft_terms, pulses)
+
+
+def _simulate(backend, phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
+              checkpoint_every, readouts, nufft_width, nufft_terms, pulses) -> SimResult:
+    """simulate_metal on ``backend`` (``METAL``, or ``blochparty.cuda``'s)."""
     if readouts not in ("direct", "nufft"):
         raise ValueError(f"readouts must be 'direct' or 'nufft', not {readouts!r}")
     if pulses not in ("step", "reuse"):
         raise ValueError(f"pulses must be 'step' or 'reuse', not {pulses!r}")
     if torch.is_grad_enabled() and _requires_grad(phantom, seq, coils, m_init, scanner, maps):
-        return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every)
+        return _simulate_grad(phantom, seq, coils, m_init, scanner, maps, mma, checkpoint_every, backend)
     with torch.no_grad():
         return _forward(phantom, seq, coils, m_init, chunk, group, scanner, mma, seed, maps,
-                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None, reuse=pulses == "reuse")
+                        nufft=(nufft_width, nufft_terms) if readouts == "nufft" else None, reuse=pulses == "reuse",
+                        backend=backend)
 
 
 def default_checkpoint_every(n_segments: int) -> int:
@@ -1789,6 +1818,7 @@ class _Opts(NamedTuple):
     lineshape: str
     cutoff: float | None
     memory: float
+    backend: object = METAL
 
 
 N_SPIN_GRADS = 20  # rows of the adjoint's per-spin gradients: pos (3), db0, pd, r1, r2, b1, conc (7), bound (5)
@@ -1810,7 +1840,7 @@ class _MetalSimulate(torch.autograd.Function):
         from ..fields import SpinFields
 
         res, cx = _forward(ph, sq, coils, d(m0), opts.every, 256, None, opts.mma, 0, None, True,
-                           SpinFields(d(pos), d(conc), opts.mode), keep=True)
+                           SpinFields(d(pos), d(conc), opts.mode), keep=True, backend=opts.backend)
         ctx.opts, ctx.cx = opts, cx
         ctx.like = [None if t is None else (t.dtype, t.device) for t in
                     (pos, pd, t1, t2, db0, coils_ri, dt, rf, grad, adc_phase, m0, b1, b0_offset, conc, bound, rf_freq)]
@@ -1830,7 +1860,7 @@ class _MetalSimulate(torch.autograd.Function):
             need[5] = need[9] = False
         if (g_sig is None and g_m is None) or not any(need):
             return (None,) * 17
-        dev, f32 = torch.device("mps"), torch.float32
+        dev, f32 = opts.backend.device, torch.float32
         n, nc, S, every = t1.shape[0], cx["n_coils"], len(opts.is_rf), opts.every
         adc_idx = torch.tensor(opts.adc).nonzero()[:, 0]
         h = torch.zeros(max(cx["n_adc"], 1), nc, 2, dtype=f32)
@@ -1856,7 +1886,7 @@ class _MetalSimulate(torch.autograd.Function):
             sens = torch.cat([sens, torch.zeros(2 * (ncr - nc), n, device=dev, dtype=f32)]).contiguous()
             h = torch.cat([h, torch.zeros(h.shape[0], ncr - nc, 2, dtype=f32, device=h.device)], 1)
         SEG = torch.zeros(S * 8 if need_seg else 1, device=dev, dtype=f32)
-        lib = _lib()
+        lib = opts.backend.lib()
         h = h.to(dev).contiguous()
         kernel = getattr(lib, f"bloch_adjoint{cx['suffix']}_c{ncr}")
         replay = getattr(lib, "bloch_replay" + cx["suffix"])
@@ -1874,7 +1904,7 @@ class _MetalSimulate(torch.autograd.Function):
                    cx["line"], cx["log_f"], cx["conc"], R, lam, GS, GC, GSEG, prm, threads=threads, group_size=256)
             if need_seg:
                 lib.seg_reduce(GSEG, SEG, reds[c], threads=8 * (s1 - s0))
-        torch.mps.synchronize()
+        opts.backend.synchronize()
         GS, lam = GS.cpu().double(), lam.cpu().double()
         out = [None] * 16
         if need[0]:
@@ -1911,7 +1941,7 @@ class _MetalSimulate(torch.autograd.Function):
         return (None, *[None if g is None or not need[i] else g.to(dtype=ctx.like[i][0], device=ctx.like[i][1]) for i, g in enumerate(out)])
 
 
-def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps, mma, every) -> SimResult:
+def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps, mma, every, backend=METAL) -> SimResult:
     """simulate_metal with gradients: the inputs as tensors of an autograd Function (_MetalSimulate)."""
     for what, present in (("diffusion", phantom.diffusion is not None), ("motion", phantom.motion is not None),
                           ("free pools", bool(getattr(phantom, "pools", None))),
@@ -1956,7 +1986,8 @@ def _simulate_grad(phantom: Phantom, seq: Sequence, coils, m_init, scanner, maps
     every = every or default_checkpoint_every(len(seq))
     if every % 64:
         raise ValueError(f"checkpoint_every must be a multiple of 64, got {every}")
-    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff, memory)
+    opts = _Opts(list(seq.is_rf), list(seq.adc), list(seq.spoil), every, fields.mode, mma, lineshape, cutoff, memory,
+                 backend)
     sig, m = _MetalSimulate.apply(opts, fields.pos, pd, phantom.t1, phantom.t2, db0, torch.view_as_real(coils),
                                   seq.dt, seq.rf, seq.grad, seq.adc_phase, m0, b1, seq.b0_offset, fields.conc, bound,
                                   rf_freq)
@@ -2109,11 +2140,12 @@ def _take(phantom: Phantom, idx: Tensor) -> Phantom:
 
 
 def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scanner, mma, seed, maps,
-             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None, reuse: bool = False):
+             ordered: bool = False, fields_in=None, keep: bool = False, nufft=None, reuse: bool = False, backend=None):
     """The forward kernels. ``fields_in``: the field model's inputs (``fields.SpinFields``) in place of
     spin_fields(scanner, pos). ``keep``: also return what the adjoint needs, with the state before every
     ``chunk`` segments (one dispatch each). ``nufft``: (width, terms) of NUFFT readouts; ``reuse``: reused
-    pulse maps (simulate_metal)."""
+    pulse maps (simulate_metal). ``backend``: ``METAL`` (default) or ``blochparty.cuda``'s."""
+    backend = METAL if backend is None else backend
     runs = []
     for opt, on in (("readouts='nufft'", nufft is not None), ("pulses='reuse'", reuse)):
         if not on:
@@ -2140,7 +2172,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
             inv = torch.argsort(order)
             r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
                          None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
-                         nufft=nufft, reuse=reuse)
+                         nufft=nufft, reuse=reuse, backend=backend)
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv])
     pools = tuple(getattr(phantom, "pools", None) or ())
     if pools:  # as bloch.simulate
@@ -2154,9 +2186,10 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         if order is not None:  # run the spins sorted by cost, return them in the caller's order
             inv = torch.argsort(order)
             r = _forward(_take(phantom, order), seq, None if coils is None else coils[order],
-                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True)
+                         None if m_init is None else m_init[order], chunk, group, scanner, mma, seed, maps, True,
+                         backend=backend)
             return SimResult(r.signal, r.m[inv], None if r.m_bound is None else r.m_bound[inv], r.m_pools[inv])
-    dev, f32 = torch.device("mps"), torch.float32
+    dev, f32 = backend.device, torch.float32
     n = len(phantom)
     b1 = phantom.b1 if getattr(phantom, "b1", None) is not None else torch.ones(n)
     # encoding positions (nonlinearity), concomitant coefficients
@@ -2194,6 +2227,8 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
     mma = n_coils >= MMA_MIN_COILS if mma is None else mma
     if not mma and n_coils > MAX_COILS:
         raise ValueError(f"at most {MAX_COILS} coils with mma=False")
+    if backend.max_coils is not None and n_coils > backend.max_coils:
+        raise ValueError(f"at most {backend.max_coils} coils on {backend.name}")
     if group != 256:
         raise ValueError("the Metal kernel's sample buffer is sized for threadgroups of 256")
     threads = math.ceil(n / group) * group
@@ -2354,7 +2389,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         suffix = f"_bm{len(pools)}"
     if phantom.diffusion is not None or phantom.motion is not None:
         suffix += "_diff"
-    lib, S = _lib(), len(seq)
+    lib, S = backend.lib(), len(seq)
     # buffers 7-19 (MB pool frf line log_f | conc | U modes nsub | P chol | wsub geom) and the scalars
     MB, pool_b, frf_b, line_b, logf_b, mt_flag = mt_bufs
     conc_b, mode_flag = conc_buf
@@ -2446,7 +2481,7 @@ def _forward(phantom: Phantom, seq: Sequence, coils, m_init, chunk, group, scann
         else:
             getattr(lib, "bloch_chunk" + suffix)(M, spins, sens, segs, flags, rows, sig, *bufs, prms[c],
                                                  *bm_bufs, fm_buf, lo_buf, threads=threads, group_size=group)
-    torch.mps.synchronize()
+    backend.synchronize()
     full = sig.cpu()
     sig = full[: n_adc * n_coils * 2].view(n_adc, n_coils, 2)
     signal = torch.complex(sig[..., 0], sig[..., 1]).T.contiguous()
