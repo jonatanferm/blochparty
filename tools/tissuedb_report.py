@@ -13,7 +13,8 @@ from blochparty.tissuedb import load, tissue_table
 
 UNITS = {"pd": (1, ""), "t1": (1e3, "ms"), "t2": (1e3, "ms"), "t2star": (1e3, "ms"), "chi": (1e6, "ppm"),
          "bound_fraction": (1, ""), "exchange_rate": (1, "/s"), "bound_t2": (1e6, "us"),
-         "diffusivity": (1e9, "um^2/ms"), "fat_fraction": (1, "")}
+         "diffusivity": (1e9, "um^2/ms"), "fat_fraction": (1, ""),
+         "myelin_water_fraction": (1, ""), "myelin_water_t2": (1e3, "ms")}
 
 
 def fmt(d, name):
