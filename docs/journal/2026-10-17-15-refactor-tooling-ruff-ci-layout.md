@@ -20,3 +20,8 @@
   the laptop 835 passed, 178 skipped.
 - Found on the way: a plain `uv sync` removes the extras (it makes the environment exact); `CLAUDE.md`'s command
   now says so and lists the anatomy extra.
+- **CI's first run** (on `35c9f92`): green in 9 minutes (lint, format, install, quick tests). GitHub warns that
+  `actions/checkout@v4` and `astral-sh/setup-uv@v6` target Node 20 (run on Node 24 for now) and that
+  `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19.
+- **The whole plan done**: the full suite on the mini on the final tree, 861 passed, 180 skipped, 0 failed (13 min);
+  the temporary check files on the mini removed.

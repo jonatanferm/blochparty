@@ -21,7 +21,7 @@ changes, no public-API renames (one addition: `bp.simulate(..., engine=)`, phase
 | 4. `blochparty.generate` | done 2026-10-17 | `577d2b4` `ab3eeb0` `a568e4c` `b94af68` `71b2bc5` |
 | 8. `validation/` one study per folder | done 2026-10-17 | `68612fc` `137384f` `d07d31d` `a2f128d` |
 | 10. `design/` | done 2026-10-17 | `87f1800` `3e41172` `7539dda` |
-| 9. docs and tooling | done 2026-10-17 | `68d91e3` (journal, lessons), layout and links tests, `6c1473a` (ruff), `f4eb759` (format), `6362c93` (CI) |
+| 9. docs and tooling | done 2026-10-17 | `68d91e3` (journal, lessons), `33ef727` (layout and link tests), `6c1473a` (ruff), `f4eb759` (format), `6362c93` (CI) |
 
 ## 0. What changed since the first version
 
