@@ -632,7 +632,8 @@ which physics (M6) the protocol families call for.
       from a library) → sample scanner imperfections (B1+, B0 shim, GIRF from benchmark 7, coil
       array from `loops.py` / `em.py`, noise covariance) → simulate on Metal → `write_dataset`.
       Throughput target and a nightly run that records spins·segments/s.
-      *Started 2026-10-14:* `validation/realism/generate.py` (spec + seed -> ISMRMRD sample with
+      *Started 2026-10-14:* `validation/realism/generate.py`, since 2026-10-17 the package `blochparty.generate`
+      with that script as its command line (spec + seed -> ISMRMRD sample with
       a `/truth` group: clean / noisy k-space, clean image, fractions, residual maps, lesion mask);
       the spec's front door is the brain itself: `anatomy.add_lesions` places white-matter lesions by
       region with cited tissue values. The first consumer is reconstruction: `transfer.py` scores a

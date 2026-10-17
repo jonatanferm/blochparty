@@ -353,14 +353,15 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `phantom.py` | `Phantom`, tissue table, Shepp-Logan, maps → spins (sub-voxel, T2′, fat, B1⁺), B0 field maps |
 | `anatomy/`, `susceptibility.py` | anatomies on a grid (`grid`), cited tissue tables (`tables`, and the `tissuedb` database), the BrainWeb / QSM / AHEAD / IXI loaders, anatomy → spins (`phantom`), the generator's edits (`edits`), deformations and the head sampler `sample_head` (`sampler`); susceptibility → B0, shimming |
 | `io.py` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance |
-| `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
+| `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise; the receive ring's placement behind the head and the scanner's prescan normalisation |
 | `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |
 | `receive.py` | the receive chain (oversampling, filtering) |
-| `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
+| `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination; the orthonormal pair `fft2c` / `ifft2c_ortho`, line masks (uniform, variable-density, random), CG-SENSE |
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
 | `fields.py` | `Scanner` field model: concomitant fields, gradient nonlinearity (solid harmonics, coefficient files) |
-| `design.py` | hardware / safety constraints and penalties, image metrics, Cramér–Rao bound, `minimize`, `design_report()` |
+| `design.py` | hardware / safety constraints and penalties, image metrics (and a classifier's AUC with its bootstrap), Cramér–Rao bound, `minimize`, `design_report()` |
+| `generate/` | training data (ROADMAP M7): `spec` (the sample specification), `heads` (the realism preset's head per seed), `protocols` (the paired real protocols), `sample` (`samples()`: spec + seed → simulated, noised slices with their truth; `write()`: ISMRMRD HDF5 with a `/truth` group); `validation/realism/generate.py` is its command line |
 
 Tests live in `tests/<area>/`: `engines`, `physics`, `sequences`, `phantoms`, `signal`, `validation`, `design` and
 `docs`; `uv run pytest tests/engines` runs one area. Cases shared between files are in `tests/cases.py`, the
