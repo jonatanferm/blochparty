@@ -233,3 +233,11 @@
   this rsync preserves creation times (a file known to be new showed nine days old). Before copying data, list what
   will be copied (`rsync -n`) and keep that list. And moving files needs `rsync --delete` on that folder, or the
   mirror keeps both copies and pytest collects the old ones.
+
+- **A move breaks what finds code by name or by place, not only its imports** (2026-10-17, the refactor): the
+  dataset reader rebuilt the sequence's event classes by name from `blochparty.sequence` and silently returned
+  dicts after they moved (only `test_io`'s round trip showed it); a test that scanned all of `src/` for
+  `Sequence.meta` keys failed once the generator, with its own `meta = {...}`, moved into the package; a script that
+  was numpy-only on import started loading torch, and another script that imports it beside finufft aborted on two
+  OpenMP runtimes. Each passed the area's own tests. After a move, run the whole suite, grep for `getattr(module,`,
+  `__file__` and scans of the tree, and run the scripts that import the moved module.

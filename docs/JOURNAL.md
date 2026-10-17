@@ -84,3 +84,6 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-17 [Refactor: the anatomy package (plan phase 5)](journal/2026-10-17-09-refactor-the-anatomy-package.md)
 - 2026-10-17 [Refactor: the sequences package (plan phase 7)](journal/2026-10-17-10-refactor-the-sequences-package.md)
 - 2026-10-17 [Refactor: engines/ with one preparation step and one capability table (plan phase 6)](journal/2026-10-17-11-refactor-engines-prepare-capabilities.md)
+- 2026-10-17 [Refactor: the training-data generator into the package (plan phase 4)](journal/2026-10-17-12-refactor-the-generator-into-the-package.md)
+- 2026-10-17 [Refactor: validation, one study per folder (plan phase 8)](journal/2026-10-17-13-refactor-validation-one-study-per-folder.md)
+- 2026-10-17 [Refactor: the design package and its worked problems (plan phase 10)](journal/2026-10-17-14-refactor-the-design-package.md)

@@ -12,4 +12,4 @@ so it can be re-checked. `tests/docs/test_docs.py` checks this index lists every
 - [Reference data, datasets, formats and other simulators](lessons/reference-data.md) (49): NIST, published values, the tissue database, MRzero, KomaMRI, BMCTool
 - [Anatomy and realism](lessons/anatomy-realism.md) (42): BrainWeb, IXI, AHEAD, fastMRI, segmentation, the realism benchmark
 - [Sequence design](lessons/design.md) (4): learning sequences, classifiers under an acquisition budget
-- [Process and tooling](lessons/process.md) (47): shells, machines, downloads, tests, git
+- [Process and tooling](lessons/process.md) (48): shells, machines, downloads, tests, git
