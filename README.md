@@ -341,7 +341,8 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 
 | module | contents |
 |---|---|
-| `sequence.py` | `Sequence` (flat piecewise-constant segments), `SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks |
+| `sequence.py` | `Sequence` (flat piecewise-constant segments), `kspace_trajectory`, `flip_angle` |
+| `sequences/` | `builder` (`SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks), `library` (ready-made sequences: `gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`), `meta` (the `Sequence.meta` keys), `pulseq` (`read_pulseq()`: `.seq` / pypulseq → `Sequence`; `write_pulseq()`: `Sequence` → `.seq`, lossless), `girf` (`apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents incl. B0 terms), `drift` (B0 drift and respiratory fields as sequence transforms), `transmit` (the RF amplifier). `blochparty.builders`, `.pulseq`, `.girf`, `.drift` and `.transmit` are these modules |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
 | `engines/gpu/` | the engine: one driver and adjoint over two backends, `metal/` (Apple GPU, `simulate_metal`) and `cuda/` (NVIDIA, `simulate_cuda`); device code in `shaders/*.metal`, compiled at run time; float32; 5.8× the retired fused CPU kernel on the real NIST TSE workload. `blochparty.metal` and `blochparty.cuda` are these modules |
@@ -354,15 +355,11 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `io.py` | `write_dataset` / `read_dataset`: raw data as ISMRMRD HDF5 with full provenance |
 | `coils.py` | receive sensitivities, B1⁺ transmit field, thermal noise |
 | `loops.py`, `em.py` | coils from loops (Biot–Savart, quasi-static); full-wave B1⁺ / receive maps and noise covariance |
-| `receive.py`, `transmit.py` | the receive chain (oversampling, filtering); the RF amplifier |
-| `builders.py` | ready-made sequences (`gre_2d`, `gre_3d`, `gre_cartesian`, `se_2d`, `tse_2d`, `bssfp_2d`, `epi_2d`) |
+| `receive.py` | the receive chain (oversampling, filtering) |
 | `recon.py` | k-space gridding, centred N-D iFFT, RSS, coil combination |
 | `reference.py` | independent models for validation: closed forms, signal equation |
 | `epg.py` | independent extended-phase-graph model |
-| `pulseq.py` | `read_pulseq()`: `.seq` / pypulseq → `Sequence`; `write_pulseq()`: `Sequence` → `.seq`, lossless |
 | `fields.py` | `Scanner` field model: concomitant fields, gradient nonlinearity (solid harmonics, coefficient files) |
-| `girf.py` | `apply_girf()`: GIRF / transfer functions, delays, multi-exponential eddy currents (incl. B0 terms) |
-| `drift.py` | B0 drift and respiratory fields as sequence transforms |
 | `design.py` | hardware / safety constraints and penalties, image metrics, Cramér–Rao bound, `minimize`, `design_report()` |
 
 Tests live in `tests/<area>/`: `engines`, `physics`, `sequences`, `phantoms`, `signal`, `validation`, `design` and
@@ -382,4 +379,4 @@ comparison helpers in `tests/helpers.py`, and the `gpu` fixture (every GPU engin
   (z, y, x), so the last axis is x. 3D GRE lines run with ky fastest, then kz.
 - **ADC timing:** sample i of a readout sits at (i + ½)·dwell after the ADC start (Pulseq).
 - **Pulseq:** RF field = conj(Pulseq RF waveform), receiver phase = −(Pulseq ADC phase); see
-  `blochparty/pulseq.py` for why and for the MRzero mapping.
+  `blochparty/sequences/pulseq/` for why and for the MRzero mapping.
