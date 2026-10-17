@@ -1,5 +1,7 @@
-"""Sequence.meta's keys are documented: every key the package writes into a sequence's meta (builder, library,
-Pulseq reader, Sequence methods) is in ``sequences.meta.KEYS``, and every listed key is written somewhere."""
+"""Sequence.meta's keys are documented: every key the code that builds sequences (``sequence.py`` and
+``sequences/``: builder, library, Pulseq reader, Sequence methods) writes into a sequence's meta is in
+``sequences.meta.KEYS``, and every listed key is written somewhere. Other ``meta`` dictionaries (an anatomy's, a
+generated sample's) are not scanned."""
 
 import ast
 import pathlib
@@ -8,6 +10,7 @@ from collections import defaultdict
 from blochparty.sequences.meta import KEYS
 
 SRC = pathlib.Path(__file__).resolve().parents[2] / "src" / "blochparty"
+SEQUENCE_CODE = (SRC / "sequence.py", SRC / "sequences")
 
 def dict_keys(node):
     if isinstance(node, ast.Dict):
@@ -23,10 +26,11 @@ def dict_keys(node):
 def is_meta(node):
     return (isinstance(node, ast.Attribute) and node.attr == "meta") or (isinstance(node, ast.Name) and node.id == "meta")
 
-def scan(root=SRC):
+def scan(roots=SEQUENCE_CODE):
     found = defaultdict(set)
-    for path in sorted(pathlib.Path(root).rglob("*.py")):
-        if "anatomy" in path.parts: continue  # Anatomy.meta and DigitalPhantom.meta: another dictionary
+    roots = [roots] if isinstance(roots, (str, pathlib.Path)) else roots
+    paths = [p for r in map(pathlib.Path, roots) for p in (sorted(r.rglob("*.py")) if r.is_dir() else [r])]
+    for path in paths:
         tree = ast.parse(path.read_text())
         for n in ast.walk(tree):
             keys = set()
