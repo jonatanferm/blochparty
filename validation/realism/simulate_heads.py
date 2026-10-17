@@ -303,12 +303,12 @@ def main():
             seq = sequence(args.n, proto["TR"], proto["TE"], order, rf_raster, float(zs[1] - zs[0]), args.readout_os,
                            proto["refocus_deg"] if args.refocus == "protocol" else 180., args.ordering,
                            **(dict(etl=REAL_ETL, esp=proto["esp"]) if args.train == "header" else {}))
-            k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])  # noqa: F821 (head, fields: this loop's, del'd at its end)
+            k = round((zs[i] - head.anatomy.origin[2]) / head.anatomy.voxel[0])
             region = (slice(max(k - half, 0), k + half + 1), slice(None), slice(None))
-            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,  # noqa: F821 (head, fields: this loop's, del'd at its end)
+            ph = head.to_phantom(fov_region=region, field_maps=fields, spins_per_voxel=spins, sampling=sampling, jitter=jitter,
                                  mt=args.mt)
             if args.b1 == "birdcage":
-                ph.b1 = b1_plus(head, ph.pos, ROOT).to(ph.pos.dtype)  # noqa: F821 (head, fields: this loop's, del'd at its end)
+                ph.b1 = b1_plus(head, ph.pos, ROOT).to(ph.pos.dtype)
             ph.pos = ph.pos - torch.tensor([cx, cy, zs[i]], dtype=ph.pos.dtype)
             ph = turn(ph)
             ring_pos = ph.pos - torch.tensor([ring, 0.0, 0.0], dtype=ph.pos.dtype) if ring else ph.pos  # turned: x is AP
@@ -344,7 +344,7 @@ def main():
                 "seconds": round(time.perf_counter() - t0)}
         np.savez(dest, meta=json.dumps(meta), **kspace)
         print(json.dumps(meta), flush=True)
-        del head, fields, kspace
+        head = fields = kspace = None  # free this head's arrays before the next one
         gc.collect()  # one process over many heads grew to 15 GB on a 16 GB machine
         if torch.backends.mps.is_available():
             torch.mps.empty_cache()
