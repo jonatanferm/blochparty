@@ -8,6 +8,14 @@ backend switch (`b8afd98`) and a GPU-engine test fixture (`b5cb509`). It is a pl
 changes, no public-API renames (one addition: `bp.simulate(..., engine=)`, phase 3), every default bit-identical
 (`tools/snapshot.py` before and after each phase, as `CLAUDE.md` requires).
 
+**Progress** (the journal has each phase's numbers):
+
+| phase | state | commits |
+|---|---|---|
+| 1. GPU sources as files, one driver | done 2026-10-17 | `461cf04` `8ee7ac3` and docs |
+| 2. tests in area folders | done 2026-10-17 | `f3ca1b2` … `58b326a`, `eaae460` |
+| 9. docs and tooling | journal and lessons split done (`68d91e3`); ruff, CI, layout check to do | |
+
 ## 0. What changed since the first version
 
 - **A second GPU engine.** `blochparty.cuda` (`b5cb509`) reuses Metal's device code by turning

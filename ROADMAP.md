@@ -43,7 +43,8 @@ Three conditions, each testable. The core is done when all three hold.
 | engine | role | gradients | policy |
 |---|---|---|---|
 | `blochparty.simulate` (`src/blochparty/bloch.py`) | readable reference; every new effect lands here first, checked on small cases | autograd, `simulate_chunked` | keep small and readable; float64 |
-| `blochparty.metal.simulate_metal` (`src/blochparty/metal/__init__.py`) | the engine; all imaging-scale work | hand-written adjoint (M2) | must agree with the core; float32 |
+| `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`: driver, adjoint, `shaders/`, `metal/`) | the engine; all imaging-scale work | hand-written adjoint (M2) | must agree with the core; float32 |
+| `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/cuda/`) | the same engine on NVIDIA GPUs (cloud pods) | the same adjoint | the same driver and device code; must agree with the core |
 | `blochparty.fused.simulate_fused` (was `src/blochparty/fused/`) | CPU kernel with a hand-written adjoint | adjoint | retired 2026-10-09 after M2; in the git history |
 
 ## Working rules for whoever implements this
@@ -61,8 +62,9 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
   snapshot. If an item needs the snapshot to grow (new engine, new default inputs), add to
   `tools/snapshot.py` in a separate commit and say so in the journal.
 - **Core, then Metal, then parity test.** Physics goes into `bloch.py` with a test against the
-  reference, then into the Metal shader, then a test in `tests/engines/test_gpu.py` comparing the two
-  on the same inputs. Float32 tolerance for parity is ~1e-5 relative on signals (what the
+  reference, then into the GPU device code (`src/blochparty/engines/gpu/shaders/*.metal`, which CUDA
+  shares; kernel-side changes in both `metal/*.metal.in` and `cuda/*.cu.in`), then a test in
+  `tests/engines/test_gpu.py` (run on every GPU engine present) comparing the two on the same inputs. Float32 tolerance for parity is ~1e-5 relative on signals (what the
   existing tests use); say which tolerance and why.
 - **Metal variants.** The shader is compiled in three variants of `advance<V, DIFF>` (plain,
   `_full` for the rate-model bound pool and the field model, `_gen` for generalized Bloch), each
@@ -71,7 +73,7 @@ The rules in `CLAUDE.md` apply. Concretely, for every item below:
   shared. Measure the plain variant's speed before and after any shader change
   (`benchmarks/bench.py`, record with `--record`).
 - **Metal's adjoint raises** for what it does not differentiate (pattern: `_simulate_grad` in
-  `src/blochparty/metal/__init__.py`), and the engine matrix says so.
+  `src/blochparty/engines/gpu/adjoint.py`), and the engine matrix says so.
 - **Tests run on this Mac.** `uv run pytest` (about 3.5 min with GPU access). Mark anything over
   ~30 s with a marker and keep the default suite under 5 min. GPU tests skip without MPS, so
   check `blochparty.metal.available()` and do not let a skipped test pass for a GPU change.

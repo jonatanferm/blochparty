@@ -349,7 +349,7 @@ uv run python examples/design_report.py      # the report for an 8-coil GRE -> o
 | `sequence.py` | `Sequence` (flat piecewise-constant segments), `SequenceBuilder`, `System` limits, trapezoids, sinc pulses, Pulseq-like blocks |
 | `bloch.py` | the simulator core: `simulate()` |
 | `chunked.py` | `simulate_chunked()`: same results, spin-chunked memory-bounded backward |
-| `metal/` | the engine: forward kernel and adjoint on the Apple GPU (`simulate_metal`, float32, runtime-compiled Metal shader); 5.8× the retired fused CPU kernel on the real NIST TSE workload |
+| `engines/gpu/` | the engine: one driver and adjoint over two backends, `metal/` (Apple GPU, `simulate_metal`) and `cuda/` (NVIDIA, `simulate_cuda`); device code in `shaders/*.metal`, compiled at run time; float32; 5.8× the retired fused CPU kernel on the real NIST TSE workload. `blochparty.metal` and `blochparty.cuda` are these modules |
 | `exchange.py` | magnetization transfer: the bound pool (rate model), free exchanging pools (Bloch–McConnell), lineshapes |
 | `generalized_bloch.py` | the generalized Bloch model of the bound pool |
 | `motion.py`, `restriction.py`, `rng.py` | flow, deformation and rigid motion; restricted diffusion; the counter-based random numbers every engine's walks share |

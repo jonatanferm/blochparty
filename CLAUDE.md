@@ -1,8 +1,8 @@
 # Bloch Party
 
 Differentiable MRI simulator: PyTorch core (`src/blochparty/bloch.py`, the reference
-implementation) and an Apple-GPU kernel with a hand-written adjoint (`src/blochparty/metal/`, the
-fast engine). The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
+implementation) and a GPU engine with a hand-written adjoint (`src/blochparty/engines/gpu/`, the fast
+engine: one driver, Metal on Apple GPUs and CUDA on NVIDIA). The fused C++ CPU kernel was retired on 2026-10-09 (in the git history).
 Goal: the most physically realistic simulator, judged against real scanners
 (`docs/REALISM.md`); roadmap in `ROADMAP.md`.
 
@@ -12,10 +12,11 @@ Goal: the most physically realistic simulator, judged against real scanners
   the signal equation, MRzero (`validation/`), or real data (`validation/real/`).
 - **Defaults stay bit-identical.** New physics is opt-in. Before and after a core change run
   `uv run python tools/snapshot.py save <file>` and `compare <before> <after>`.
-- **One fast engine: Apple GPU (`blochparty.metal`).** New physics goes into the PyTorch core
-  (the readable reference, checked on small cases) and the Metal kernel (forward, and the adjoint
-  where calibration or design needs it), which must agree with it. Other engines and the CPU+GPU
-  hybrid come later.
+- **One fast engine: the GPU driver (`blochparty.engines.gpu`), Metal and CUDA backends.** New physics
+  goes into the PyTorch core (the readable reference, checked on small cases) and the GPU device code
+  (`engines/gpu/shaders/*.metal`, shared by both backends; kernel-side changes in `metal/*.metal.in` and
+  `cuda/*.cu.in`), forward and the adjoint where calibration or design needs it, which must agree with it.
+  Other engines and the CPU+GPU hybrid come later.
 - **`docs/ENGINES.md` is the capability matrix**, checked cell by cell by `tests/engines/test_engines.py`:
   when an engine gains or refuses a feature, change its cell (and add a row and a case for a new
   feature).

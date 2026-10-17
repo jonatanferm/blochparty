@@ -6,8 +6,8 @@ Which simulator does what. The capability matrix below is checked cell by cell b
 | engine | entry point | device, precision | gradients | role |
 |---|---|---|---|---|
 | core | `blochparty.simulate` (`src/blochparty/bloch.py`) | any torch device; float32 or float64 | autograd (`checkpoint_every` bounds memory over segments) | the readable reference: new physics lands here first |
-| metal | `blochparty.metal.simulate_metal` (`src/blochparty/metal/`) | Apple GPU; float32 only (inputs are cast, results come back float32 on the CPU) | hand-written adjoint on the GPU, checkpointed (`checkpoint_every`); not for moving spins, free pools or the generalized bound pool (raises) | the engine for imaging-scale work |
-| cuda | `blochparty.cuda.simulate_cuda` (`src/blochparty/cuda/`) | NVIDIA GPU; float32 only, as Metal | the same hand-written adjoint, as Metal | the Metal kernels ported: the same device code and Python driver, CUDA kernels (warp shuffles for the coil sums), compiled at run time by NVRTC |
+| metal | `blochparty.metal.simulate_metal` (`src/blochparty/engines/gpu/`, Metal backend) | Apple GPU; float32 only (inputs are cast, results come back float32 on the CPU) | hand-written adjoint on the GPU, checkpointed (`checkpoint_every`); not for moving spins, free pools or the generalized bound pool (raises) | the engine for imaging-scale work |
+| cuda | `blochparty.cuda.simulate_cuda` (`src/blochparty/engines/gpu/`, CUDA backend) | NVIDIA GPU; float32 only, as Metal | the same hand-written adjoint, as Metal | the Metal kernels ported: the same device code and Python driver, CUDA kernels (warp shuffles for the coil sums), compiled at run time by NVRTC |
 | chunked | `blochparty.simulate_chunked` (`src/blochparty/chunked.py`) | as the core | autograd, recomputed one spin chunk at a time | the core with a memory-bounded backward over spins |
 
 The fused C++ CPU kernel (`blochparty.fused.simulate_fused`: float32 / float64, hand-written

@@ -4,7 +4,7 @@ A draw is a pure function of (seed, spin, segment, block), so the PyTorch refere
 kernel produce the same random walk for the same spin, whatever the evaluation order; results
 can be compared spin by spin, not only statistically. ``normals`` gives 8 standard normals per
 (spin, segment) by Box-Muller from two Philox blocks. Reference implementation: numpy uint64,
-the same rounds as the Metal kernel's uint32 arithmetic (``metal/__init__.py``).
+the same rounds as the GPU kernels' uint32 arithmetic (``engines/gpu/shaders/common.metal``).
 """
 
 from __future__ import annotations

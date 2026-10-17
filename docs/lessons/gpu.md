@@ -25,7 +25,7 @@
 
 ## The CUDA port — 2026-10-17
 
-- **Port a shader by sharing its device code, not by copying it** (`src/blochparty/cuda/`): Metal Shading Language is
+- **Port a shader by sharing its device code, not by copying it** (`src/blochparty/engines/gpu/cuda/`): Metal Shading Language is
   C++14 with address-space qualifiers, vector types and a few built-ins. Dropping `thread` / `device` /
   `threadgroup`, mapping `constant float*` to `const float*`, renaming `float3` & co. onto small structs with the
   operators the code uses, and `precise::sin` & co. onto `sinf` turned the whole device library (~1000 lines: steps,
