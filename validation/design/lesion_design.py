@@ -287,6 +287,9 @@ def main():
     ap.add_argument("--batch", type=int, default=8, help="arm C: slabs per simulated step")
     ap.add_argument("--replay", type=int, default=4, help="arm C: extra network-only updates per step from the replay buffer")
     ap.add_argument("--design-lr", type=float, default=1e-2)
+    ap.add_argument("--net-lr", type=float, default=3e-5, help="arm C: the network's rate in the joint phase. It starts from G's converged "
+                    "net (cosine-decayed to 1e-5); at 3e-4 with a fresh Adam and batches of 8 the joint phase wrecked it (100 %%: G 0.95 -> C 0.66 "
+                    "with the design nearly unchanged), so the joint phase keeps batch-norm statistics and dropout fixed and moves the net gently")
     ap.add_argument("--starts", default="25:6:15,10:6:15,25:20:30,15:30:40,15:45:55,15:60:70",
                     help="arm G / C's starting designs as flip_deg:TE_ms:TR_ms (K lines evenly spread): each is fitted with one seed and the "
                          "best on the training set is arm G (refitted with --seeds) and arm C's start. A coarse search over the generic "
@@ -413,12 +416,13 @@ def main():
     if "C" in arms:
         gen = torch.Generator().manual_seed(args.seed + 100)
         net = copy.deepcopy(nets_g[0])
+        net.eval()  # the joint phase fine-tunes G's net: batch-norm statistics and dropout fixed, gradients still flow
         opt_design = torch.optim.Adam(design.parameters(), lr=args.design_lr)
-        opt_net = torch.optim.Adam(net.parameters(), lr=3e-4, weight_decay=1e-4)
+        opt_net = torch.optim.Adam(net.parameters(), lr=args.net_lr, weight_decay=1e-4)
         buffer = collections.deque(maxlen=32 * args.batch)
         t0 = time.perf_counter()
+        recent = collections.deque(maxlen=20)
         for step in range(args.steps):
-            net.train()
             flips, ky, te, tr = design()
             seq = learnable_gre(flips, ky, te, tr)
             idx = torch.randint(len(train), (args.batch,), generator=gen).tolist()
@@ -430,6 +434,7 @@ def main():
                 xb.append(front_input(args.front, sig, ky)); yb.append(y_train[j])
             loss = nn.functional.binary_cross_entropy_with_logits(net(torch.stack(xb).to(device)), torch.tensor(yb, dtype=torch.float32, device=device))
             opt_design.zero_grad(); opt_net.zero_grad(); loss.backward(); opt_design.step(); opt_net.step()
+            recent.append(loss.item())
             buffer.extend((x.detach().cpu(), y) for x, y in zip(xb, yb))
             for _ in range(args.replay):  # the network alone, on recent acquisitions (a slowly moving design)
                 pick = torch.randint(len(buffer), (16,), generator=gen).tolist()
@@ -438,8 +443,8 @@ def main():
                 l_r = nn.functional.binary_cross_entropy_with_logits(net(xr), yr)
                 opt_net.zero_grad(); l_r.backward(); opt_net.step()
             if step % 20 == 0 or step == args.steps - 1:
-                print(f"C step {step}: loss {loss.item():.3f} (replay {l_r.item():.3f}), {design.summary()}, {time.perf_counter() - t0:.0f} s", flush=True)
-        net.eval()
+                print(f"C step {step}: loss {np.mean(recent):.3f} over the last {len(recent)} batches (replay {l_r.item():.3f}), {design.summary()}, "
+                      f"{time.perf_counter() - t0:.0f} s", flush=True)
         with torch.no_grad():
             flips, ky, te, tr = design()
             seq = learnable_gre(flips, ky, te, tr)

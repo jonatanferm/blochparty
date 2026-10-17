@@ -2623,3 +2623,30 @@ controls).
   Nineteen lines, uniform (R = 3.4 in one direction), is already past what any reader here can use: SENSE with exact
   maps at 0.62, the zero-filled adjoint of any GRE contrast at chance. The 20 % run was moved to the end of the queue
   (100 % and 50 % first, then 20 %, then arms B and G with the 16 coil channels at 50 / 30 %: `reorder.sh`).
+- **The multi-start sweep's table (design4_rss_f*, 515 train / 129 test slabs, 92 test positives, SNR 20, test AUC,
+  three seeds for A, B, G; G = the best of the six GRE starts on the training set, which was 15 deg / TE 60 / TR 70 ms
+  at every fraction):**
+
+  | fraction (lines) | A: TSE + CG-SENSE + CNN | B: TSE lines + adjoint + CNN | G: GRE TE 60 + adjoint + CNN | C: joint from G | scan A / G |
+  |---|---|---|---|---|---|
+  | 100 % (64) | 0.86 (0.84-0.88) | 0.80 (0.74-0.85) | **0.95** (0.94-0.96) | 0.66 | 30 s / 5.0 s |
+  | 50 % (32) | 0.81 (0.73-0.87) | 0.72 (0.68-0.75) | 0.61 (0.57-0.66) | 0.52 | 15 s / 2.8 s |
+  | 30 % (19) | 0.62 (0.58-0.67) | 0.60 (0.59-0.61) | 0.54 (0.53-0.55) | 0.53 | 8.9 s / 1.9 s |
+  | 20 % (13) | 0.61 (0.58-0.63) | 0.57 (0.56-0.59) | 0.52 (0.52-0.53) | 0.49 | 6.1 s / 1.5 s |
+
+  The six starts at 100 % (test / train AUC): 25/6/15 0.49 / 0.59, 10/6/15 0.51 / 0.54, 25/20/30 0.52 / 0.55, 15/30/40
+  0.86 / 0.92, 15/45/55 0.95 / 0.96, 15/60/70 0.95 / 0.98 — the lesion is a T2* lesion for a GRE (its T2* is 0.8 x its
+  T2 here, 160 ms against white matter's ~50), invisible below TE 20 ms and conspicuous from TE 45 ms. With the 16
+  coil channels instead of the root-sum-of-squares (one seed): B 0.58 / G 0.55 at 50 %, 0.60 / 0.55 at 30 % — worse.
+  Three results. (1) *At full sampling the raw path wins*: a 5 s spoiled GRE at TE 60 ms, read by a CNN from the
+  zero-filled adjoint of its multi-coil samples with no reconstruction, detects the lesion at 0.95 where the 30 s
+  clinical TSE through SENSE reads 0.86 — but the choice that did it was the contrast, found by a six-point search,
+  not by the gradient. (2) *Undersampling hurts the raw arms more than SENSE*: evenly spread lines at R = 2 fold the
+  head onto itself in the zero-filled image, the root-sum-of-squares discards the coil phase that could unfold it,
+  and the CNN does not learn to unfold from 515 slabs (nor from the 16 coil channels), while SENSE with the exact
+  maps holds 0.81 at 50 %; below 30 % nothing reads 64 x 64 through 8 coils, SENSE included. (3) *The joint phase
+  did not help anywhere*: from G's converged net (0.95 at 100 %) it ended at 0.66 with the design nearly where it
+  started (TE 60 -> 58.5 ms, flips 15 -> 16.6, lines unchanged, the per-step loss 0.3-1.1) — the net's fine-tuning
+  (Adam 3e-4 from scratch, batch-norm statistics from batches of 8) wrecked it; at 50 / 30 / 20 % the start was
+  already at chance. Fixed: the joint phase keeps batch-norm and dropout fixed and moves the net at 3e-5
+  (`--net-lr`), the loss is logged as a 20-batch mean; rerunning C at 100 % and 50 % (`queue3.sh` -> design5_rss_f*).
