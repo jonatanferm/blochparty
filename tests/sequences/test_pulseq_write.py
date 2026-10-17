@@ -159,9 +159,9 @@ def test_scanner_file_is_written_back_losslessly(tmp_path):
 
 
 def test_flip_angle_about_the_pulse_frequency():
-    rf, _, _ = bp.sequence.sinc_pulse(180.0, 2e-3, slice_thickness=5e-3, slice_offset=0.02)
+    rf, _, _ = bp.sinc_pulse(180.0, 2e-3, slice_thickness=5e-3, slice_offset=0.02)
     sig = (rf.signal[:, 0] + 1j * rf.signal[:, 1]).numpy()
     assert abs(abs(sig.sum()) * rf.raster * 360 - 180) > 170  # the phase ramp cancels the plain sum
     assert abs(flip_angle(sig, rf.raster) - 180) < 1e-9
-    rf0, _, _ = bp.sequence.sinc_pulse(90.0, 2e-3, slice_thickness=5e-3)
+    rf0, _, _ = bp.sinc_pulse(90.0, 2e-3, slice_thickness=5e-3)
     assert abs(flip_angle((rf0.signal[:, 0] + 1j * rf0.signal[:, 1]).numpy(), rf0.raster) - 90) < 1e-9

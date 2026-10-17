@@ -19,7 +19,7 @@ from blochparty import design as d
 from blochparty.constants import PULSEQ_GAMMA_BAR
 from blochparty.phantom import LABELS
 from blochparty.reference import spoiled_gre_signal
-from blochparty.sequence import System
+from blochparty.sequences.builder import System
 
 import design_contrast_tr as contrast_tr
 import design_despot1 as despot1

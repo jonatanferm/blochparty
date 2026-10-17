@@ -21,7 +21,7 @@ from dataclasses import replace
 
 import torch
 
-from .sequence import Sequence
+from ..sequence import Sequence
 
 
 def rapp(amp, gain: float = 1.0, a_sat: float = math.inf, p: float = 2.0):

@@ -40,7 +40,7 @@ import torch
 from torch import nn
 
 import blochparty as bp
-from blochparty.sequence import SequenceBuilder
+from blochparty.sequences.builder import SequenceBuilder
 
 simulate_metal = functools.partial(bp.simulate, engine="gpu")  # Metal, or CUDA on an NVIDIA machine
 

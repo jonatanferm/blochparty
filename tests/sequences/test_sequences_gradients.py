@@ -12,8 +12,7 @@ import torch
 import blochparty as bp
 from blochparty.builders import bssfp_2d, epi_2d, se_2d, tse_2d
 from blochparty.constants import PULSEQ_GAMMA_BAR
-from blochparty.sequence import (ADC, SequenceBuilder, System, gradient_waveform, sinc_pulse,
-                                 trapezoid)
+from blochparty.sequences.builder import ADC, SequenceBuilder, System, gradient_waveform, sinc_pulse, trapezoid
 
 SYS = System()
 
@@ -88,7 +87,7 @@ def test_trapezoid_area_limits_and_segments(kw):
     for t in (g.rise, g.flat if "duration" not in kw else g.rise, g.duration):  # on the gradient raster
         assert abs(t / SYS.grad_raster - round(t / SYS.grad_raster)) < 1e-9
     if "area" in kw:
-        assert torch.allclose(g.area, torch.as_tensor(bp.sequence._vector(kw["area"], axis, torch.float64)), atol=1e-9)
+        assert torch.allclose(g.area, torch.as_tensor(bp.sequences.builder._vector(kw["area"], axis, torch.float64)), atol=1e-9)
     if "duration" in kw:
         assert abs(g.duration - kw["duration"]) < 1e-15
     # appended as segments: the total moment is the area, every ramp piece one raster step

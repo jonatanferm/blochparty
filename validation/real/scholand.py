@@ -76,7 +76,7 @@ def sequence(*, n_tr: int = N_TR, inversion: str = "hypsec", slice_select: bool 
         sb.delay(gap)
 
     def make(flip, phase):
-        rf, gz, reph = bp.sequence.sinc_pulse(flip, T_RF, slice_thickness=SLICE, time_bw_product=BWTP,
+        rf, gz, reph = bp.sinc_pulse(flip, T_RF, slice_thickness=SLICE, time_bw_product=BWTP,
                                               apodization=0.46, phase=phase, system=system)
         return (rf, gz, reph) if slice_select else (rf, None, None)
 
@@ -94,7 +94,7 @@ def sequence(*, n_tr: int = N_TR, inversion: str = "hypsec", slice_select: bool 
     nxt = centre + TR / 2
     for i in range(n_tr):
         rf, gz, reph = make(fa, math.pi * (i % 2))
-        pre = None if reph is None else bp.sequence.trapezoid(area=reph, system=system)
+        pre = None if reph is None else bp.trapezoid(area=reph, system=system)
         wait = nxt - rf.delay - 0.5 * T_RF - (pre.duration if pre is not None else 0.0) - sb.time
         if wait < -1e-9:
             raise ValueError("TR too short for the gradients")

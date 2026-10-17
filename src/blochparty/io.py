@@ -33,6 +33,7 @@ import torch
 from torch import Tensor
 
 from . import sequence as _sequence
+from .sequences import builder as _events
 from .constants import GAMMA_BAR
 from .sequence import Sequence, kspace_trajectory
 
@@ -90,7 +91,8 @@ def _decode(x):
     if "__items__" in x:
         return {_decode(k): _decode(v) for k, v in x["__items__"]}
     if "__dataclass__" in x:
-        cls = getattr(_sequence, x["__dataclass__"], None)  # only the sequence's own event types
+        name = x["__dataclass__"]  # only the sequence's own event types (System, Trapezoid, RFPulse, ADC, ...)
+        cls = getattr(_events, name, None) or getattr(_sequence, name, None)
         values = {k: _decode(v) for k, v in x.items() if k != "__dataclass__"}
         if dataclasses.is_dataclass(cls):
             return cls(**values)
@@ -187,7 +189,7 @@ def write_dataset(path, signal, seq: Sequence, *, phantom=None, coils=None, nois
     was run. Overwrites ``path``."""
     h5py, ismrmrd = _imports()
     from .anatomy import DigitalPhantom
-    from .pulseq import write_pulseq
+    from .sequences.pulseq import write_pulseq
 
     path = Path(path)
     sig = getattr(signal, "signal", signal)

@@ -3,7 +3,7 @@
 ``gre_cartesian`` / ``gre_2d`` / ``gre_3d`` default to the idealised sequence (hard pulse,
 instantaneous gradients, ideal spoiling); ``spoiling``, ``slice_thickness`` and ``ramps``
 switch on the realistic versions, built from the ``System``-limited blocks of
-``sequence.py``. ``se_2d``, ``tse_2d``, ``bssfp_2d`` and ``epi_2d`` are always built that way.
+``sequences/builder.py``. ``se_2d``, ``tse_2d``, ``bssfp_2d`` and ``epi_2d`` are always built that way.
 
 What each returns in ``meta``: ``kspace_shape`` when the ADC samples reshape directly to
 the Cartesian grid (GRE, SE, bSSFP: ``bp.reconstruct`` works). TSE (line ordering) and EPI
@@ -21,9 +21,10 @@ from typing import NamedTuple
 import torch
 from torch import Tensor
 
-from .recon import ifftnc, kspace_grid
-from .sequence import (_T_TOL, ADC, RFPulse, Sequence, SequenceBuilder, System, Trapezoid, _ceil_to, _vector,
-                       block_duration, block_pulse, sinc_pulse, trapezoid)
+from ..recon import ifftnc, kspace_grid
+from ..sequence import _T_TOL, Sequence
+from .builder import (ADC, RFPulse, SequenceBuilder, System, Trapezoid, _ceil_to, _vector, block_duration, block_pulse,
+                      sinc_pulse, trapezoid)
 
 SPOILING = ("ideal", "gradient", "rf")
 
@@ -540,7 +541,7 @@ def tse_2d(
                   system=sysm, **({} if slice_order is None else {"slice_order": slice_order}),
                   **({} if os_ == 1 else {"readout_oversampling": os_}))
     if ghosts:  # the far slices' pulses: the bound pool alone, at G (z_j - z)
-        from .exchange import rf_frequency
+        from ..exchange import rf_frequency
 
         f_rf = rf_frequency(seq).clone()
         bound_only = [False] * len(seq)

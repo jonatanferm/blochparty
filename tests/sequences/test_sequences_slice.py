@@ -10,7 +10,7 @@ import torch
 from scipy.integrate import solve_ivp
 
 import blochparty as bp
-from blochparty.sequence import SequenceBuilder, System, sinc_pulse, trapezoid
+from blochparty.sequences.builder import SequenceBuilder, System, sinc_pulse, trapezoid
 
 THK, DUR = 5e-3, 2e-3
 f64 = torch.float64

@@ -28,7 +28,7 @@ import torch
 
 import blochparty as bp
 from blochparty.io import write_dataset
-from blochparty.sequence import System
+from blochparty.sequences.builder import System
 
 ROOT = Path(__file__).resolve().parents[1] / "validation" / "anatomy" / "data"
 SYSTEM = System(rf_raster=1e-5)

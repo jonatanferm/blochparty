@@ -55,7 +55,7 @@ from scipy import ndimage
 import blochparty as bp
 import realism as R  # noqa: E402
 from blochparty.anatomy import Distribution
-from blochparty.sequence import System
+from blochparty.sequences.builder import System
 
 ROOT = Path(__file__).resolve().parents[2] / "validation" / "anatomy" / "data"
 FOV, THICKNESS, SLICES = 0.22, 5e-3, 16

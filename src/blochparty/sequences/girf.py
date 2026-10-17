@@ -31,7 +31,7 @@ from dataclasses import dataclass, replace
 import torch
 from torch import Tensor
 
-from .sequence import Sequence
+from ..sequence import Sequence
 
 OUTPUTS = ("x", "y", "z", "b0")
 
