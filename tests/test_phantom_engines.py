@@ -58,13 +58,14 @@ def test_forward_2d_and_3d(sim):
 
 def test_spin_and_sequence_gradients():
     # every input, b1 included, against autograd through the PyTorch core
+    from helpers import GPU
     from test_metal_grad import compare
 
     ph = realistic(8)
     coils = bp.birdcage_sensitivities(ph.pos, n_coils=3)
     seq = bp.gre_2d(8, flip_deg=30.0, rf_phase=0.4, n_dummy=8)
     if metal.available():
-        compare(ph, seq, TOL_GRAD, coils=coils)
+        compare(GPU("metal"), ph, seq, TOL_GRAD, coils=coils)
 
     def leaves_with_b1(sim):
         b1 = ph.b1.clone().requires_grad_()
