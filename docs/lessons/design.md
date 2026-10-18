@@ -2,6 +2,13 @@
 
 ## Sequence design by classification — 2026-10-17
 
+- **The gain was in the per-line freedom, not the contrast point** (2026-10-18, split_design.py): of the +0.10 AUC a
+  learned GRE gave over its start, the per-line part (a mild band pattern of flips across k-space and sub-cycle line
+  shifts) carried 85-95 % at the start's own TE, TR and scan time; the learned flip level, TE and TR alone gave
+  +0.02-0.03. Searching a few global sequence parameters finer would not have found it. When a learned design wins,
+  split it into what a conventional parameter search could reach and what only the extra freedom can, and test
+  each part with fresh nets.
+
 - **Judge a learned acquisition with a reader trained from scratch on it** (2026-10-18, arms C, F, L): the joint run's
   own network, fine-tuned from the start sequence's for 400 steps, scored 0.73-0.82 (mean 0.78 over five runs), and
   the matched control F said the sequence added only +0.04. Fresh nets trained on the same learned sequences with the
