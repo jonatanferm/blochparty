@@ -89,3 +89,4 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-17 [Refactor: the design package and its worked problems (plan phase 10)](journal/2026-10-17-14-refactor-the-design-package.md)
 - 2026-10-17 [Refactor: ruff, CI, the generated layout table (plan phase 9, tooling)](journal/2026-10-17-15-refactor-tooling-ruff-ci-layout.md)
 - 2026-10-17 [Lesion design: a second seed of the learned GRE at 50 % Gaussian, on an L40](journal/2026-10-17-16-lesion-design-second-seed-on-an-l40.md)
+- 2026-10-18 [Lesion design: the frozen-design control (arm F), three seeds on an L40](journal/2026-10-18-01-lesion-design-frozen-design-control.md)

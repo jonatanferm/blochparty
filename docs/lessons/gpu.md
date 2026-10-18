@@ -50,6 +50,15 @@
   it. A secure 4090 for 45 minutes of verification and benchmarks cost $0.59. Reuse the image's PyTorch
   (`uv venv --system-site-packages`): the project ran on torch 2.8 there, nothing to download.
 
+- **A laptop with its lid closed cannot run a pod's job** (2026-10-18, the frozen-design control): the lid closed on
+  battery six minutes after the pod came up; clamshell sleep ignores the app's keep-awake hold, and a background
+  watcher on the laptop then ran only in macOS's 2-second dark wakes every ~17 minutes (`pmset -g log`). The jobs
+  started 33 minutes late, the result copy broke mid-transfer, and the pod was removed an hour after the jobs ended:
+  2 h 7 min for 20 minutes of work ($1.75 instead of ~$0.40). The watcher also removed the pod after checking only the
+  logs for "job exit 0", so the three `results.json` were lost (the logs carried the numbers). Start a pod's jobs on
+  the pod itself the moment its data is complete, fetch and check the result files before removal, and do not
+  leave a pod's end to a machine that can sleep.
+
 - **Copy a pod's data from where it lives, not through the laptop** (2026-10-17, the second lesion-design seed): the
   7.0 GB of slabs came from the mini to the laptop at ~5 MB/s; a throwaway ed25519 key made on the mini and added to
   the pod's `authorized_keys` let the mini rsync straight to the pod at ~19 MB/s (6 minutes). Delete the key, its

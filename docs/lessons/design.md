@@ -2,6 +2,13 @@
 
 ## Sequence design by classification — 2026-10-17
 
+- **The same seed does not give the same network on CUDA** (2026-10-18, lesion_design.py seed 1 run twice on two
+  L40 hosts): the G net trained on cached k-space (no simulation in the loop) reached train AUC 0.786 one time and
+  0.768 the next, another G net 0.709 and 0.746, and arm C 0.758 and 0.730. The runs differed in CPU threads (15
+  against 10) and GPU sharing, and torch's CUDA defaults allow non-deterministic convolution algorithms; which one
+  moved it was not isolated. So a seed's spread includes non-determinism, and only comparisons inside one job are
+  clean: arm F reuses C's starting net and C's generator, and its gap to C is the paired number.
+
 - **A repeat with a new seed must leave what it holds fixed alone** (validation/design/lesion_design.py, the second
   seed of arm C): `--seed` set the networks' initialisation and also drew the Gaussian line mask, so "the same run
   with another seed" would have scanned other lines and mixed the mask's luck into the seed spread. `--mask-seed`
