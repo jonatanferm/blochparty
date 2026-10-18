@@ -2,6 +2,12 @@
 
 ## Sequence design by classification — 2026-10-17
 
+- **A design gradient through line positions does sampling design** (2026-10-18, the split of the learned GRE): the
+  whole per-line gain (+0.07-0.09 AUC) came from moving lines off the Cartesian grid by ~0.3 cycles, and the learned
+  flip pattern added nothing. The moved lines lowered the zero-filled point-spread function's sidelobes below 99.9 %
+  of random jitters of the same size, which raise them. Check what a learned trajectory does to the PSF before
+  reading it as physics, and compare it with random perturbations of the same size, not only with the start.
+
 - **The gain was in the per-line freedom, not the contrast point** (2026-10-18, split_design.py): of the +0.10 AUC a
   learned GRE gave over its start, the per-line part (a mild band pattern of flips across k-space and sub-cycle line
   shifts) carried 85-95 % at the start's own TE, TR and scan time; the learned flip level, TE and TR alone gave

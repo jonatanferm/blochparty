@@ -11,5 +11,5 @@ so it can be re-checked. `tests/docs/test_docs.py` checks this index lists every
 - [Pulseq and sequences](lessons/pulseq.md) (22): Pulseq files, pypulseq, rasters, GIRF and gradient delays
 - [Reference data, datasets, formats and other simulators](lessons/reference-data.md) (49): NIST, published values, the tissue database, MRzero, KomaMRI, BMCTool
 - [Anatomy and realism](lessons/anatomy-realism.md) (42): BrainWeb, IXI, AHEAD, fastMRI, segmentation, the realism benchmark
-- [Sequence design](lessons/design.md) (8): learning sequences, classifiers under an acquisition budget
+- [Sequence design](lessons/design.md) (9): learning sequences, classifiers under an acquisition budget
 - [Process and tooling](lessons/process.md) (48): shells, machines, downloads, tests, git

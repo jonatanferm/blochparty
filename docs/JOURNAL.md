@@ -92,3 +92,4 @@ newest last. A new entry is a new file and one line here (`tests/docs/test_docs.
 - 2026-10-18 [Lesion design: the frozen-design control (arm F), three seeds on an L40](journal/2026-10-18-01-lesion-design-frozen-design-control.md)
 - 2026-10-18 [Lesion design: the learned sequence read by fresh nets (arm L), ten seeds](journal/2026-10-18-02-lesion-design-learned-sequence-fresh-nets.md)
 - 2026-10-18 [Lesion design: what in the learned sequence helps (TE/TR against the per-line design)](journal/2026-10-18-03-lesion-design-split-tetr-perline.md)
+- 2026-10-18 [Lesion design: the sub-cycle line shifts carry the gain, by lowering the aliasing](journal/2026-10-18-04-lesion-design-line-shifts-carry-the-gain.md)

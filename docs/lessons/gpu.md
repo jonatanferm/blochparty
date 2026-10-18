@@ -58,7 +58,8 @@
   The pod's script runs the jobs, touches `job_done`, waits up to 30 minutes for the mini to fetch and check the result
   files (`fetched`), then deletes itself; a `sleep 7200; DELETE` started at setup is the dead-man switch. The mini
   (always on) copies the data with a throwaway key, starts the job, fetches, and removes the key on exit. First use:
-  18 minutes of pod for 8.5 minutes of jobs, $0.24, with the laptop out of the loop.
+  18 minutes of pod for 8.5 minutes of jobs, $0.24, with the laptop out of the loop. The steps are scripted in
+  `validation/design/pod/` (`launch.sh` tries a secure L40, then a secure RTX 4090).
 
 - **A laptop with its lid closed cannot run a pod's job** (2026-10-18, the frozen-design control): the lid closed on
   battery six minutes after the pod came up; clamshell sleep ignores the app's keep-awake hold, and a background
