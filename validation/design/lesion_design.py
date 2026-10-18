@@ -18,7 +18,9 @@ the image SNR of a reference GRE in the head, see ``snr_unit``):
      through the GPU adjoint (``bp.simulate(..., engine="gpu")``: Metal, or CUDA), with a replay buffer of recent
      acquisitions for extra network updates;
   F  the control for C: G's net fine-tuned for the same steps on the same batches, noise and replay with the design
-     frozen at G's (C minus F is what learning the sequence adds, not the extra training).
+     frozen at G's (C minus F is what learning the sequence adds, not the extra training);
+  L  a learned sequence held fixed (``--fixed-designs``: arm C's saved ``arm_C.pt``) read by fresh nets trained like
+     G's: seed for seed the same initialisation, order and noise as G's nets, only the sequence differs.
 The adjoint is a fixed, parameter-free linear map of the raw samples, differentiable in the line positions (``--front
 raw`` feeds the samples to the CNN as they are, which fails: a CNN cannot read a small lesion out of k-space). The K
 lines are evenly spaced (``--sampling uniform``, SENSE's case) or drawn from a Gaussian density (``gauss``: incoherent
@@ -33,6 +35,7 @@ import argparse
 import collections
 import copy
 import functools
+import hashlib
 import json
 import math
 import time
@@ -261,7 +264,17 @@ def main():
         default=None,
         help="the gauss line mask's seed (default --seed): fixed, it repeats a run on the same lines with new training seeds",
     )
-    ap.add_argument("--arms", default="A,B,G,C", help="any of A, B, G, C, F (F: C with the design frozen)")
+    ap.add_argument(
+        "--arms", default="A,B,G,C", help="any of A, B, G, C, F (C with the design frozen), L (--fixed-designs)"
+    )
+    ap.add_argument(
+        "--fixed-designs",
+        default="",
+        help="arm L: comma-separated arm_C.pt files of earlier runs (the same --fraction and mask)",
+    )
+    ap.add_argument(
+        "--cache-only", action="store_true", help="arm L: simulate and cache the fixed designs' k-space, then stop"
+    )
     args = ap.parse_args()
     mask_seed = args.seed if args.mask_seed is None else args.mask_seed
     torch.manual_seed(args.seed)
@@ -361,6 +374,8 @@ def main():
                     "accuracy": float(np.mean([(v > thr) == l for v, l in zip(s_te, y_test)])),
                     "train_auc": auc(y_train, s_tr),
                     "threshold": thr,
+                    "seed": args.seed + s,
+                    "test_scores": s_te,
                 }
             )
             nets.append(net)
@@ -462,6 +477,35 @@ def main():
             {"scan_s": best["scan_s"], "design": design.describe(), "start": best["start"]}
         )
         print("G", {k: v for k, v in results["G_gre_" + args.front].items() if k not in ("runs", "design")}, flush=True)
+
+    if "L" in arms:
+        for path in [Path(p) for p in args.fixed_designs.split(",") if p]:
+            fixed = Design(lines)
+            fixed.load_state_dict(torch.load(path, weights_only=False, map_location="cpu")["design"])
+            with torch.no_grad():
+                flips_l, ky_l, te_l, tr_l = fixed()
+                seq_l = learnable_gre(flips_l, ky_l, te_l, tr_l)
+            tag = hashlib.sha1(json.dumps(fixed.describe()).encode()).hexdigest()[:10]
+            k_l = cached(
+                f"gre{lines}_fixed_{tag}",
+                lambda ph, seq=seq_l: simulate_metal(ph, seq, coils_for(ph)).signal.reshape(N_COILS, lines, NX).cpu(),
+            )
+            if args.cache_only:
+                continue
+            name = "L_" + path.parent.name
+            results[name], _ = fit(
+                name,
+                lambda r, g, k=k_l, ky=ky_l: front_input(args.front, add_noise(k[r["file"]], sigma[r["file"]], g), ky),
+            )
+            results[name].update({"scan_s": float(seq_l.dt.sum()), "design": fixed.describe(), "from": str(path)})
+            print(
+                name,
+                {k: v for k, v in results[name].items() if k not in ("runs", "design")},
+                fixed.summary(),
+                flush=True,
+            )
+        if args.cache_only:
+            return
 
     def joint(name: str, learn: bool):
         """Arm C (``learn``): the design and G's first net trained together for ``--steps``; arm F: the same steps,
