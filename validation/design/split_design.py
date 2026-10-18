@@ -2,10 +2,12 @@
 
     uv run python validation/design/split_design.py ~/data/design6_gauss_f0.5/arm_C.pt --out ~/data/design10_split
 
-writes ``<out>/<run>_tetr/arm_C.pt``, the learned flip level, TE and TR with flat flips on the start's lines (the
-contrast point a coarse search over flip, TE and TR could find), and ``<out>/<run>_perline/arm_C.pt``, the learned
+writes ``<out>/<run>_<part>/arm_C.pt`` for four parts: ``tetr``, the learned flip level, TE and TR with flat flips on
+the start's lines (the contrast point a coarse search over flip, TE and TR could find); ``perline``, the learned
 per-line flip pattern (shifted to the start's flip level) and line positions at the start's TE and TR (what only a
-per-line design can do). ``<run>`` is the name of the folder of the input file. The start is lesion_design.py's arm-G
+per-line design can do); and the per-line part's two halves at the start's TE and TR, ``flips`` (the flip pattern on
+the start's lines) and ``shifts`` (the learned line positions with the start's flat flips). ``<run>`` is the name of
+the folder of the input file. The start is lesion_design.py's arm-G
 start (``--start``, flip:TE:TR) on the Gaussian line mask of ``--mask-seed``.
 """
 
@@ -28,16 +30,21 @@ def _raw_flips(flips: torch.Tensor) -> torch.Tensor:
     return torch.log((flips - 2) / (90 - flips))  # Design's flip = 2 + 88 sigmoid(raw)
 
 
-def split(learned: Design, start: Design) -> tuple[Design, Design]:
-    """(tetr, perline): see the module docstring."""
+def split(learned: Design, start: Design) -> dict[str, Design]:
+    """{part: design} for the parts of the module docstring."""
     with torch.no_grad():
         flips, ky, te, tr = learned()
         flips0, ky0, te0, tr0 = start()
-        lines = len(flips)
+        lines, pattern = len(flips), _raw_flips(flips - flips.mean() + flips0.mean())
+
+        def at_start(ky_init, flip_raw=None):
+            d = Design(lines, init_flip=float(flips0.mean()), init_te=float(te0), init_tr=float(tr0), ky_init=ky_init)
+            if flip_raw is not None:
+                d.flip_raw.copy_(flip_raw)
+            return d
+
         tetr = Design(lines, init_flip=float(flips.mean()), init_te=float(te), init_tr=float(tr), ky_init=ky0)
-        perline = Design(lines, init_flip=float(flips0.mean()), init_te=float(te0), init_tr=float(tr0), ky_init=ky)
-        perline.flip_raw.copy_(_raw_flips(flips - flips.mean() + flips0.mean()))
-    return tetr, perline
+        return {"tetr": tetr, "perline": at_start(ky, pattern), "flips": at_start(ky0, pattern), "shifts": at_start(ky)}
 
 
 def main():
@@ -58,7 +65,7 @@ def main():
     run = args.design.parent.name
     print(f"{'start':>{len(run) + 8}}: {start.summary()}")
     print(f"{run + ' learned':>{len(run) + 8}}: {learned.summary()}")
-    for part, d in zip(("tetr", "perline"), split(learned, start)):
+    for part, d in split(learned, start).items():
         folder = args.out / f"{run}_{part}"
         folder.mkdir(parents=True, exist_ok=True)
         torch.save({"design": d.state_dict(), "describe": d.describe(), "from": str(args.design)}, folder / "arm_C.pt")
