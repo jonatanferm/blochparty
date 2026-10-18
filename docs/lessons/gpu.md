@@ -50,6 +50,16 @@
   it. A secure 4090 for 45 minutes of verification and benchmarks cost $0.59. Reuse the image's PyTorch
   (`uv venv --system-site-packages`): the project ran on torch 2.8 there, nothing to download.
 
+- **A pod that deletes itself, driven from the mini** (2026-10-18, arm L): the Runpod API key goes in at creation
+  (`runpodctl pod create --env '{"BP_RUNPOD_KEY": ...}'`, built in Python from `~/.runpod/config.toml` so the key never
+  appears in a command line or output); inside, container variables are not in an ssh session's environment but are
+  in `/proc/1/environ`, with `RUNPOD_POD_ID`. `DELETE https://rest.runpod.io/v1/pods/$RUNPOD_POD_ID` with a Bearer
+  header removes the pod (an unknown pod gives 404, an unknown route 400, which told the route exists before trying it).
+  The pod's script runs the jobs, touches `job_done`, waits up to 30 minutes for the mini to fetch and check the result
+  files (`fetched`), then deletes itself; a `sleep 7200; DELETE` started at setup is the dead-man switch. The mini
+  (always on) copies the data with a throwaway key, starts the job, fetches, and removes the key on exit. First use:
+  18 minutes of pod for 8.5 minutes of jobs, $0.24, with the laptop out of the loop.
+
 - **A laptop with its lid closed cannot run a pod's job** (2026-10-18, the frozen-design control): the lid closed on
   battery six minutes after the pod came up; clamshell sleep ignores the app's keep-awake hold, and a background
   watcher on the laptop then ran only in macOS's 2-second dark wakes every ~17 minutes (`pmset -g log`). The jobs

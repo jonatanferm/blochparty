@@ -2,6 +2,14 @@
 
 ## Sequence design by classification — 2026-10-17
 
+- **Judge a learned acquisition with a reader trained from scratch on it** (2026-10-18, arms C, F, L): the joint run's
+  own network, fine-tuned from the start sequence's for 400 steps, scored 0.73-0.82 (mean 0.78 over five runs), and
+  the matched control F said the sequence added only +0.04. Fresh nets trained on the same learned sequences with the
+  baseline's recipe scored 0.842 and 0.841 (ten seeds each, +0.100 over the baseline, 10 of 10 seeds). The fine-tuned
+  net carries the start sequence's habits and too little training on the new images; the joint run's AUC
+  undersells what it found. Seed-pair the comparison (same initialisation, order and noise) and resample subjects,
+  not slabs, for the interval.
+
 - **The same seed does not give the same network on CUDA** (2026-10-18, lesion_design.py seed 1 run twice on two
   L40 hosts): the G net trained on cached k-space (no simulation in the loop) reached train AUC 0.786 one time and
   0.768 the next, another G net 0.709 and 0.746, and arm C 0.758 and 0.730. The runs differed in CPU threads (15
