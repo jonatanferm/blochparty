@@ -1,5 +1,11 @@
 # Lessons: Anatomy and realism
 
+- **A map of a phantom's spins needs PD-weighted medians**: `to_phantom` gives every tissue in a voxel its own
+  spins with PD = fraction·PD/K, so most spins in a pixel belong to minor tissues. A mean lets one CSF spin (T2 ~2 s)
+  set a brain pixel's T2 and fat spins (their -434 Hz chemical shift at 3 T is in `Phantom.db0`) set the B0 map; a
+  plain median gives speckle. PD is the pixel's sum, T1/T2/B0 the PD-weighted median. Found drawing the README's
+  tissue maps (`tools/readme_figures.py`, 2026-10-19).
+
 - **The T2* policy can silently drop a measured R2* map**: with susceptibility on, the default
   (`t2star="auto"`) omits R2' to avoid double counting, so AHEAD's measured R2* produced no T2*
   contrast at all until R2' was supplied explicitly. Look at a long-TE image before trusting it.
