@@ -1,22 +1,50 @@
-# Bloch Party 🎉
+<p align="center">
+  <img src="docs/images/hero.png" alt="One simulated head in three contrasts: T1-weighted GRE, T2-weighted TSE and T2*-weighted GRE" width="100%">
+</p>
 
-A small, differentiable MRI simulator in PyTorch: phantom + coils + sequence → raw k-space.
-Everyone's invited, as long as they precess.
-Every feature is checked against an independent reference (the record: [docs/ROADMAP_ARCHIVE.md](docs/ROADMAP_ARCHIVE.md); the plan: [ROADMAP.md](ROADMAP.md)).
-What other simulators do and the realism plan: [docs/REALISM.md](docs/REALISM.md); hard-won
-lessons: [docs/LESSONS.md](docs/LESSONS.md); project journal: [docs/JOURNAL.md](docs/JOURNAL.md); comparison with real scanner data:
-[validation/real/](validation/real/).
+<h1 align="center">Bloch Party 🎉</h1>
+
+<p align="center">
+  <b>A differentiable MRI simulator in PyTorch, checked against real scanners.</b><br>
+  <i>Everyone's invited, as long as they precess.</i>
+</p>
+
+<p align="center">
+  <a href="https://github.com/jonatanferm/blochparty/actions/workflows/ci.yml"><img src="https://github.com/jonatanferm/blochparty/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/PyTorch-differentiable-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">
+  <img src="https://img.shields.io/badge/GPU-Metal%20%7C%20CUDA-76b900" alt="GPU: Metal and CUDA">
+  <img src="https://img.shields.io/badge/Pulseq-read%20%2B%20write-6f42c1" alt="Pulseq read and write">
+  <img src="https://img.shields.io/badge/tests-1000%2B-2ea44f" alt="1000+ tests">
+</p>
+
+Phantom + coils + sequence → raw k-space. Bloch Party simulates every spin through every RF pulse, gradient and
+ADC sample of a sequence, and every number along the way (flip angles, timings, gradient waveforms, T1/T2/PD and
+field maps, coil sensitivities, the scanner's own imperfections) can be a tensor with `requires_grad=True`.
+The simulated head above is 9.7 million spins, with the real sequences' sinc pulses, ramps, spoiling and slice
+profiles, imaged through an 8-channel coil array on a laptop GPU.
+
+<p align="center">
+  <img src="docs/images/pipeline.png" alt="Tissue maps (PD, T1, T2, susceptibility B0) of a sampled head, its simulated raw k-space and the reconstructed image" width="100%">
+</p>
+
+## What's at the party
+
+|  |  |
+|---|---|
+| **Differentiable, end to end** | Autograd through the PyTorch reference, and a hand-written adjoint on the GPU: gradients reach the sequence, the tissue, the coils and the hardware model. Optimize a sequence, fit a scanner, train through the physics. |
+| **Fast** | One GPU driver for Apple Metal and NVIDIA CUDA (same device code). A 3D 64³ GRE runs in 0.5 s on an RTX 4090; full 3D 128³ in ~3 min on an M4 laptop. |
+| **Realistic physics, opt-in** | Sub-voxel isochromats, T2′, B0 from tissue susceptibility, B1⁺, 6-peak fat, magnetization transfer (rate model and generalized Bloch), CEST pools, diffusion (free and restricted), flow and motion, J-coupling. |
+| **Realistic hardware** | Concomitant (Maxwell) fields, gradient nonlinearity, GIRF and eddy currents, B0 drift and respiration, full-wave coil fields, correlated receive noise. All differentiable in the hardware parameters. |
+| **Real sequences in, real data out** | Lossless Pulseq read *and* write (`.seq` files a scanner can play), sampled BrainWeb heads with cited tissue tables, ISMRMRD HDF5 output with full provenance. |
+| **Checked, every feature** | Against closed forms, a SciPy ODE solver, EPG, the signal equation, MRzero, and raw data from real scanners. Defaults stay bit-identical; ~1000 tests. |
+
+## Quick start
 
 ```bash
-uv sync
-uv run pytest                              # ~685 verification tests, ~4 min on an M4
-uv run pytest -m "not slow"                # the quick subset, under a minute
-uv run python examples/gre_demo.py         # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
-uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--gpu: the GPU adjoint)
-uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
-uv run python benchmarks/bench.py --backend gpu    # same, on the GPU (CUDA where an NVIDIA GPU is, else Metal)
-uv run python benchmarks/bench.py --grad --backend gpu  # forward + backward through the GPU adjoint
-uv run python examples/gre3d_128.py        # full 3D 128^3 on the GPU, ~3 min on an M4
+git clone https://github.com/jonatanferm/blochparty && cd blochparty
+uv sync                                     # or: pip install -e .
+uv run python examples/gre_demo.py          # 8-coil GRE of Shepp-Logan -> outputs/gre_demo.png
 ```
 
 ```python
@@ -30,7 +58,87 @@ kspace = bp.simulate(phantom, seq, coils).signal          # (coils, n_adc) compl
 image = bp.rss(bp.ifft2c(bp.kspace_grid(kspace, seq)))
 ```
 
-3D works the same way: `bp.shepp_logan(32, ndim=3)`, `bp.gre_3d(32)`, `bp.reconstruct(...)`.
+3D works the same way: `bp.shepp_logan(32, ndim=3)`, `bp.gre_3d(32)`, `bp.reconstruct(...)`. Add
+`engine="gpu"` to any `simulate` call to run it on Metal or CUDA.
+
+<details>
+<summary>More commands: tests, examples, benchmarks</summary>
+
+```bash
+uv sync --extra pulseq --extra mrzero --extra io --extra anatomy   # everything optional
+uv run pytest                              # the full suite, ~4 min on an M4 (GPU tests skip without a GPU)
+uv run pytest -m "not slow"                # the quick subset, under a minute
+uv run python examples/optimize_contrast.py  # gradient descent through the simulator (--gpu: the GPU adjoint)
+uv run python examples/gre3d_128.py        # full 3D 128^3 on the GPU, ~3 min on an M4
+uv run python benchmarks/bench.py          # timed 2D/3D workloads (--record to log)
+uv run python benchmarks/bench.py --grad --backend gpu  # forward + backward through the GPU adjoint
+uv run python tools/readme_figures.py      # this README's figures
+```
+
+</details>
+
+## Spins, simulated
+
+<p align="center">
+  <img src="docs/images/spin_echo.gif" alt="Animated spin echo: isochromats fan out after a 90 degree pulse and refocus after a 180 degree pulse, with the simulated signal on top of the closed form" width="640">
+</p>
+
+A spin echo, as Bloch Party sees it: 36 isochromats spread over 60 Hz fan out after a 90°ₓ pulse, a 180°ᵧ
+pulse at 30 ms mirrors them, and they refocus at TE = 60 ms. The arrows are the simulator's magnetization at each
+frame; the dots are its ADC samples, on top of the closed form (agreement to 2e-3, set by the 50 µs hard pulses).
+A case with a known answer, so you can see the simulator is right; the real sequences [below](#against-real-scanners)
+have none, and that is where it earns its keep.
+
+## Gradients through the whole scanner
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/optimize_flip_dark.png">
+  <img src="docs/images/optimize_flip.png" alt="L-BFGS on simulator gradients finds the flip angle that maximizes white/grey matter contrast, 16.11 degrees against the analytic 16.09" width="640">
+</picture>
+
+L-BFGS on gradients through the Bloch simulation *and* the reconstruction finds the flip angle that maximizes
+white/grey-matter contrast in a simulated spoiled GRE: 16.11° in 18 simulations, against 16.09° from the
+closed-form steady state ([`examples/optimize_contrast.py`](examples/optimize_contrast.py)).
+[`blochparty.design`](#sequence-design) builds on this: hardware and safety constraints (gradient, slew, B1, SAR,
+PNS) with smooth penalties, CNR / SNR / PSF metrics, Cramér–Rao bounds, and a constrained optimizer.
+
+## Against real scanners
+
+Simulators are usually validated against closed forms and each other. Bloch Party also runs the **scanner's own
+`.seq` files** on a digital model of the scanned object, with properties from independent references and
+**nothing fitted**, and compares with the raw data the scanner measured
+([validation/real/](validation/real/), [docs/REALISM.md](docs/REALISM.md)).
+
+<p align="center">
+  <img src="validation/real/nist_irse_curves.png" alt="NIST phantom inversion recovery: scanner, analytic formula and Bloch simulation for 14 spheres" width="100%">
+</p>
+
+The ISMRM/NIST phantom on a 3 T Siemens Prisma, inversion-recovery spin echo, 14 spheres: simulating the actual
+sequence (sinc pulses and their slice profiles, crushers, spoilers, real timing) matches the measured curves to
+**1.3 %**, where the analytic inversion-recovery formula misses by ~20 % ([results](validation/real/RESULTS.md)).
+Other benchmarks cover multi-echo TSE, radial IR-bSSFP, CEST z-spectra, MT in BSA and a spiral TSE.
+
+## Heads, sampled
+
+<p align="center">
+  <img src="validation/anatomy/sampled_heads.png" alt="Ten sampled heads in T1w GRE, T2w TSE and T2*w GRE" width="100%">
+</p>
+
+`bp.sample_head(seed)` returns a new head for every seed: a BrainWeb subject, smoothly deformed, with its own
+tissue draws from a cited table (relaxation, MT, diffusion, susceptibility) and its own texture, ready to be
+scanned and written out as ISMRMRD raw data with full provenance. With full-wave coil fields, the transmit field
+and receive array come from Maxwell's equations too:
+
+<p align="center">
+  <img src="docs/images/em_brainweb.png" alt="BrainWeb head at 3 T with ideal fields, a full-wave birdcage B1+ map, and an 8-loop receive array with correlated noise" width="100%">
+</p>
+
+## Documentation
+
+Every feature is checked against an independent reference (the record: [docs/ROADMAP_ARCHIVE.md](docs/ROADMAP_ARCHIVE.md);
+the plan: [ROADMAP.md](ROADMAP.md)). What other simulators do and the realism plan: [docs/REALISM.md](docs/REALISM.md);
+which engine runs what: [docs/ENGINES.md](docs/ENGINES.md); hard-won lessons: [docs/LESSONS.md](docs/LESSONS.md);
+the project journal: [docs/JOURNAL.md](docs/JOURNAL.md).
 
 Anything numeric in a sequence or phantom can be a tensor with `requires_grad=True`
 (flip angles, TR, gradient amplitudes, T1/T2/PD/B0/B1⁺/T2′/fat maps, coil maps).
