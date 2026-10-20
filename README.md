@@ -16,6 +16,7 @@
   <img src="https://img.shields.io/badge/GPU-Metal%20%7C%20CUDA-76b900" alt="GPU: Metal and CUDA">
   <img src="https://img.shields.io/badge/Pulseq-read%20%2B%20write-6f42c1" alt="Pulseq read and write">
   <img src="https://img.shields.io/badge/tests-1000%2B-2ea44f" alt="1000+ tests">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-0BSD-blue" alt="License: 0BSD"></a>
 </p>
 
 Phantom + coils + sequence → raw k-space. Bloch Party simulates every spin through every RF pulse, gradient and
@@ -497,3 +498,10 @@ comparison helpers in `tests/helpers.py`, and the `gpu` fixture (every GPU engin
 - **ADC timing:** sample i of a readout sits at (i + ½)·dwell after the ADC start (Pulseq).
 - **Pulseq:** RF field = conj(Pulseq RF waveform), receiver phase = −(Pulseq ADC phase); see
   `blochparty/sequences/pulseq/` for why and for the MRzero mapping.
+
+## License
+
+[Zero-Clause BSD](LICENSE): use, copy, modify and distribute it for any purpose, with or without fee, no
+attribution required. The datasets the validation scripts download (BrainWeb, the NIST phantom scans, the
+CEST and MT sets, the IT'IS tissue values cited in `anatomy/tissuedb/sources.csv`) keep their own terms, recorded
+with each source.
