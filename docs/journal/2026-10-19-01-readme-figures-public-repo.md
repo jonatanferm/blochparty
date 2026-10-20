@@ -32,3 +32,7 @@
   doesn't: those figures are checks, picked because they have a known answer; the README now says so, and points to
   the NIST benchmark, where the scanner's own sequence has no closed form and the textbook formula is ~20 % off.
 - Commits: 8eac716 (README, `tools/readme_figures.py`, `docs/images/`), this entry with the lesson.
+- **Licence (2026-10-20)**: the user asked for the most permissive one. Zero-Clause BSD (e020262): OSI-approved, no
+  attribution or notice required, and a plain grant valid everywhere, unlike a public-domain dedication (Unlicense,
+  CC0), which some jurisdictions don't recognise and which OSI does not list for software (CC0). `pyproject.toml`
+  declares it (`License-Expression: 0BSD` in the wheel); the downloaded datasets keep their own terms.
